@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bellhop",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/auth/*", "/media/*", "/mcp"]
+  },
+  "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
+  "queues": {
+    "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
+    "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
+  },
+  "vars": {
+    // Cloudflare's always-pass test key; replace per environment.
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  }
+}
