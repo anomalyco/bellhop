@@ -5,3 +5,5 @@ GOOGLE_CLIENT_SECRET=
 COOKIE_SECRET=
 # Enables /auth/dev?email=... sign-in without Google. Never set in production.
 DEV_LOGIN=1
+# Origin for the Google OAuth callback when served behind a TLS proxy (e.g. https://bellhop.i.vogel.dev). Optional.
+PUBLIC_ORIGIN=

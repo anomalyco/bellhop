@@ -97,6 +97,10 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
   })
   cookie(c, "bh_session", token, month)
 }
+/** Behind a TLS-terminating proxy (the tailnet dev URL) the Worker sees http, so PUBLIC_ORIGIN can pin the origin. */
+function callbackUrl(c: Ctx) {
+  return new URL("/auth/google/callback", c.env.PUBLIC_ORIGIN || c.req.url).href
+}
 export const auth = new Hono<Bindings>()
 auth.get("/api/config", (c) =>
   c.json({
@@ -143,7 +147,7 @@ auth.get("/auth/google", (c) => {
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth")
   url.search = new URLSearchParams({
     client_id: c.env.GOOGLE_CLIENT_ID,
-    redirect_uri: new URL("/auth/google/callback", c.req.url).href,
+    redirect_uri: callbackUrl(c),
     response_type: "code",
     scope: "openid email profile",
     state
@@ -164,7 +168,7 @@ auth.get("/auth/google/callback", async (c) => {
       code,
       client_id: c.env.GOOGLE_CLIENT_ID,
       client_secret: c.env.GOOGLE_CLIENT_SECRET,
-      redirect_uri: new URL("/auth/google/callback", c.req.url).href
+      redirect_uri: callbackUrl(c)
     }),
     signal: AbortSignal.timeout(10000)
   })
