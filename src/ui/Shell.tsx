@@ -7,7 +7,7 @@ import { UserAvatar } from "./Actor"
 import { IssueOpenIcon, SettingsIcon } from "./icons"
 import { Menu, MenuHeader, MenuItem } from "./Menu"
 import { Counter, Logo } from "./primitives"
-import { appPath, homeUrl, signInHref } from "../lib/site"
+import { appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
 import { SiteLink } from "./SiteLink"
 
 export function useMe() {
@@ -24,7 +24,7 @@ function UserMenu() {
   if (!me) return <span className="header-user-placeholder" />
   if (!me.user) {
     return (
-      <SiteLink href={signInHref()} className="btn" data-variant="invisible" data-size="small">
+      <SiteLink href={signInHref()} className="btn" data-variant="default">
         Sign in
       </SiteLink>
     )
@@ -33,10 +33,10 @@ function UserMenu() {
   return (
     <Menu
       align="end"
-      width={240}
+      width={256}
       trigger={(props) => (
         <button type="button" className="header-avatar" aria-label="Account" {...props}>
-          <UserAvatar user={user} size={28} />
+          <UserAvatar user={user} size={24} />
         </button>
       )}
     >
@@ -49,7 +49,9 @@ function UserMenu() {
           <MenuItem
             onSelect={() => {
               close()
-              navigate("/")
+              const home = homeUrl()
+              if (isAbsolute(home)) window.location.assign(home)
+              else navigate(home)
             }}
           >
             Your applications
@@ -69,20 +71,48 @@ function UserMenu() {
   )
 }
 
-export function Header({ app }: { app?: { slug: string; name: string } }) {
+export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: string }; tab?: "issues" | "settings" }) {
+  const detail = app && "counts" in app ? app : null
   return (
     <header className="header" data-app={app ? "" : undefined}>
       <div className="header-inner">
         <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
-          <Logo size={24} />
+          <Logo size={22} />
         </SiteLink>
         {app && (
           <>
-            <span className="header-sep">/</span>
+            <span className="header-sep" aria-hidden="true">
+              /
+            </span>
             <Link href={appPath(app.slug)} className="header-app">
               {app.name}
             </Link>
           </>
+        )}
+        {app && (
+          <nav className="app-nav" aria-label={app.name}>
+            {detail ? (
+              <>
+                <Link href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
+                  <IssueOpenIcon size={14} />
+                  Issues <Counter>{detail.counts.open}</Counter>
+                </Link>
+                {detail.role && (
+                  <Link
+                    href={appPath(app.slug, "/settings")}
+                    aria-current={tab === "settings" ? "page" : undefined}
+                    aria-label="Settings"
+                    onPointerEnter={() => void import("../routes/Settings")}
+                  >
+                    <SettingsIcon size={14} />
+                    <span className="nav-label">Settings</span>
+                  </Link>
+                )}
+              </>
+            ) : (
+              <span className="app-nav-placeholder" />
+            )}
+          </nav>
         )}
         <span className="spacer" />
         <UserMenu />
@@ -99,38 +129,20 @@ export function Page({ children, narrow }: { children: ReactNode; narrow?: boole
   )
 }
 
-/** Header plus the Issues/Settings nav for every page inside an application. */
+/** Header with the Issues/Settings nav for every page inside an application. */
 export function AppLayout({ slug, tab, children }: { slug: string; tab: "issues" | "settings"; children: (app: AppDetail) => ReactNode }) {
   const { data: app, error } = useApp(slug)
   if (!app) {
     return (
       <>
-        <Header app={{ slug, name: slug }} />
-        {error ? <ErrorPage error={error} /> : <div className="app-nav app-nav-placeholder" />}
+        <Header app={{ slug, name: slug }} tab={tab} />
+        {error ? <ErrorPage error={error} /> : null}
       </>
     )
   }
   return (
     <>
-      <Header app={app} />
-      <nav className="underline-nav app-nav">
-        <div className="app-nav-inner">
-          <Link href={appPath(slug)} aria-current={tab === "issues" ? "page" : undefined}>
-            <IssueOpenIcon />
-            Issues <Counter>{app.counts.open}</Counter>
-          </Link>
-          {app.role && (
-            <Link
-              href={appPath(slug, "/settings")}
-              aria-current={tab === "settings" ? "page" : undefined}
-              onPointerEnter={() => void import("../routes/Settings")}
-            >
-              <SettingsIcon />
-              Settings
-            </Link>
-          )}
-        </div>
-      </nav>
+      <Header app={app} tab={tab} />
       {children(app)}
     </>
   )

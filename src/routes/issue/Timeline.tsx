@@ -10,14 +10,15 @@ import { Dots, Label } from "../../ui/primitives"
 import { visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 
-export function CommentBox({
+/** One message in the conversation: avatar, name, time, then the text. Agent messages sit on a faint layer. */
+export function Message({
   slug,
   author,
   createdAt,
   body,
   attachments,
   byAuthor,
-  verb = "commented",
+  verb,
   actions,
   children,
   pending,
@@ -35,40 +36,37 @@ export function CommentBox({
 }) {
   const loose = attachments.filter((a) => !body.includes(a.url))
   return (
-    <div className="comment" data-pending={pending ? "" : undefined}>
-      <span className="comment-avatar">
-        <ActorAvatar actor={author} size={40} />
+    <article className="msg" data-agent={author.type === "agent" || undefined} data-pending={pending ? "" : undefined}>
+      <span className="msg-avatar">
+        <ActorAvatar actor={author} size={28} />
       </span>
-      <div className="comment-box" data-author={byAuthor || undefined}>
-        <div className="comment-header">
-          <span className="comment-avatar-inline">
-            <ActorAvatar actor={author} size={20} />
-          </span>
+      <div className="msg-main">
+        <header className="msg-head">
           <ActorName actor={author} />
-          <span className="comment-when">
-            {pending ?? (
-              <>
-                {verb} <Time iso={createdAt} />
-              </>
-            )}
-          </span>
-          <span className="spacer" />
-          {byAuthor && <span className="role-badge">Author</span>}
+          {byAuthor && <span className="role-badge">Reporter</span>}
           {author.type === "member" && (
             <span className="role-badge" data-role="member">
               Member
             </span>
           )}
-          {actions}
-        </div>
+          <span className="msg-time">
+            {pending ?? (
+              <>
+                {verb && `${verb} `}
+                <Time iso={createdAt} />
+              </>
+            )}
+          </span>
+          {actions && <span className="msg-actions">{actions}</span>}
+        </header>
         {children ?? (
-          <div className="comment-body">
+          <div className="msg-body">
             <Markdown source={body} slug={slug} />
             {loose.length > 0 && <AttachmentList attachments={loose} />}
           </div>
         )}
       </div>
-    </div>
+    </article>
   )
 }
 
@@ -90,7 +88,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
 
 export function CommentItem({ slug, comment }: { slug: string; comment: Comment }) {
   return (
-    <CommentBox
+    <Message
       slug={slug}
       author={comment.author}
       createdAt={comment.created_at}
@@ -211,12 +209,10 @@ export function EventItem({ slug, event }: { slug: string; event: IssueEvent }) 
   }
 
   return (
-    <div className="timeline-event">
-      <span className="badge" data-tone={tone}>
-        {icon}
-      </span>
-      <span className="timeline-event-text">
-        <ActorAvatar actor={event.actor} size={20} /> <ActorName actor={event.actor} /> {body} <Time iso={event.created_at} />
+    <div className="event" data-tone={tone}>
+      <span className="event-icon">{icon}</span>
+      <span className="event-text">
+        <ActorName actor={event.actor} /> {body} <span className="event-time">· <Time iso={event.created_at} /></span>
       </span>
     </div>
   )
@@ -230,22 +226,21 @@ function PencilGlyph() {
   )
 }
 
-/** The agent (or a member) at work: avatar, name, typing dots and its short status line. */
+/** The agent (or a member) at work, as the last line of the thread: avatar, name, typing dots and its status. */
 export function ActivityRow({ activity }: { activity: Activity | null }) {
   const live = useUntil(activity?.expires_at)
   if (!activity || !live) return null
   return (
-    <div className="comment activity-row" aria-live="polite">
-      <span className="comment-avatar">
-        <ActorAvatar actor={activity.actor} size={40} />
+    <div className="msg typing" data-agent={activity.actor.type === "agent" || undefined} aria-live="polite">
+      <span className="msg-avatar">
+        <ActorAvatar actor={activity.actor} size={28} />
       </span>
-      <div className="activity">
-        <span className="comment-avatar-inline">
-          <ActorAvatar actor={activity.actor} size={20} />
-        </span>
-        <ActorName actor={activity.actor} />
-        <Dots />
-        {activity.text && <span className="activity-text">{activity.text}</span>}
+      <div className="msg-main">
+        <div className="msg-head">
+          <ActorName actor={activity.actor} />
+          <Dots />
+          {activity.text && <span className="typing-text">{activity.text}</span>}
+        </div>
       </div>
     </div>
   )

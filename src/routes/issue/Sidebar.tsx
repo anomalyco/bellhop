@@ -5,9 +5,9 @@ import { api, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
 import { visibleState } from "../../lib/issues"
 import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
-import { SettingsIcon, StatusIcon, XIcon } from "../../ui/icons"
+import { ChevronDownIcon, SettingsIcon, StatusIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
-import { Button, Label } from "../../ui/primitives"
+import { Button, Label, StateIcon } from "../../ui/primitives"
 import { AttachmentList } from "./Timeline"
 import { appPath } from "../../lib/site"
 
@@ -88,37 +88,33 @@ export function Sidebar({ app, issue, me, actions }: { app: AppDetail; issue: Is
   return (
     <aside className="issue-sidebar">
       {member && issue.status !== "closed" && (
-        <Section
-          title="Status"
-          action={
-            <Menu align="end" width={260} trigger={(p) => gear(p, "Change status")}>
-              {(close) =>
-                statusOptions.map((o) => (
-                  <MenuItem
-                    key={o.status}
-                    checked={issue.status === o.status}
-                    description={o.description}
-                    onSelect={() => {
-                      close()
-                      if (issue.status !== o.status) actions.setStatus(o.status)
-                    }}
-                  >
-                    {o.label}
-                  </MenuItem>
-                ))
-              }
-            </Menu>
-          }
-        >
-          <div className="sidebar-value">
-            <span className="state-icon" data-state={visibleState(issue)}>
-              {(() => {
-                const G = StatusIcon[visibleState(issue)]
-                return <G size={16} />
-              })()}
-            </span>
-            {statusOptions.find((o) => o.status === issue.status)?.label}
-          </div>
+        <Section title="Status">
+          <Menu
+            width={260}
+            trigger={(p) => (
+              <button type="button" className="btn sidebar-select" data-variant="default" {...p}>
+                <StateIcon state={visibleState(issue)} size={14} />
+                <span className="sidebar-select-text">{statusOptions.find((o) => o.status === issue.status)?.label}</span>
+                <ChevronDownIcon size={14} />
+              </button>
+            )}
+          >
+            {(close) =>
+              statusOptions.map((o) => (
+                <MenuItem
+                  key={o.status}
+                  checked={issue.status === o.status}
+                  description={o.description}
+                  onSelect={() => {
+                    close()
+                    if (issue.status !== o.status) actions.setStatus(o.status)
+                  }}
+                >
+                  {o.label}
+                </MenuItem>
+              ))
+            }
+          </Menu>
         </Section>
       )}
 

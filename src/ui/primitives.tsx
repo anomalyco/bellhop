@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react"
 import { StatusIcon } from "./icons"
 
+/** primary: OpenCode's "contrast" button. default: "neutral". invisible: ghost. */
 export type ButtonVariant = "default" | "primary" | "danger" | "invisible" | "outline"
 export type ButtonSize = "small" | "medium" | "large"
 
@@ -57,7 +58,7 @@ export function StateLabel({ state, size, text }: { state: VisibleState; size?: 
   const Glyph = StatusIcon[state]
   return (
     <span className="state" data-state={state} data-size={size}>
-      <Glyph size={size ? 14 : 16} />
+      <Glyph size={14} />
       {text ?? stateText[state]}
     </span>
   )
@@ -66,7 +67,7 @@ export function StateLabel({ state, size, text }: { state: VisibleState; size?: 
 export function StateIcon({ state, size = 16 }: { state: VisibleState; size?: number }) {
   const Glyph = StatusIcon[state]
   return (
-    <span className="state-icon" data-state={state} style={{ display: "inline-flex" }}>
+    <span className="state-icon" data-state={state}>
       <Glyph size={size} />
     </span>
   )
@@ -84,7 +85,7 @@ export function AiBadge() {
   return <span className="ai-badge">AI</span>
 }
 
-/** FNV-1a, enough to spread seeds over identicon patterns and hues. */
+/** FNV-1a, enough to spread ids over the avatar palette. */
 function hash(seed: string) {
   let h = 0x811c9dc5
   for (let i = 0; i < seed.length; i++) {
@@ -94,27 +95,30 @@ function hash(seed: string) {
   return h >>> 0
 }
 
-/** Carbon's 40–50 grades: bright enough on the dark tile, all from the same family as the theme. */
-const identiconColors = ["#4589ff", "#33b1ff", "#08bdba", "#42be65", "#a56eff", "#ee5396", "#ff832b", "#f1c21b", "#78a9ff"]
+/** OpenCode's dark project-avatar palette; each colour is a background and border pair in components.css. */
+const avatarColors = ["orange", "yellow", "cyan", "green", "red", "pink", "blue", "purple", "gray"] as const
 
-/** GitHub-style identicon: a mirrored 5×5 grid in one colour, seeded by the actor id. */
-export function Identicon({ seed, size = 20, square }: { seed: string; size?: number; square?: boolean }) {
-  const h = hash(seed)
-  const color = identiconColors[h % identiconColors.length]
-  const cells: ReactNode[] = []
-  for (let row = 0; row < 5; row++) {
-    for (let col = 0; col < 3; col++) {
-      if ((h >>> (row * 3 + col + 8)) & 1) {
-        cells.push(<rect key={`${row}-${col}`} x={1 + col} y={1 + row} width="1.02" height="1.02" fill={color} />)
-        if (col < 2) cells.push(<rect key={`${row}-${col}m`} x={5 - col} y={1 + row} width="1.02" height="1.02" fill={color} />)
-      }
-    }
-  }
+/** What an avatar shows: two hex characters for a guest handle ("guest-4b6a" → "4b"), otherwise the first letter. */
+export function avatarGlyph(name: string) {
+  const guest = /^guest-([0-9a-f]{2})/i.exec(name)
+  if (guest) return guest[1]!.toLowerCase()
+  const first = [...name.trim()][0]
+  return first ? first.toUpperCase() : "?"
+}
+
+/** A round avatar in one of OpenCode's project colours, picked by hashing the actor id. */
+export function Avatar({ seed, name, size = 20 }: { seed: string; name: string; size?: number }) {
+  const color = avatarColors[hash(seed) % avatarColors.length]
+  const glyph = avatarGlyph(name)
   return (
-    <svg className="avatar" data-square={square || undefined} width={size} height={size} viewBox="0 0 7 7" aria-hidden="true">
-      <rect width="7" height="7" fill="#1d2226" />
-      {cells}
-    </svg>
+    <span
+      className="avatar"
+      data-color={color}
+      style={{ width: size, height: size, fontSize: Math.max(8, Math.round(size * (glyph.length > 1 ? 0.38 : 0.44))) }}
+      aria-hidden="true"
+    >
+      {glyph}
+    </span>
   )
 }
 
@@ -122,32 +126,30 @@ export function Identicon({ seed, size = 20, square }: { seed: string; size?: nu
 function BellMark() {
   return (
     <>
-      <circle cx="12" cy="7.1" r="1.6" fill="#fff" />
-      <rect x="11.3" y="8" width="1.4" height="2" fill="#fff" />
-      <path d="M5.6 15.6a6.4 6.4 0 0 1 12.8 0z" fill="#fff" />
-      <rect x="4.2" y="16.4" width="15.6" height="2.2" rx="1.1" fill="#fff" />
+      <circle cx="12" cy="7.1" r="1.6" fill="currentColor" />
+      <rect x="11.3" y="8" width="1.4" height="2" fill="currentColor" />
+      <path d="M5.6 15.6a6.4 6.4 0 0 1 12.8 0z" fill="currentColor" />
+      <rect x="4.2" y="16.4" width="15.6" height="2.2" rx="1.1" fill="currentColor" />
     </>
   )
 }
 
-/** Agents get a square avatar with the bell mark, like GitHub's app avatars. */
+/** Agents get a square avatar with the bell mark in OpenCode's grey contrast style. */
 export function AgentAvatar({ size = 20 }: { size?: number }) {
   return (
-    <svg className="avatar" data-square width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-      <rect width="24" height="24" fill="var(--accent)" />
-      <BellMark />
-    </svg>
+    <span className="avatar" data-agent style={{ width: size, height: size, borderRadius: Math.round(size * 0.26) }} aria-hidden="true">
+      <svg width={size} height={size} viewBox="0 0 24 24">
+        <BellMark />
+      </svg>
+    </span>
   )
 }
 
 export function Logo({ size = 24 }: { size?: number }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
-        <rect width="24" height="24" rx="6" fill="var(--accent)" />
-        <BellMark />
-      </svg>
-      <span style={{ fontWeight: 700, fontSize: size * 0.72, letterSpacing: "-0.01em" }}>Bellhop</span>
+    <span className="logo">
+      <AgentAvatar size={size} />
+      <span className="logo-word">Bellhop</span>
     </span>
   )
 }

@@ -4,7 +4,7 @@ import type { App, Config } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { setData, useResource } from "../lib/cache"
 import { Header, Page, useMe } from "../ui/Shell"
-import { Button, Logo } from "../ui/primitives"
+import { AgentAvatar, Button } from "../ui/primitives"
 import { appLabel, appPath, isAbsolute } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 
@@ -38,7 +38,7 @@ function SignIn() {
   return (
     <main className="signin">
       <div className="signin-inner">
-        <Logo size={32} />
+        <AgentAvatar size={36} />
         <h1 className="signin-title">Sign in to Bellhop</h1>
         {(!config || config.google_enabled || !config.dev_login) && (
           <a className="btn" data-size="large" href={`/auth/google?next=${encodeURIComponent(next)}`}>
@@ -90,10 +90,9 @@ function Apps() {
       <Header />
       <Page>
         <div className="home-grid">
-          <section className="box">
-            <div className="box-header">
-              <h2 className="box-title">Your applications</h2>
-            </div>
+          <section>
+            <h2 className="section-title">Your applications</h2>
+            <div className="box">
             {!apps && !error && <div className="box-row skeleton-row" />}
             {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
             {apps?.length === 0 && <div className="box-row muted-text">No applications yet.</div>}
@@ -101,7 +100,7 @@ function Apps() {
               <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
                 <div className="app-row-main">
                   <div className="app-row-title">
-                    <span className="issue-title">{app.name}</span>
+                    <span className="app-row-name">{app.name}</span>
                     <span className="mono app-row-slug">{appLabel(app.slug)}</span>
                   </div>
                   {app.description && <div className="issue-meta">{app.description}</div>}
@@ -109,6 +108,7 @@ function Apps() {
                 <span className="role-badge">{app.role === "owner" ? "Owner" : "Member"}</span>
               </SiteLink>
             ))}
+            </div>
           </section>
           <NewApp />
         </div>

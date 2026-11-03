@@ -1,10 +1,18 @@
-/* Bellhop theme: GitHub Primer's control geometry (sizes, padding, borders, radius, motion) coloured with
-   IBM Carbon's cool gray and blue palettes, dark only. */
+/* Bellhop theme: OpenCode's v2 dark tokens (neutral greys, white-alpha borders and overlays, elevation shadows),
+   Inter for text, OpenTUI Mono for issue numbers and code. Dark only. */
 
 @font-face {
-  font-family: "Satoshi";
-  src: url("/fonts/Satoshi-Variable.woff2") format("woff2");
-  font-weight: 300 900;
+  font-family: "Inter";
+  src: url("/fonts/InterVariable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Inter";
+  src: url("/fonts/InterVariable-Italic.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
   font-display: swap;
 }
 @font-face {
@@ -23,94 +31,108 @@
 :root {
   color-scheme: dark;
 
-  /* Carbon cool gray */
-  --gray-100: #121619;
-  --gray-90: #21272a;
-  --gray-80: #343a3f;
-  --gray-70: #4d5358;
-  --gray-60: #697077;
-  --gray-50: #878d96;
-  --gray-40: #a2a9b0;
-  --gray-30: #c1c7cd;
-  --gray-20: #dde1e6;
-  --gray-10: #f2f4f8;
-
-  /* Carbon blue */
-  --blue-80: #002d9c;
-  --blue-70: #0043ce;
-  --blue-60: #0f62fe;
-  --blue-50: #4589ff;
-  --blue-40: #78a9ff;
-  --blue-30: #a6c8ff;
+  /* OpenCode v2 grey */
+  --grey-50: #ffffff;
+  --grey-100: #fafafa;
+  --grey-200: #f2f2f2;
+  --grey-300: #eeeeee;
+  --grey-400: #dbdbdb;
+  --grey-500: #aeaeae;
+  --grey-600: #808080;
+  --grey-700: #5c5c5c;
+  --grey-800: #3a3a3a;
+  --grey-900: #2e2e2e;
+  --grey-1000: #242424;
+  --grey-1100: #161616;
+  --grey-1200: #080808;
 
   /* Surfaces */
-  --bg: #0d1013;
-  --bg-inset: #090b0d;
-  --bg-subtle: #14181b;
-  --bg-overlay: #191e21;
-  --border: #2b3135;
-  --border-muted: #1f2427;
-  --border-strong: var(--gray-70);
+  --bg: var(--grey-1100);
+  --bg-deep: var(--grey-1200);
+  --layer-1: var(--grey-1000);
+  --layer-2: var(--grey-900);
+  --layer-3: var(--grey-800);
+  --bg-contrast: var(--grey-700);
+  --bg-neutral: rgb(255 255 255 / 0.06);
 
-  /* Text */
-  --fg: var(--gray-10);
-  --fg-muted: var(--gray-40);
-  --fg-subtle: var(--gray-60);
-  --fg-on-emphasis: #ffffff;
-  --fg-link: var(--blue-40);
+  /* Text and icons */
+  --fg: var(--grey-100);
+  --fg-muted: var(--grey-500);
+  --fg-faint: var(--grey-600);
+  --fg-contrast: var(--grey-50);
+  --icon: var(--grey-400);
+  --icon-muted: var(--grey-600);
+  --fg-link: #a2bcff;
+  --fg-link-hover: #c3d4fd;
 
-  /* Controls (Primer "control" tokens) */
-  --control-bg: #1a1f22;
-  --control-bg-hover: #22282c;
-  --control-bg-active: #2a3135;
-  --control-border: #343a3f;
-  --control-border-hover: #4d5358;
-  --control-transparent-hover: rgb(135 141 150 / 0.14);
-  --control-transparent-active: rgb(135 141 150 / 0.22);
+  /* Borders and overlays */
+  --border-muted: rgb(255 255 255 / 0.08);
+  --border: rgb(255 255 255 / 0.1);
+  --border-strong: rgb(255 255 255 / 0.2);
+  --hover: rgb(255 255 255 / 0.06);
+  --pressed: rgb(255 255 255 / 0.1);
+  --contrast-hover: rgb(0 0 0 / 0.24);
+  --contrast-pressed: rgb(0 0 0 / 0.4);
+  --scrim: rgb(0 0 0 / 0.6);
+  --focus: #7698fd;
 
-  /* Accent: Carbon blue 60 */
-  --accent: var(--blue-60);
-  --accent-hover: #0050e6;
-  --accent-active: var(--blue-80);
-  --accent-fg: var(--blue-40);
-  --accent-muted: rgb(69 137 255 / 0.14);
-  --accent-border: rgb(69 137 255 / 0.4);
-  --focus: var(--blue-50);
+  /* Issue states (OpenCode state tokens; closed uses the v2 purple scale) */
+  --open: #6bd586;
+  --open-bg: #14361d;
+  --open-border: #1d783c;
+  --progress: #f2cf76;
+  --progress-bg: #4b4025;
+  --progress-border: #ac8833;
+  --waiting: #7698fd;
+  --waiting-bg: #021945;
+  --waiting-border: #2c47c8;
+  --closed: #9e99f7;
+  --closed-bg: #221358;
+  --closed-border: #442aa1;
+  --neutral: var(--grey-500);
+  --neutral-bg: var(--layer-1);
+  --neutral-border: var(--border-strong);
+  --danger: #f17471;
+  --danger-bg: #461516;
+  --danger-border: #97252b;
 
-  /* Issue states (Carbon support colours) */
-  --open: #42be65;
-  --open-emphasis: #198038;
-  --progress: #f1c21b;
-  --progress-emphasis: #8e6a00;
-  --waiting: #33b1ff;
-  --waiting-emphasis: #0072c3;
-  --closed: #a56eff;
-  --closed-emphasis: #8a3ffc;
-  --neutral: var(--gray-50);
-  --neutral-emphasis: var(--gray-70);
-  --danger: #fa4d56;
-  --danger-emphasis: #da1e28;
-  --danger-hover: #b81921;
+  /* Elevation */
+  --elevation-raised:
+    0 2px 4px 0 rgb(0 0 0 / 0.3), 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(255 255 255 / 0.16),
+    0 -0.5px 0 0 rgb(255 255 255 / 0.06);
+  --elevation-floating:
+    0 8px 16px 0 rgb(0 0 0 / 0.3), 0 4px 8px 0 rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(255 255 255 / 0.16),
+    0 -0.5px 0 0 rgb(255 255 255 / 0.06);
+  --elevation-overlay:
+    0 16px 32px 0 rgb(0 0 0 / 0.3), 0 8px 16px 0 rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(255 255 255 / 0.16),
+    0 -0.5px 0 0 rgb(255 255 255 / 0.06);
+  --elevation-neutral: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.2), 0 -0.5px 0 0 rgb(255 255 255 / 0.1);
+  --elevation-contrast: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.4), 0 -0.5px 0 0 rgb(255 255 255 / 0.3);
+  --contrast-highlight: linear-gradient(180deg, rgb(255 255 255 / 0.2) 0%, rgb(255 255 255 / 0) 100%);
 
-  /* Primer geometry */
-  --radius: 6px;
+  /* Geometry */
   --radius-small: 4px;
+  --radius: 6px;
+  --radius-large: 8px;
+  --radius-xl: 12px;
   --radius-full: 999px;
-  --control-small: 28px;
-  --control-medium: 32px;
-  --control-large: 40px;
-  --pad-small: 8px;
-  --pad-medium: 12px;
-  --pad-large: 16px;
-  --ease: cubic-bezier(0.65, 0, 0.35, 1);
+  --control-small: 24px;
+  --control-medium: 28px;
+  --control-large: 32px;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
 
-  --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "OpenTUI Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --text-small: 12px;
+  --text-ui: 13px;
   --text-body: 14px;
   --text-title: 16px;
   --text-heading: 20px;
-  --text-display: 26px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-button: 530;
+  --weight-semibold: 600;
+  --weight-bold: 670;
 }
 
 *,
@@ -126,8 +148,9 @@ body {
   color: var(--fg);
   font-family: var(--font-sans);
   font-size: var(--text-body);
+  font-weight: var(--weight-regular);
   line-height: 20px;
-  font-weight: 450;
+  letter-spacing: -0.01em;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
@@ -138,22 +161,25 @@ a {
   text-decoration: none;
 }
 a:hover {
+  color: var(--fg-link-hover);
   text-decoration: underline;
   text-underline-offset: 0.2em;
 }
 
 :focus-visible {
   outline: 2px solid var(--focus);
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 
 code,
 kbd,
+pre,
 .mono {
   font-family: var(--font-mono);
   font-feature-settings: "calt" 0;
+  letter-spacing: 0;
 }
 
 ::selection {
-  background: rgb(69 137 255 / 0.35);
+  background: rgb(255 255 255 / 0.2);
 }

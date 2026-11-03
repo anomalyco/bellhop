@@ -26,8 +26,8 @@ function markdownFor(a: Attachment) {
 const recordingTypes = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"]
 const canRecord = typeof navigator !== "undefined" && !!navigator.mediaDevices?.getDisplayMedia && typeof MediaRecorder !== "undefined"
 
-/** Markdown composer shared by new issues, comments and edits: Write/Preview, uploads with progress (picker,
- *  paste, drop), and screen recording. Uploaded files land in the text as markdown and in `onAttachment`. */
+/** Markdown composer shared by new issues, comments and edits: the text, then a toolbar with uploads (picker,
+ *  paste, drop), screen recording, a preview toggle and the caller's actions. Uploaded files land in the text as markdown and in `onAttachment`. */
 export function Editor({
   slug,
   value,
@@ -36,10 +36,13 @@ export function Editor({
   onAttachment,
   onSubmit,
   onBusyChange,
-  placeholder = "Add your comment here…",
+  placeholder = "Write a reply…",
   autoFocus,
   minHeight = 120,
   label,
+  actions,
+  extra,
+  variant,
 }: {
   slug: string
   value: string
@@ -52,6 +55,12 @@ export function Editor({
   autoFocus?: boolean
   minHeight?: number
   label?: string
+  /** Buttons on the right of the toolbar (Send, Save). */
+  actions?: ReactNode
+  /** A row between the text and the toolbar. */
+  extra?: ReactNode
+  /** "chat": the docked composer on an issue. */
+  variant?: "chat"
 }) {
   const [tab, setTab] = useState<"write" | "preview">("write")
   const [chips, setChips] = useState<Chip[]>([])
@@ -184,57 +193,51 @@ export function Editor({
     input.value = ""
   }
 
-  return (
-    <div className="editor" data-dragging={dragging || undefined}>
-      <div className="editor-head">
-        <div className="segmented" role="tablist">
-          <button type="button" role="tab" aria-pressed={tab === "write"} aria-selected={tab === "write"} onClick={() => setTab("write")}>
-            Write
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-pressed={tab === "preview"}
-            aria-selected={tab === "preview"}
-            onMouseEnter={() => loadMarkdown()}
-            onClick={() => setTab("preview")}
-          >
-            Preview
-          </button>
-        </div>
-        <div className="editor-tools">
-          <Button
-            variant="invisible"
-            iconOnly
-            aria-label="Attach file"
-            title="Attach file"
-            icon={<PaperclipIcon />}
-            onClick={() => fileInput.current?.click()}
-          />
-          <Button
-            variant="invisible"
-            iconOnly
-            aria-label="Add image or video"
-            title="Add image or video"
-            icon={<ImageIcon />}
-            onClick={() => mediaInput.current?.click()}
-          />
-          {canRecord && (
-            <Button
-              variant="invisible"
-              iconOnly
-              aria-label="Record screen"
-              title="Record screen"
-              icon={<RecordIcon />}
-              disabled={!!recording}
-              onClick={record}
-            />
-          )}
-        </div>
-        <input ref={fileInput} type="file" multiple hidden onChange={(e) => pick(e.currentTarget)} />
-        <input ref={mediaInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e.currentTarget)} />
-      </div>
+  const tools = (
+    <div className="editor-tools">
+      <Button
+        variant="invisible"
+        iconOnly
+        aria-label="Attach file"
+        title="Attach file"
+        icon={<PaperclipIcon />}
+        onClick={() => fileInput.current?.click()}
+      />
+      <Button
+        variant="invisible"
+        iconOnly
+        aria-label="Add image or video"
+        title="Add image or video"
+        icon={<ImageIcon />}
+        onClick={() => mediaInput.current?.click()}
+      />
+      {canRecord && (
+        <Button
+          variant="invisible"
+          iconOnly
+          aria-label="Record screen"
+          title="Record screen"
+          icon={<RecordIcon />}
+          disabled={!!recording}
+          onClick={record}
+        />
+      )}
+      <Button
+        variant="invisible"
+        aria-pressed={tab === "preview"}
+        title={tab === "preview" ? "Back to writing" : "Preview markdown"}
+        onMouseEnter={() => loadMarkdown()}
+        onClick={() => setTab(tab === "write" ? "preview" : "write")}
+      >
+        {tab === "write" ? "Preview" : "Write"}
+      </Button>
+      <input ref={fileInput} type="file" multiple hidden onChange={(e) => pick(e.currentTarget)} />
+      <input ref={mediaInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e.currentTarget)} />
+    </div>
+  )
 
+  return (
+    <div className="editor" data-variant={variant} data-dragging={dragging || undefined} data-preview={tab === "preview" || undefined}>
       {tab === "write" ? (
         <textarea
           ref={area}
@@ -269,6 +272,11 @@ export function Editor({
           ))}
         </div>
       )}
+      {extra}
+      <div className="editor-foot">
+        {tools}
+        {actions && <div className="editor-actions">{actions}</div>}
+      </div>
       {recording && <RecordingBar started={recording.started} onStop={() => recording.recorder.stop()} />}
     </div>
   )

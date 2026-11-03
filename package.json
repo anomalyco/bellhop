@@ -3,9 +3,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "fonts": "bun scripts/fonts.ts",
-    "dev": "bun scripts/fonts.ts && vite --host 127.0.0.1 --port 5287 --strictPort",
-    "build": "bun scripts/fonts.ts && vite build",
+    "dev": "vite --host 127.0.0.1 --port 5287 --strictPort",
+    "build": "vite build",
     "typecheck": "tsc -b",
     "db:migrate": "wrangler d1 migrations apply bellhop --local"
   },

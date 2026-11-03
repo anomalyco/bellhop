@@ -3,5 +3,4 @@ dist/
 .wrangler/
 .dev.vars
 *.tsbuildinfo
-public/fonts/Satoshi-*
 .DS_Store

@@ -1,6 +1,16 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { createPortal } from "react-dom"
 
-/** A small anchored overlay: click outside or Escape closes it, arrow keys move between items. */
+/** Phones get a bottom sheet instead of an anchored popover. */
+const sheetQuery = "(max-width: 640px)"
+const margin = 8
+const gap = 4
+
+/**
+ * An anchored overlay rendered into document.body, so no scrolling or clipped ancestor can cut it off. It opens
+ * below its trigger (above when there's more room there), stays inside the viewport, and closes on an outside
+ * click, Escape, scroll or resize. Arrow keys move between items.
+ */
 export function Menu({
   trigger,
   children,
@@ -15,33 +25,101 @@ export function Menu({
   onOpenChange?: (open: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
+  const [sheet, setSheet] = useState(false)
+  const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" })
   const root = useRef<HTMLDivElement>(null)
   const panel = useRef<HTMLDivElement>(null)
+  const side = useRef<"below" | "above" | null>(null)
+  const changed = useRef(onOpenChange)
+  changed.current = onOpenChange
 
   const set = (next: boolean) => {
     setOpen(next)
-    onOpenChange?.(next)
+    changed.current?.(next)
   }
 
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: PointerEvent) => {
-      if (!root.current?.contains(e.target as Node)) set(false)
+  const close = (refocus = false) => {
+    set(false)
+    if (refocus) root.current?.querySelector<HTMLElement>("[aria-haspopup]")?.focus({ preventScroll: true })
+  }
+
+  const place = () => {
+    const anchor = root.current?.getBoundingClientRect()
+    const el = panel.current
+    if (!anchor || !el) return
+    if (window.matchMedia(sheetQuery).matches) {
+      setSheet(true)
+      setStyle({})
+      return
     }
-    document.addEventListener("pointerdown", onDown)
-    const first = panel.current?.querySelector<HTMLElement>("input, [role^=menuitem]")
-    first?.focus()
-    return () => document.removeEventListener("pointerdown", onDown)
+    setSheet(false)
+    const vw = document.documentElement.clientWidth
+    const vh = window.innerHeight
+    const w = Math.min(width, vw - margin * 2)
+    const left = Math.max(margin, Math.min(align === "end" ? anchor.right - w : anchor.left, vw - margin - w))
+    const below = vh - anchor.bottom - gap - margin
+    const above = anchor.top - gap - margin
+    side.current ??= el.scrollHeight <= below || below >= above ? "below" : "above"
+    setStyle(
+      side.current === "below"
+        ? { left, width: w, top: anchor.bottom + gap, maxHeight: below }
+        : { left, width: w, bottom: vh - anchor.top + gap, maxHeight: above },
+    )
+  }
+
+  useLayoutEffect(() => {
+    if (!open) {
+      side.current = null
+      setStyle({ visibility: "hidden" })
+      return
+    }
+    place()
+    const el = panel.current
+    const observer = new ResizeObserver(() => place())
+    if (el) observer.observe(el)
+    return () => observer.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation()
-      set(false)
-      root.current?.querySelector<HTMLElement>("[aria-haspopup]")?.focus()
-      return
+  useEffect(() => {
+    if (!open) return
+    const inside = (node: EventTarget | null) =>
+      node instanceof Node && (!!root.current?.contains(node) || !!panel.current?.contains(node))
+    const onDown = (e: PointerEvent) => {
+      if (!inside(e.target)) close()
     }
+    const onScroll = (e: Event) => {
+      // The sheet doesn't move with the page, and focusing its filter can scroll the page on phones.
+      if (!window.matchMedia(sheetQuery).matches && !inside(e.target)) close()
+    }
+    const onResize = () => {
+      if (!window.matchMedia(sheetQuery).matches || !sheet) close()
+    }
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation()
+        close(true)
+      }
+    }
+    document.addEventListener("pointerdown", onDown, true)
+    window.addEventListener("scroll", onScroll, true)
+    window.addEventListener("resize", onResize)
+    document.addEventListener("keydown", onKey)
+    // After the panel has been placed and shown; a hidden element can't take focus.
+    const frame = requestAnimationFrame(() =>
+      panel.current?.querySelector<HTMLElement>("input, [role^=menuitem]")?.focus({ preventScroll: true }),
+    )
+    return () => {
+      cancelAnimationFrame(frame)
+      document.removeEventListener("pointerdown", onDown, true)
+      window.removeEventListener("scroll", onScroll, true)
+      window.removeEventListener("resize", onResize)
+      document.removeEventListener("keydown", onKey)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, sheet])
+
+  const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
     const items = [...(panel.current?.querySelectorAll<HTMLElement>("[role^=menuitem]:not([disabled])") ?? [])]
     if (!items.length) return
@@ -54,11 +132,16 @@ export function Menu({
   return (
     <div className="menu-root" ref={root} onKeyDown={onKeyDown}>
       {trigger({ onClick: () => set(!open), "aria-expanded": open, "aria-haspopup": "menu" })}
-      {open && (
-        <div className="menu" role="menu" ref={panel} data-align={align} style={{ width }}>
-          {children(() => set(false))}
-        </div>
-      )}
+      {open &&
+        createPortal(
+          <>
+            {sheet && <div className="menu-scrim" aria-hidden="true" />}
+            <div className="menu" role="menu" ref={panel} data-sheet={sheet || undefined} style={sheet ? undefined : { width, ...style }}>
+              {children(() => close())}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   )
 }

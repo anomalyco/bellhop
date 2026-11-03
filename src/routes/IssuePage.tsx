@@ -7,14 +7,14 @@ import { ensureHuman } from "../lib/human"
 import { appendTimeline, applyActivity, applySummary, findSummary, stateText, storeIssue, visibleState } from "../lib/issues"
 import { useLive } from "../lib/live"
 import { Time } from "../lib/time"
-import { ActorName, UserAvatar } from "../ui/Actor"
+import { ActorName } from "../ui/Actor"
 import { Editor } from "../ui/Editor"
 import { ChevronDownIcon, PersonIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
-import { Button, Identicon, StateIcon, StateLabel } from "../ui/primitives"
+import { Button, StateIcon, StateLabel } from "../ui/primitives"
 import { relationRequest, Sidebar, type IssueActions, type RelationKind } from "./issue/Sidebar"
-import { ActivityRow, CommentBox, CommentItem, EventItem } from "./issue/Timeline"
+import { ActivityRow, CommentItem, EventItem, Message } from "./issue/Timeline"
 import { appPath } from "../lib/site"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
@@ -180,7 +180,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       <IssueHeader app={app} issue={issue} viewers={viewers} canEdit={member || issue.viewer_is_author} />
       <div className="issue-layout">
         <div className="issue-main">
-          <div className="timeline">
+          <div className="thread">
             <IssueBodyBox app={app} issue={issue} canEdit={member || issue.viewer_is_author} />
             {issue.timeline.map((item) =>
               item.kind === "comment" ? (
@@ -191,7 +191,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
             )}
             {viewerActor &&
               pending.map((p) => (
-                <CommentBox
+                <Message
                   key={p.id}
                   slug={slug}
                   author={viewerActor}
@@ -211,7 +211,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
                         </button>
                       </span>
                     ) : (
-                      "sending…"
+                      "Sending…"
                     )
                   }
                 />
@@ -226,7 +226,6 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
           <Composer
             app={app}
             issue={issue}
-            me={viewerActor}
             onComment={postComment}
             onStatus={(status, reason) => setStatus(status, reason)}
             onDuplicate={async (other) => {
@@ -248,22 +247,22 @@ function IssueLoading({ app, number }: { app: AppDetail; number: number }) {
     <Page>
       <div className="issue-header">
         <h1 className="issue-heading">
-          {summary ? <span className="issue-heading-title">{summary.title}</span> : <span className="skeleton" style={{ width: 320, height: 24 }} />}{" "}
+          {summary ? <span className="issue-heading-title">{summary.title}</span> : <span className="skeleton" style={{ width: 320, height: 20 }} />}{" "}
           <span className="mono issue-heading-number">#{number}</span>
         </h1>
         <div className="issue-state-row">
-          {summary ? <StateLabel state={visibleState(summary)} text={stateText(summary)} /> : <span className="skeleton" style={{ width: 80, height: 32, borderRadius: 16 }} />}
+          {summary ? <StateLabel state={visibleState(summary)} text={stateText(summary)} /> : <span className="skeleton" style={{ width: 80, height: 24, borderRadius: 12 }} />}
         </div>
       </div>
       <div className="issue-layout">
         <div className="issue-main">
-          <div className="comment">
-            <span className="comment-avatar">
-              <span className="skeleton" style={{ width: 40, height: 40, borderRadius: 20 }} />
-            </span>
-            <div className="comment-box">
-              <div className="comment-header" />
-              <div className="comment-body skeleton-lines">
+          <div className="thread">
+            <div className="msg">
+              <span className="msg-avatar">
+                <span className="skeleton" style={{ width: 28, height: 28, borderRadius: 14 }} />
+              </span>
+              <div className="msg-main skeleton-lines">
+                <span className="skeleton" style={{ width: 160, height: 12 }} />
                 <span className="skeleton" style={{ width: "80%", height: 12 }} />
                 <span className="skeleton" style={{ width: "60%", height: 12 }} />
               </div>
@@ -322,7 +321,7 @@ function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: 
           <div className="issue-title-actions">
             {canEdit && (
               <Button
-                size="small"
+                variant="invisible"
                 onClick={() => {
                   setTitle(issue.title)
                   setEditing(true)
@@ -331,7 +330,7 @@ function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: 
                 Edit
               </Button>
             )}
-            <Link href={appPath(app.slug, "/new")} className="btn" data-variant="primary" data-size="small">
+            <Link href={appPath(app.slug, "/new")} className="btn issue-new-link" data-variant="default">
               New issue
             </Link>
           </div>
@@ -376,7 +375,7 @@ function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; c
   }
 
   return (
-    <CommentBox
+    <Message
       slug={app.slug}
       author={issue.author}
       createdAt={issue.created_at}
@@ -400,7 +399,7 @@ function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; c
       }
     >
       {editing ? (
-        <div className="comment-edit">
+        <div className="msg-edit">
           <Editor
             slug={app.slug}
             value={body}
@@ -411,19 +410,21 @@ function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; c
             onSubmit={save}
             autoFocus
             label="Description"
+            actions={
+              <>
+                <Button variant="invisible" onClick={() => setEditing(false)}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={save} disabled={saving || busy}>
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              </>
+            }
           />
           {error && <p className="field-error">{error}</p>}
-          <div className="form-actions">
-            <Button variant="invisible" onClick={() => setEditing(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" onClick={save} disabled={saving || busy}>
-              {saving ? "Saving…" : "Update"}
-            </Button>
-          </div>
         </div>
       ) : undefined}
-    </CommentBox>
+    </Message>
   )
 }
 
@@ -433,17 +434,18 @@ const closeOptions: { reason: CloseReason; label: string; description: string }[
   { reason: "duplicate", label: "Close as duplicate", description: "Duplicate of another issue" },
 ]
 
+const sendKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵"
+
+/** The reply box docked under the thread, with close/reopen beside Send. */
 function Composer({
   app,
   issue,
-  me,
   onComment,
   onStatus,
   onDuplicate,
 }: {
   app: AppDetail
   issue: Issue
-  me: Actor | null
   onComment: (body: string, attachmentIds: string[]) => Promise<boolean>
   onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
   onDuplicate: (other: number) => Promise<void>
@@ -495,82 +497,87 @@ function Composer({
   }
 
   const option = closeOptions.find((o) => o.reason === reason)!
-  const closeLabel = hasText ? option.label.replace("Close as", "Close with comment as") : option.label
+  const closeLabel = reason === "completed" ? (hasText ? "Close with comment" : "Close issue") : option.label
+  const reopenLabel = hasText ? "Reopen with comment" : "Reopen issue"
+
+  const statusControl = !member ? null : issue.status === "closed" ? (
+    <Button icon={<StateIcon state="open" size={14} />} onClick={reopen} disabled={busy} aria-label={reopenLabel} title={reopenLabel}>
+      <span className="close-label">{reopenLabel}</span>
+    </Button>
+  ) : (
+    <span className="split">
+      <Button
+        icon={<StateIcon state={reason === "completed" ? "closed" : "not_planned"} size={14} />}
+        onClick={close}
+        disabled={busy || working}
+        aria-label={closeLabel}
+        title={hasText ? `${closeLabel} (posts your reply first)` : closeLabel}
+      >
+        <span className="close-label">{closeLabel}</span>
+      </Button>
+      <Menu
+        align="end"
+        width={300}
+        trigger={(p) => <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon size={14} />} {...p} />}
+      >
+        {(dismiss) =>
+          closeOptions.map((o) => (
+            <MenuItem
+              key={o.reason}
+              checked={reason === o.reason}
+              description={o.description}
+              onSelect={() => {
+                setReason(o.reason)
+                setDupError(null)
+                dismiss()
+              }}
+            >
+              {o.label}
+            </MenuItem>
+          ))
+        }
+      </Menu>
+    </span>
+  )
 
   return (
-    <div className="comment composer">
-      <span className="comment-avatar">
-        {me ? me.type === "member" ? <UserAvatar user={me} size={40} /> : <Identicon seed={me.id} size={40} /> : <ActorAvatarPlaceholder />}
-      </span>
-      <div className="composer-main">
-        <h2 className="composer-title">Add a comment</h2>
-        <Editor
-          slug={app.slug}
-          value={body}
-          onChange={setBody}
-          member={member}
-          onAttachment={(a) => setAttachments((l) => [...l, a])}
-          onBusyChange={setBusy}
-          onSubmit={() => void comment()}
-          label="Comment"
-        />
-        {member && reason === "duplicate" && issue.status !== "closed" && (
-          <div className="dup-form">
-            <label className="field-label" htmlFor="dup-of">
-              Duplicate of
-            </label>
-            <div className="input" data-size="small">
-              <span className="input-prefix mono">#</span>
-              <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
+    <div className="composer">
+      <Editor
+        variant="chat"
+        slug={app.slug}
+        value={body}
+        onChange={setBody}
+        member={member}
+        onAttachment={(a) => setAttachments((l) => [...l, a])}
+        onBusyChange={setBusy}
+        onSubmit={() => void comment()}
+        label="Reply"
+        minHeight={44}
+        extra={
+          member &&
+          reason === "duplicate" &&
+          issue.status !== "closed" && (
+            <div className="dup-form">
+              <label className="field-label" htmlFor="dup-of">
+                Duplicate of
+              </label>
+              <div className="input" data-size="small">
+                <span className="input-prefix mono">#</span>
+                <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
+              </div>
+              {dupError && <span className="field-error">{dupError}</span>}
             </div>
-            {dupError && <span className="field-error">{dupError}</span>}
-          </div>
-        )}
-        <div className="composer-actions">
-          {member &&
-            (issue.status === "closed" ? (
-              <Button icon={<StateIcon state="open" />} onClick={reopen} disabled={busy}>
-                {hasText ? "Reopen with comment" : "Reopen issue"}
-              </Button>
-            ) : (
-              <span className="btn-group">
-                <Button icon={<StateIcon state={reason === "completed" ? "closed" : "not_planned"} />} onClick={close} disabled={busy || working}>
-                  <span className="close-label">{closeLabel}</span>
-                </Button>
-                <Menu
-                  align="end"
-                  width={300}
-                  trigger={(p) => <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon />} {...p} />}
-                >
-                  {(dismiss) =>
-                    closeOptions.map((o) => (
-                      <MenuItem
-                        key={o.reason}
-                        checked={reason === o.reason}
-                        description={o.description}
-                        onSelect={() => {
-                          setReason(o.reason)
-                          setDupError(null)
-                          dismiss()
-                        }}
-                      >
-                        {o.label}
-                      </MenuItem>
-                    ))
-                  }
-                </Menu>
-              </span>
-            ))}
-          <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy}>
-            {busy ? "Uploading…" : "Comment"}
-          </Button>
-        </div>
-      </div>
+          )
+        }
+        actions={
+          <>
+            {statusControl}
+            <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
+              {busy ? "Uploading…" : "Send"}
+            </Button>
+          </>
+        }
+      />
     </div>
   )
 }
-
-function ActorAvatarPlaceholder() {
-  return <span className="skeleton" style={{ width: 40, height: 40, borderRadius: 20 }} />
-}
-

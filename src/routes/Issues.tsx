@@ -7,7 +7,7 @@ import { applyActivity, applySummary, formatQuery, listKey, parseQuery, prefetch
 import { useLive } from "../lib/live"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
-import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, XIcon } from "../ui/icons"
+import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppLayout, Page } from "../ui/Shell"
 import { Button, Dots, Label, StateIcon } from "../ui/primitives"
@@ -78,11 +78,28 @@ function IssuesBody({ app }: { app: AppDetail }) {
   const counts = data?.counts ?? (filter.label || filter.text ? null : app.counts)
   const filtered = !!(filter.label || filter.text)
 
+  const stateHref = (state: Filter["state"]) => {
+    const next = formatQuery({ ...filter, state })
+    return appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`)
+  }
+
   return (
     <Page>
       <div className="list-toolbar">
+        <nav className="segmented list-states" aria-label="Issue state">
+          <Link href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
+            <StateIcon state="open" size={14} />
+            Open
+            {counts && <span className="segmented-count">{counts.open}</span>}
+          </Link>
+          <Link href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
+            <StateIcon state="closed" size={14} />
+            Closed
+            {counts && <span className="segmented-count">{counts.closed}</span>}
+          </Link>
+        </nav>
         <form className="input list-search" onSubmit={submitSearch} role="search">
-          <SearchIcon />
+          <SearchIcon size={14} />
           <input
             aria-label="Search issues"
             value={draft}
@@ -96,38 +113,20 @@ function IssuesBody({ app }: { app: AppDetail }) {
             </button>
           )}
         </form>
-        <Link href={appPath(slug, "/new")} className="btn" data-variant="primary">
-          <PlusIcon />
+        <div className="list-label">
+          <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
+        </div>
+        <Link href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
+          <PlusIcon size={14} />
           New issue
         </Link>
       </div>
 
-      <section className="box">
-        <div className="box-header list-header">
-          <Link
-            href={appPath(slug, formatQuery({ ...filter, state: "open" }) === "is:open" ? "" : `?q=${encodeURIComponent(formatQuery({ ...filter, state: "open" }))}`)}
-            className="tab-link"
-            aria-current={filter.state === "open" ? "page" : undefined}
-          >
-            <StateIcon state="open" />
-            {counts ? <span className="mono-num">{counts.open}</span> : null} Open
-          </Link>
-          <Link
-            href={appPath(slug, `?q=${encodeURIComponent(formatQuery({ ...filter, state: "closed" }))}`)}
-            className="tab-link"
-            aria-current={filter.state === "closed" ? "page" : undefined}
-          >
-            <StateIcon state="closed" />
-            {counts ? <span className="mono-num">{counts.closed}</span> : null} Closed
-          </Link>
-          <span className="spacer" />
-          <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
-        </div>
-
-        {!!error && !data && <div className="box-row muted-text">{errorMessage(error)}</div>}
+      <section className="issue-list" aria-label="Issues">
+        {!!error && !data && <div className="list-empty">{errorMessage(error)}</div>}
         {!data && !error && <SkeletonRows />}
         {data && data.issues.length === 0 && (
-          <div className="box-empty">
+          <div className="list-empty">
             {filtered ? (
               <>
                 No results.{" "}
@@ -148,8 +147,8 @@ function IssuesBody({ app }: { app: AppDetail }) {
           <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={(label) => go({ ...filter, label })} />
         ))}
         {data?.next_cursor && (
-          <div className="box-footer">
-            <Button size="small" onClick={loadMore} disabled={loadingMore}>
+          <div className="list-footer">
+            <Button onClick={loadMore} disabled={loadingMore}>
               {loadingMore ? "Loading…" : "Load more"}
             </Button>
             {moreError && <span className="field-error">{moreError}</span>}
@@ -164,7 +163,7 @@ function SkeletonRows() {
   return (
     <>
       {[0, 1, 2, 3, 4].map((i) => (
-        <div key={i} className="box-row skeleton-row">
+        <div key={i} className="issue-row skeleton-row">
           <span className="skeleton" style={{ width: 16, height: 16, borderRadius: 8 }} />
           <span className="skeleton-lines">
             <span className="skeleton" style={{ width: `${55 - i * 6}%`, height: 14 }} />
@@ -185,9 +184,10 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
       width={280}
       onOpenChange={(open) => !open && setQuery("")}
       trigger={(props) => (
-        <button type="button" className="btn" data-variant="invisible" data-size="small" {...props}>
-          {value ? <span className="filter-active">Label: {value}</span> : "Label"}
-          <ChevronDownIcon />
+        <button type="button" className="btn" data-variant="default" data-active={value ? "" : undefined} {...props}>
+          <TagIcon size={14} />
+          <span className="filter-text">{value ? value : "Label"}</span>
+          <ChevronDownIcon size={14} />
         </button>
       )}
     >
@@ -236,7 +236,7 @@ function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary;
   const active = useUntil(issue.activity?.expires_at)
   const href = appPath(slug, `/issues/${issue.number}`)
   return (
-    <div className="box-row issue-row">
+    <div className="issue-row">
       <StateIcon state={visibleState(issue)} />
       <div className="issue-row-main">
         <div className="issue-row-title">
@@ -250,12 +250,12 @@ function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary;
           ))}
         </div>
         <div className="issue-meta">
-          <span className="mono">#{issue.number}</span> opened <Time iso={issue.created_at} /> by {actorName(issue.author)}
+          <span className="mono">#{issue.number}</span> · {actorName(issue.author)} opened <Time iso={issue.created_at} />
         </div>
       </div>
       <div className="issue-row-side">
         {active && issue.activity && (
-          <span className="activity issue-row-activity" title={issue.activity.text ?? undefined}>
+          <span className="issue-row-activity" title={issue.activity.text ?? undefined}>
             <Dots />
             <span className="issue-row-activity-name">{actorName(issue.activity.actor)}</span>
           </span>
@@ -266,7 +266,7 @@ function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary;
           </span>
         )}
         <Link href={href} className="issue-row-comments" aria-label={`${issue.comment_count} comments`} data-zero={issue.comment_count === 0 || undefined}>
-          <CommentIcon />
+          <CommentIcon size={14} />
           <span className="mono-num">{issue.comment_count}</span>
         </Link>
       </div>

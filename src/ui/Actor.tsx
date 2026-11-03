@@ -1,17 +1,18 @@
 import { useState } from "react"
 import type { Actor } from "../../shared/api"
-import { AgentAvatar, AiBadge, Identicon } from "./primitives"
+import { AgentAvatar, AiBadge, Avatar } from "./primitives"
 
 export function actorName(actor: Actor) {
   return actor.type === "guest" ? actor.handle : actor.name
 }
 
-function Photo({ src, seed, size }: { src: string; seed: string; size: number }) {
+function Photo({ src, seed, name, size }: { src: string; seed: string; name: string; size: number }) {
   const [failed, setFailed] = useState(false)
-  if (failed) return <Identicon seed={seed} size={size} />
+  if (failed) return <Avatar seed={seed} name={name} size={size} />
   return (
     <img
       className="avatar"
+      data-photo
       src={src}
       width={size}
       height={size}
@@ -24,11 +25,11 @@ function Photo({ src, seed, size }: { src: string; seed: string; size: number })
 
 export function ActorAvatar({ actor, size = 20 }: { actor: Actor; size?: number }) {
   if (actor.type === "agent") return <AgentAvatar size={size} />
-  if (actor.type === "member" && actor.avatar_url) return <Photo src={actor.avatar_url} seed={actor.id} size={size} />
-  return <Identicon seed={actor.id} size={size} />
+  if (actor.type === "member" && actor.avatar_url) return <Photo src={actor.avatar_url} seed={actor.id} name={actor.name} size={size} />
+  return <Avatar seed={actor.id} name={actorName(actor)} size={size} />
 }
 
-/** Name in bold, plus the AI badge for agents. */
+/** The name, plus the AI badge for agents. */
 export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boolean }) {
   return (
     <>
@@ -38,6 +39,11 @@ export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boole
   )
 }
 
-export function UserAvatar({ user, size = 20 }: { user: { id: string; avatar_url: string | null }; size?: number }) {
-  return user.avatar_url ? <Photo src={user.avatar_url} seed={user.id} size={size} /> : <Identicon seed={user.id} size={size} />
+export function UserAvatar({ user, size = 20 }: { user: { id: string; name?: string | null; email?: string; avatar_url: string | null }; size?: number }) {
+  const name = user.name || user.email || "?"
+  return user.avatar_url ? (
+    <Photo src={user.avatar_url} seed={user.id} name={name} size={size} />
+  ) : (
+    <Avatar seed={user.id} name={name} size={size} />
+  )
 }
