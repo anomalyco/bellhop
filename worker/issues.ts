@@ -69,7 +69,7 @@ export function issueNumber(n: unknown) {
 export async function listIssues(
   env: Env,
   appId: string,
-  options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number }
+  options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number; allStates?: boolean }
 ): Promise<IssueList> {
   const where = ["i.app_id=?"],
     values: unknown[] = [appId]
@@ -101,7 +101,7 @@ export async function listIssues(
     limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? 30)))
   const list = sql(
     env,
-    `SELECT ${fields}${base} AND i.status${state === "open" ? "!=" : "="}'closed' ${cursor ? "AND i.number<?" : ""} ORDER BY i.number DESC LIMIT ?`,
+    `SELECT ${fields}${base} ${options.allStates ? "" : `AND i.status${state === "open" ? "!=" : "="}'closed'`} ${cursor ? "AND i.number<?" : ""} ORDER BY i.number DESC LIMIT ?`,
     ...values,
     ...(cursor ? [cursor] : []),
     limit + 1

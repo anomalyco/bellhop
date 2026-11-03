@@ -8,6 +8,8 @@ import { appRoom, issueRoom } from "./events"
 import { issueNumber } from "./issues"
 import { issues } from "./mutations"
 import { media } from "./media"
+import { mcp } from "./mcp"
+import { queue } from "./webhooks"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -17,9 +19,11 @@ const limit = bodyLimit({
 })
 api.use("*", async (c, next) => {
   if (!c.req.path.startsWith("/media/")) c.header("Cache-Control", "no-store")
-  firstContact(c)
+  if (c.req.path !== "/mcp") firstContact(c)
   const origin = c.req.header("origin")
-  if (origin && origin !== new URL(c.req.url).origin && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
+  // Behind a TLS-terminating proxy the request URL is http while the browser's Origin is PUBLIC_ORIGIN.
+  const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
+  if (origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
   if (c.req.path.startsWith("/api/")) await currentUser(c)
   if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/uploads$/.test(c.req.path))
     return limit(c, next)
@@ -51,7 +55,7 @@ async function live(c: Ctx, number?: string) {
 }
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))
-api.post("/mcp", (c) => c.json({ error: { code: "not_implemented", message: "MCP not implemented" } }, 501))
+api.route("/", mcp)
 api.notFound((c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404))
 api.onError((e, c) => {
   const err = e instanceof ApiFailure ? e : dbError(e)
@@ -59,4 +63,4 @@ api.onError((e, c) => {
   console.error("bellhop.request_failed", { method: c.req.method, path: c.req.path, message: e.message })
   return c.json({ error: { code: "internal_error", message: "Internal server error" } }, 500)
 })
-export default { fetch: api.fetch }
+export default { fetch: api.fetch, queue }

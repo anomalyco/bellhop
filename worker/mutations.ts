@@ -37,7 +37,7 @@ function access(c: Ctx): Access {
     actor: c.var.actor,
     guestId: c.var.appGuestId,
     privileged: !!c.var.app.role,
-    origin: new URL(c.req.url).origin
+    origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
 const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, a.privileged, a.guestId)

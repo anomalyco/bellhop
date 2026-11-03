@@ -1,6 +1,7 @@
 import type { Activity, Actor, App, IssueSummary, LiveEvent, TimelineItem, WebhookEventType } from "../shared/api"
 import { missing, now, sql, str } from "./core"
 import { currentActivity } from "./issues"
+import { enqueueWebhook } from "./webhooks"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
 export interface Change {
@@ -23,6 +24,18 @@ export function emit(env: Env, ctx: Work, change: Change) {
   const timeline: LiveEvent[] = items.map((item) => ({ type: "timeline.added", issue_id: issue.id, item }))
   ctx.waitUntil(
     Promise.all([appRoom(env, app.id).publish([list]), issueRoom(env, issue.id).publish([...timeline, updated])])
+  )
+  if (type === "comment.created" && change.actor.type === "agent") return
+  const origin = env.PUBLIC_ORIGIN || change.origin
+  ctx.waitUntil(
+    enqueueWebhook(env, origin, {
+      app,
+      type,
+      actor: change.actor,
+      issue: { ...issue, url: new URL(`/${app.slug}/issues/${issue.number}`, origin).href },
+      ...(type === "issue.updated" && { changes: change.changes ?? [] }),
+      ...(type === "comment.created" && { comment: items.find((i) => i.kind === "comment")?.comment })
+    })
   )
 }
 export async function setActivity(

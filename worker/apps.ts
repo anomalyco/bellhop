@@ -31,6 +31,7 @@ import {
 } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { guestActor } from "./auth"
+import { enqueueWebhook, webhookUrl } from "./webhooks"
 
 export async function loadApp(c: Ctx) {
   const app = await sql(
@@ -119,7 +120,7 @@ export async function settings(c: Ctx): Promise<AppSettings> {
     webhook: { ...hook, deliveries },
     tokens,
     members: members.map((m) => ({ ...m, joined: !!m.joined })),
-    mcp_url: new URL("/mcp", c.req.url).href
+    mcp_url: new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
   }
 }
 export async function assignee(env: Env, appId: string, id: unknown): Promise<Actor | null> {
@@ -225,6 +226,25 @@ apps.patch("/api/apps/:slug", async (c) => {
 apps.get("/api/apps/:slug/settings", async (c) => {
   member(c)
   return c.json(await settings(c))
+})
+apps.put("/api/apps/:slug/webhook", async (c) => {
+  owner(c)
+  const url = webhookUrl((await body(c)).url, c.env)
+  await sql(c.env, "UPDATE webhook_settings SET url=? WHERE app_id=?", url, c.var.app.id).run()
+  return c.json(await settings(c))
+})
+apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
+  owner(c)
+  await sql(c.env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", secret(), c.var.app.id).run()
+  return c.json(await settings(c))
+})
+apps.post("/api/apps/:slug/webhook/test", async (c) => {
+  owner(c)
+  const id = await enqueueWebhook(c.env, c.env.PUBLIC_ORIGIN || c.req.url, {
+    type: "ping", app: c.var.app, actor: c.var.actor
+  })
+  if (!id) bad("Set a webhook URL first")
+  return c.json({ delivery_id: id })
 })
 apps.post("/api/apps/:slug/tokens", async (c) => {
   owner(c)
