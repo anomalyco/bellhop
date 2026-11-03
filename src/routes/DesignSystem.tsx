@@ -28,18 +28,18 @@ import {
 } from "../ui/primitives"
 
 const swatches: [string, string, string][] = [
-  ["Deep", "--bg-deep", "#080808"],
-  ["Base", "--bg", "#161616"],
-  ["Layer 1", "--layer-1", "#242424"],
-  ["Layer 2", "--layer-2", "#2e2e2e"],
-  ["Layer 3", "--layer-3", "#3a3a3a"],
-  ["Contrast", "--bg-contrast", "#5c5c5c"],
+  ["Deep", "--bg-deep", "#050505"],
+  ["Base", "--bg", "#0a0a0a"],
+  ["Layer 1", "--layer-1", "#131313"],
+  ["Layer 2", "--layer-2", "#1b1b1b"],
+  ["Layer 3", "--layer-3", "#262626"],
+  ["Primary", "--primary-bg", "#f2f2f2"],
   ["Hover", "--hover", "white 6%"],
   ["Border", "--border", "white 10%"],
   ["Text", "--fg", "#fafafa"],
   ["Muted", "--fg-muted", "#aeaeae"],
   ["Faint", "--fg-faint", "#808080"],
-  ["Focus", "--focus", "#7698fd"],
+  ["Glow", "--focus", "#3b5cf6 24%"],
   ["Open", "--open", "#6bd586"],
   ["In progress", "--progress", "#f2cf76"],
   ["Closed", "--closed", "#9e99f7"],
@@ -47,7 +47,7 @@ const swatches: [string, string, string][] = [
 ]
 
 const variants: [ButtonVariant, string, string][] = [
-  ["primary", "Contrast", "Send"],
+  ["primary", "Primary", "Send"],
   ["default", "Neutral", "Label"],
   ["danger", "Danger", "Delete"],
   ["outline", "Outline", "Claim"],

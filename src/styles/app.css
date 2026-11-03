@@ -295,9 +295,7 @@ a.box-row:hover {
   font-size: var(--text-ui);
   line-height: 20px;
   color: var(--fg);
-  background:
-    linear-gradient(180deg, rgb(255 255 255 / 0.06) 0%, rgb(255 255 255 / 0.02) 100%),
-    var(--bg);
+  background: var(--bg-field);
   border: 0;
   border-radius: var(--radius);
   box-shadow: var(--elevation-neutral);
@@ -1263,7 +1261,7 @@ a.box-row:hover {
   z-index: 5;
   margin: 8px -14px 0;
   padding: 16px 0;
-  background: linear-gradient(to bottom, rgb(22 22 22 / 0), var(--bg) 16px);
+  background: linear-gradient(to bottom, rgb(10 10 10 / 0), var(--bg) 16px);
 }
 .dup-form {
   display: flex;
