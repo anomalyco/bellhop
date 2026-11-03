@@ -53,12 +53,12 @@ const stateText: Record<VisibleState, string> = {
   not_planned: "Not planned",
 }
 
-export function StateLabel({ state, size }: { state: VisibleState; size?: "small" }) {
+export function StateLabel({ state, size, text }: { state: VisibleState; size?: "small"; text?: string }) {
   const Glyph = StatusIcon[state]
   return (
     <span className="state" data-state={state} data-size={size}>
       <Glyph size={size ? 14 : 16} />
-      {stateText[state]}
+      {text ?? stateText[state]}
     </span>
   )
 }
