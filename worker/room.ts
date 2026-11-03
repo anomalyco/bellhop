@@ -16,6 +16,16 @@ export class Room extends DurableObject<Env> {
   private sockets(except?: WebSocket) {
     return this.ctx.getWebSockets().filter((s) => s !== except && s.readyState === WebSocket.OPEN)
   }
+  /** Clients ping every 25 s; a socket silent for 70 s belongs to a tab that went away without closing. */
+  private viewers(except?: WebSocket) {
+    const cutoff = Date.now() - 70_000
+    return this.sockets(except).filter((s) => {
+      const seen = this.ctx.getWebSocketAutoResponseTimestamp(s)?.getTime() ?? s.deserializeAttachment()?.at ?? 0
+      if (seen >= cutoff) return true
+      s.close(1001, "Idle")
+      return false
+    }).length
+  }
   async fetch(req: Request) {
     if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket")
       return Response.json(
@@ -30,7 +40,8 @@ export class Room extends DurableObject<Env> {
       : null
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket]
     this.ctx.acceptWebSocket(server, [issueId ? "issue" : "app"])
-    const viewers = this.sockets().length
+    server.serializeAttachment({ at: Date.now() })
+    const viewers = this.viewers()
     server.send(JSON.stringify({ type: "hello", viewers, activity } satisfies LiveEvent))
     if (issueId) this.publish([{ type: "viewers", count: viewers }])
     return new Response(null, { status: 101, webSocket: client })
@@ -81,7 +92,7 @@ export class Room extends DurableObject<Env> {
     else ws.close(1008, "Only ping supported")
   }
   webSocketClose(ws: WebSocket) {
-    if (this.ctx.getTags(ws).includes("issue")) this.publish([{ type: "viewers", count: this.sockets(ws).length }])
+    if (this.ctx.getTags(ws).includes("issue")) this.publish([{ type: "viewers", count: this.viewers(ws) }])
   }
   webSocketError(ws: WebSocket) {
     ws.close(1011, "Connection error")
