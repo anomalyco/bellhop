@@ -1,0 +1,159 @@
+/* Bellhop theme: GitHub Primer's control geometry (sizes, padding, borders, radius, motion) coloured with
+   IBM Carbon's cool gray and blue palettes, dark only. */
+
+@font-face {
+  font-family: "Satoshi";
+  src: url("/fonts/Satoshi-Variable.woff2") format("woff2");
+  font-weight: 300 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "OpenTUI Mono";
+  src: url("/fonts/OpenTUIMono-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "OpenTUI Mono";
+  src: url("/fonts/OpenTUIMono-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* Carbon cool gray */
+  --gray-100: #121619;
+  --gray-90: #21272a;
+  --gray-80: #343a3f;
+  --gray-70: #4d5358;
+  --gray-60: #697077;
+  --gray-50: #878d96;
+  --gray-40: #a2a9b0;
+  --gray-30: #c1c7cd;
+  --gray-20: #dde1e6;
+  --gray-10: #f2f4f8;
+
+  /* Carbon blue */
+  --blue-80: #002d9c;
+  --blue-70: #0043ce;
+  --blue-60: #0f62fe;
+  --blue-50: #4589ff;
+  --blue-40: #78a9ff;
+  --blue-30: #a6c8ff;
+
+  /* Surfaces */
+  --bg: #0d1013;
+  --bg-inset: #090b0d;
+  --bg-subtle: #14181b;
+  --bg-overlay: #191e21;
+  --border: #2b3135;
+  --border-muted: #1f2427;
+  --border-strong: var(--gray-70);
+
+  /* Text */
+  --fg: var(--gray-10);
+  --fg-muted: var(--gray-40);
+  --fg-subtle: var(--gray-60);
+  --fg-on-emphasis: #ffffff;
+  --fg-link: var(--blue-40);
+
+  /* Controls (Primer "control" tokens) */
+  --control-bg: #1a1f22;
+  --control-bg-hover: #22282c;
+  --control-bg-active: #2a3135;
+  --control-border: #343a3f;
+  --control-border-hover: #4d5358;
+  --control-transparent-hover: rgb(135 141 150 / 0.14);
+  --control-transparent-active: rgb(135 141 150 / 0.22);
+
+  /* Accent: Carbon blue 60 */
+  --accent: var(--blue-60);
+  --accent-hover: #0050e6;
+  --accent-active: var(--blue-80);
+  --accent-fg: var(--blue-40);
+  --accent-muted: rgb(69 137 255 / 0.14);
+  --accent-border: rgb(69 137 255 / 0.4);
+  --focus: var(--blue-50);
+
+  /* Issue states (Carbon support colours) */
+  --open: #42be65;
+  --open-emphasis: #198038;
+  --progress: #f1c21b;
+  --progress-emphasis: #8e6a00;
+  --waiting: #33b1ff;
+  --waiting-emphasis: #0072c3;
+  --closed: #a56eff;
+  --closed-emphasis: #8a3ffc;
+  --neutral: var(--gray-50);
+  --neutral-emphasis: var(--gray-70);
+  --danger: #fa4d56;
+  --danger-emphasis: #da1e28;
+  --danger-hover: #b81921;
+
+  /* Primer geometry */
+  --radius: 6px;
+  --radius-small: 4px;
+  --radius-full: 999px;
+  --control-small: 28px;
+  --control-medium: 32px;
+  --control-large: 40px;
+  --pad-small: 8px;
+  --pad-medium: 12px;
+  --pad-large: 16px;
+  --ease: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --font-sans: "Satoshi", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "OpenTUI Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --text-small: 12px;
+  --text-body: 14px;
+  --text-title: 16px;
+  --text-heading: 20px;
+  --text-display: 26px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: 20px;
+  font-weight: 450;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--fg-link);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+
+code,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "calt" 0;
+}
+
+::selection {
+  background: rgb(69 137 255 / 0.35);
+}
