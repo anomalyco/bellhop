@@ -458,7 +458,7 @@ function Timeline() {
         <span className="badge">
           <PersonIcon />
         </span>
-        <AgentAvatar size={20} /> <strong>OpenCode</strong> claimed this <span className="mono">2m ago</span>
+        <AgentAvatar size={20} /> <strong>OpenCode</strong> claimed this 2m ago
       </div>
 
       <div className="comment">

@@ -39,7 +39,7 @@ export function Time({ iso }: { iso: string }) {
   // A freshly mounted time should not lag the shared minute tick.
   const [mountedAt] = useState(Date.now)
   return (
-    <time className="mono time" dateTime={iso} title={full.format(new Date(iso))}>
+    <time className="time" dateTime={iso} title={full.format(new Date(iso))}>
       {relative(iso, Math.max(now, mountedAt))}
     </time>
   )

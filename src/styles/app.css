@@ -16,8 +16,9 @@
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
+/* Relative times sit inside sentences, so they stay in Satoshi; issue numbers keep the mono face. */
 .time {
-  font-size: 0.93em;
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 .link-button {
