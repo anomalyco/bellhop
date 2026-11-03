@@ -16,6 +16,8 @@ function clock(seconds: number) {
 export function VideoPlayer({ src }: { src: string }) {
   const box = useRef<HTMLDivElement>(null)
   const video = useRef<HTMLVideoElement>(null)
+  const playedBar = useRef<HTMLSpanElement>(null)
+  const thumb = useRef<HTMLSpanElement>(null)
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [playing, setPlaying] = useState(false)
   const [started, setStarted] = useState(false)
@@ -53,6 +55,23 @@ export function VideoPlayer({ src }: { src: string }) {
     idle.current = setTimeout(() => setAwake(false), 2200)
   }, [])
   useEffect(() => () => clearTimeout(idle.current), [])
+
+  // timeupdate only fires about four times a second, so while playing the bar is moved every frame directly.
+  useEffect(() => {
+    if (!playing) return
+    let frame = 0
+    const tick = () => {
+      const el = video.current
+      if (el && el.duration) {
+        const pct = `${(el.currentTime / el.duration) * 100}%`
+        if (playedBar.current) playedBar.current.style.width = pct
+        if (thumb.current) thumb.current.style.left = pct
+      }
+      frame = requestAnimationFrame(tick)
+    }
+    frame = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(frame)
+  }, [playing])
 
   useEffect(() => {
     const onFull = () => setFull(document.fullscreenElement === box.current)
@@ -217,8 +236,8 @@ export function VideoPlayer({ src }: { src: string }) {
           }}
         >
           <span className="video-buffered" style={{ width: `${buffered}%` }} />
-          <span className="video-played" style={{ width: `${played}%` }} />
-          <span className="video-thumb" style={{ left: `${played}%` }} />
+          <span ref={playedBar} className="video-played" style={{ width: `${played}%` }} />
+          <span ref={thumb} className="video-thumb" style={{ left: `${played}%` }} />
           {hover && duration > 0 && (
             <span className="video-tip" style={{ left: hover.x }}>
               {clock(hover.t)}
