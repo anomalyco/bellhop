@@ -1261,7 +1261,7 @@ a.box-row:hover {
   z-index: 5;
   margin: 8px -14px 0;
   padding: 16px 0;
-  background: linear-gradient(to bottom, rgb(10 10 10 / 0), var(--bg) 16px);
+  background: var(--bg);
 }
 .dup-form {
   display: flex;

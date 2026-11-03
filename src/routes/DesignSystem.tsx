@@ -39,7 +39,7 @@ const swatches: [string, string, string][] = [
   ["Text", "--fg", "#fafafa"],
   ["Muted", "--fg-muted", "#aeaeae"],
   ["Faint", "--fg-faint", "#808080"],
-  ["Glow", "--focus", "#3b5cf6 24%"],
+  ["Focus", "--focus", "#7698fd"],
   ["Open", "--open", "#6bd586"],
   ["In progress", "--progress", "#f2cf76"],
   ["Closed", "--closed", "#9e99f7"],

@@ -1,5 +1,5 @@
-/* Bellhop theme: an off-black page under a soft blue glow, OpenCode's white-alpha borders and overlays, flat
-   controls (no gradients) with a white primary. Inter for text, OpenTUI Mono for issue numbers and code. Dark only. */
+/* Bellhop theme: a flat off-black page, OpenCode's white-alpha borders and overlays, flat controls with a white
+   primary. No gradients anywhere. Inter for text, OpenTUI Mono for issue numbers and code. Dark only. */
 
 @font-face {
   font-family: "Inter";
@@ -54,10 +54,6 @@
   --layer-3: #262626;
   --bg-neutral: rgb(255 255 255 / 0.05);
   --bg-field: rgb(255 255 255 / 0.03);
-  /* The one blue: a glow from the top of the page, behind everything */
-  --glow:
-    radial-gradient(ellipse 70% 60% at 50% -18%, rgb(59 92 246 / 0.3) 0%, rgb(59 92 246 / 0.1) 45%, rgb(59 92 246 / 0) 75%),
-    radial-gradient(ellipse 40% 35% at 18% -10%, rgb(118 152 253 / 0.1) 0%, rgb(118 152 253 / 0) 70%);
 
   /* Primary action: flat white with dark text */
   --primary-bg: #f2f2f2;
@@ -164,15 +160,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
-/* The glow stays put while the page scrolls; it sits above the canvas and below all content. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  background: var(--glow);
-  pointer-events: none;
-}
+
 
 a {
   color: var(--fg-link);
