@@ -1,0 +1,306 @@
+/* Bellhop's video player: flat controls over the video (no gradients), hidden while playing until the pointer moves. */
+.video {
+  position: relative;
+  width: 100%;
+  max-width: 720px;
+  margin: 8px 0;
+  overflow: hidden;
+  background: #000;
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 1px var(--border-muted);
+  outline: none;
+  isolation: isolate;
+}
+.video:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* .video .video-el outranks the generic `.markdown video` rule */
+.video .video-el {
+  display: block;
+  width: 100%;
+  max-width: none;
+  max-height: 70vh;
+  margin: 0;
+  background: #000;
+  border-radius: 0;
+  cursor: pointer;
+}
+.video[data-playing]:not([data-controls]),
+.video[data-playing]:not([data-controls]) .video-el {
+  cursor: none;
+}
+.video[data-full] {
+  max-width: none;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.video[data-full] .video-el {
+  width: 100%;
+  height: 100%;
+  max-height: none;
+  object-fit: contain;
+}
+
+/* The first-play button, in the primary white */
+.video-big {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  border: 0;
+  border-radius: var(--radius-full);
+  transform: translate(-50%, -50%);
+  cursor: pointer;
+  transition: background-color 85ms ease-out, transform 120ms var(--ease);
+}
+.video-big svg {
+  width: 22px;
+  height: 22px;
+  margin-left: 3px;
+}
+.video-big:hover {
+  background: var(--primary-hover);
+}
+.video-big:active {
+  transform: translate(-50%, -50%) scale(0.96);
+}
+
+.video-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 28px;
+  height: 28px;
+  margin: -14px 0 0 -14px;
+  border: 2px solid rgb(255 255 255 / 0.2);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: video-spin 0.8s linear infinite;
+}
+@keyframes video-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Control bar: a solid translucent strip along the bottom */
+.video-bar {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 2px 8px 6px;
+  color: #fff;
+  background: rgb(10 10 10 / 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease-out;
+}
+.video[data-controls] .video-bar,
+.video:focus-within .video-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.video-track {
+  position: relative;
+  height: 14px;
+  margin: 0 4px;
+  cursor: pointer;
+  touch-action: none;
+  outline: none;
+}
+.video-track::before,
+.video-buffered,
+.video-played {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  height: 3px;
+  border-radius: var(--radius-full);
+  transform: translateY(-50%);
+  transition: height 120ms ease-out;
+}
+.video-track::before {
+  content: "";
+  right: 0;
+  background: rgb(255 255 255 / 0.16);
+}
+.video-buffered {
+  background: rgb(255 255 255 / 0.3);
+}
+.video-played {
+  background: #fff;
+}
+.video-track:hover::before,
+.video-track:hover .video-buffered,
+.video-track:hover .video-played,
+.video-track:focus-visible::before,
+.video-track:focus-visible .video-played {
+  height: 5px;
+}
+.video-thumb {
+  position: absolute;
+  top: 50%;
+  width: 11px;
+  height: 11px;
+  background: #fff;
+  border-radius: 50%;
+  transform: translate(-50%, -50%) scale(0);
+  transition: transform 120ms var(--ease);
+}
+.video-track:hover .video-thumb,
+.video-track:focus-visible .video-thumb {
+  transform: translate(-50%, -50%) scale(1);
+}
+.video-track:focus-visible .video-thumb {
+  box-shadow: 0 0 0 2px var(--focus);
+}
+.video-tip {
+  position: absolute;
+  bottom: 16px;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+  color: #fff;
+  background: var(--layer-2);
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.video-row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+}
+.video-spacer {
+  flex: 1;
+}
+.video-btn {
+  display: inline-grid;
+  place-items: center;
+  min-width: 30px;
+  height: 30px;
+  padding: 0;
+  color: rgb(255 255 255 / 0.86);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: background-color 85ms ease-out, color 85ms ease-out;
+}
+.video-btn:hover {
+  color: #fff;
+  background: rgb(255 255 255 / 0.12);
+  text-decoration: none;
+}
+.video-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: -2px;
+}
+.video-btn-text {
+  padding: 0 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: var(--weight-button);
+  font-variant-numeric: tabular-nums;
+}
+.video-time {
+  margin-left: 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: #fff;
+}
+.video-time-total {
+  color: rgb(255 255 255 / 0.55);
+}
+
+.video-speed {
+  position: relative;
+}
+.video-menu {
+  position: absolute;
+  right: 0;
+  bottom: 36px;
+  z-index: 2;
+  display: grid;
+  min-width: 84px;
+  padding: 4px;
+  background: var(--layer-2);
+  border-radius: var(--radius-large);
+  box-shadow: var(--elevation-floating);
+}
+.video-menu button {
+  height: 28px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--text-ui);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  color: var(--fg-muted);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.video-menu button:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+.video-menu button[aria-checked="true"] {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+
+.video[data-failed] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--fg-muted);
+  background: var(--layer-1);
+}
+.video[data-failed] p {
+  margin: 0;
+}
+
+@media (max-width: 480px) {
+  .video-time-total {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .video-bar,
+  .video-thumb,
+  .video-big,
+  .video-track::before,
+  .video-buffered,
+  .video-played {
+    transition: none;
+  }
+  .video-spinner {
+    animation-duration: 2s;
+  }
+}
+
+.video-slot {
+  display: block;
+}

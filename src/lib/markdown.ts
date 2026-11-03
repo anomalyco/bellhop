@@ -9,7 +9,8 @@ const videoExt = /\.(mp4|m4v|webm|mov|ogv)(?:[?#]|$)/i
 
 export const isVideo = (url: string) => url.startsWith("/media/") && videoExt.test(url)
 
-const video = (src: string) => `<video controls preload="metadata" src="${escape(src)}"></video>`
+/** A slot the Markdown component fills with Bellhop's own player (ui/VideoPlayer.tsx). */
+const video = (src: string) => `<span class="video-slot" data-src="${escape(src)}"></span>`
 
 md.renderer.rules.image = (tokens, idx) => {
   const token = tokens[idx]!
