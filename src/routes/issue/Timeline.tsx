@@ -8,6 +8,7 @@ import { LinkIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon, Im
 import { Markdown } from "../../ui/Markdown"
 import { Dots, Label } from "../../ui/primitives"
 import { visibleState } from "../../lib/issues"
+import { appPath } from "../../lib/site"
 
 export function CommentBox({
   slug,
@@ -102,7 +103,7 @@ export function CommentItem({ slug, comment }: { slug: string; comment: Comment 
 
 function IssueLink({ slug, issue }: { slug: string; issue: IssueRef }) {
   return (
-    <Link href={`/${slug}/issues/${issue.number}`} className="event-issue">
+    <Link href={appPath(slug, `/issues/${issue.number}`)} className="event-issue">
       <span className="state-icon" data-state={visibleState(issue)}>
         {(() => {
           const G = StatusIcon[visibleState(issue)]

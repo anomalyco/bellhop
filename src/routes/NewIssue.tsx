@@ -9,6 +9,7 @@ import { Editor } from "../ui/Editor"
 import { XIcon } from "../ui/icons"
 import { AppLayout, Page } from "../ui/Shell"
 import { Button, Label } from "../ui/primitives"
+import { appPath } from "../lib/site"
 
 export function NewIssue({ slug }: { slug: string }) {
   return <AppLayout slug={slug} tab="issues">{(app) => <NewIssueBody app={app} />}</AppLayout>
@@ -35,14 +36,14 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
               <div className="template-row-name">{t.name}</div>
               {t.description && <div className="issue-meta">{t.description}</div>}
             </div>
-            <Link href={`/${app.slug}/new?template=${encodeURIComponent(t.id)}`} className="btn" data-variant="primary" data-size="small">
+            <Link href={appPath(app.slug, `/new?template=${encodeURIComponent(t.id)}`)} className="btn" data-variant="primary" data-size="small">
               Get started
             </Link>
           </div>
         ))}
       </section>
       <p className="template-blank">
-        <Link href={`/${app.slug}/new?template=`}>Open a blank issue</Link>
+        <Link href={appPath(app.slug, "/new?template=")}>Open a blank issue</Link>
       </p>
     </Page>
   )
@@ -84,7 +85,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
       })
       storeIssue(app.slug, issue)
-      navigate(`/${app.slug}/issues/${issue.number}`)
+      navigate(appPath(app.slug, `/issues/${issue.number}`))
     } catch (err) {
       setError(errorMessage(err))
       setSubmitting(false)
@@ -182,7 +183,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
 
         {error && <p className="flash" data-tone="danger">{error}</p>}
         <div className="form-actions">
-          <Link href={`/${app.slug}`} className="btn" data-variant="invisible">
+          <Link href={appPath(app.slug)} className="btn" data-variant="invisible">
             Cancel
           </Link>
           <Button type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>

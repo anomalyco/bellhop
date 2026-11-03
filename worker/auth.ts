@@ -5,10 +5,15 @@ import { bad, body, denied, email, fail, hex, missing, now, secret, sha256, sql,
 import type { Bindings, Ctx, User } from "./core"
 
 const month = 30 * 86400
-function cookie(c: Ctx, name: string, value: string, maxAge: number) {
-  const local = ["localhost", "127.0.0.1"].includes(new URL(c.req.url).hostname)
-  setCookie(c, name, value, { path: "/", maxAge, httpOnly: true, sameSite: "Lax", secure: !local })
+/** `shared` cookies (the session) cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
+function cookie(c: Ctx, name: string, value: string, maxAge: number, shared = false) {
+  const host = new URL(c.req.url).hostname
+  const local = ["localhost", "127.0.0.1"].includes(host)
+  const site = c.env.APP_DOMAIN
+  const domain = shared && site?.includes(".") && onSite(site, host) ? site : undefined
+  setCookie(c, name, value, { path: "/", maxAge, httpOnly: true, sameSite: "Lax", secure: !local, domain })
 }
+const onSite = (site: string, host: string) => host === site || host.endsWith(`.${site}`)
 export function firstContact(c: Ctx) {
   let id = getCookie(c, "bh_guest")
   if (!id || !/^[0-9a-f]{64}$/.test(id)) {
@@ -58,6 +63,13 @@ export async function allowWrite(c: Ctx) {
 }
 function nextPath(c: Ctx, input?: string) {
   const origin = new URL(c.req.url).origin
+  // Sign-in runs on APP_DOMAIN, so it may return to an absolute URL on an app subdomain.
+  const site = c.env.APP_DOMAIN
+  if (site && input && /^https?:\/\//.test(input) && !/[\\\r\n]/.test(input)) {
+    const url = new URL(input)
+    const scheme = url.protocol === "https:" || !site.includes(".")
+    return scheme && onSite(site, url.hostname) ? url.href : "/"
+  }
   if (!input?.startsWith("/") || /[\\\r\n]/.test(input)) return "/"
   const url = new URL(input, origin)
   return url.origin === origin && !url.pathname.startsWith("//") ? url.pathname + url.search + url.hash : "/"
@@ -95,7 +107,7 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
   ]).then((result) => {
     if (!result[2]?.meta.changes) denied()
   })
-  cookie(c, "bh_session", token, month)
+  cookie(c, "bh_session", token, month, true)
 }
 /** Behind a TLS-terminating proxy (the tailnet dev URL) the Worker sees http, so PUBLIC_ORIGIN can pin the origin. */
 function callbackUrl(c: Ctx) {
@@ -141,6 +153,15 @@ auth.get("/auth/dev", async (c) => {
 })
 auth.get("/auth/google", (c) => {
   if (!c.env.GOOGLE_CLIENT_ID || !c.env.GOOGLE_CLIENT_SECRET) fail(503, "misconfigured", "Google sign-in unavailable")
+  // The OAuth state cookie and callback live on APP_DOMAIN; an app subdomain hands over with an absolute next URL.
+  const here = new URL(c.req.url)
+  const site = c.env.APP_DOMAIN
+  if (site && here.hostname !== site && onSite(site, here.hostname)) {
+    const next = new URL(c.req.query("next") || "/", here.origin)
+    const apex = new URL("/auth/google", `${here.protocol}//${site}${here.port ? `:${here.port}` : ""}`)
+    apex.searchParams.set("next", next.origin === here.origin ? next.href : here.origin + "/")
+    return c.redirect(apex.href)
+  }
   const state = secret()
   cookie(c, "bh_state", state, 600)
   cookie(c, "bh_next", nextPath(c, c.req.query("next")), 600)
@@ -193,6 +214,7 @@ auth.get("/auth/google/callback", async (c) => {
 auth.post("/auth/logout", async (c) => {
   const token = getCookie(c, "bh_session")
   if (token) await sql(c.env, "DELETE FROM sessions WHERE token_hash=?", await sha256(token)).run()
+  cookie(c, "bh_session", "", 0, true)
   cookie(c, "bh_session", "", 0)
   return c.json({ ok: true })
 })

@@ -18,7 +18,9 @@
   },
   "vars": {
     // Cloudflare's always-pass test key; replace per environment.
-    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+    "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+    // Empty: apps live under /<slug>. Production serves each app on <slug>.APP_DOMAIN.
+    "APP_DOMAIN": ""
   },
   "env": {
     // Build with CLOUDFLARE_ENV=production; deploy with the work account (wwrangler).
@@ -26,7 +28,12 @@
     "production": {
       "name": "bellhop",
       "account_id": "15d29c8639fd3733b1b5486a2acfd968",
-      "routes": [{ "pattern": "blhp.app", "custom_domain": true }],
+      // The apex is a custom domain; app subdomains reach the Worker through a wildcard route
+      // (needs a proxied wildcard DNS record; Universal SSL covers *.blhp.app).
+      "routes": [
+        { "pattern": "blhp.app", "custom_domain": true },
+        { "pattern": "*.blhp.app/*", "zone_name": "blhp.app" }
+      ],
       "workers_dev": false,
       "preview_urls": false,
       "d1_databases": [
@@ -43,7 +50,7 @@
         "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
         "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
       },
-      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22" },
+      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22", "APP_DOMAIN": "blhp.app" },
       "observability": { "enabled": true }
     }
   }

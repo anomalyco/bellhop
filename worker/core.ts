@@ -15,6 +15,14 @@ export const secret = () => hex(crypto.getRandomValues(new Uint8Array(32)))
 export const sha256 = async (value: string) =>
   hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))
 export const sql = (env: Env, statement: string, ...values: unknown[]) => env.DB.prepare(statement).bind(...values)
+/** With APP_DOMAIN (production) each app lives on its own subdomain; without it (dev) under /<slug>. */
+export function appUrl(env: Env, origin: string, slug: string, path = "/") {
+  return env.APP_DOMAIN ? `https://${slug}.${env.APP_DOMAIN}${path}` : new URL(`/${slug}${path === "/" ? "" : path}`, origin).href
+}
+/** Slugs double as subdomains, so names with other meanings stay unavailable. */
+export const reservedSlugs = new Set(
+  "admin api app assets auth blog cdn dev docs help mail mcp media new settings static status support www".split(" ")
+)
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 
 type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503

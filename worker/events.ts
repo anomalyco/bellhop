@@ -1,5 +1,5 @@
 import type { Activity, Actor, App, IssueSummary, LiveEvent, TimelineItem, WebhookEventType } from "../shared/api"
-import { missing, now, sql, str } from "./core"
+import { appUrl, missing, now, sql, str } from "./core"
 import { currentActivity } from "./issues"
 import { enqueueWebhook } from "./webhooks"
 
@@ -32,7 +32,7 @@ export function emit(env: Env, ctx: Work, change: Change) {
       app,
       type,
       actor: change.actor,
-      issue: { ...issue, url: new URL(`/${app.slug}/issues/${issue.number}`, origin).href },
+      issue: { ...issue, url: appUrl(env, origin, app.slug, `/issues/${issue.number}`) },
       ...(type === "issue.updated" && { changes: change.changes ?? [] }),
       ...(type === "comment.created" && { comment: items.find((i) => i.kind === "comment")?.comment })
     })

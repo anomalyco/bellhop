@@ -15,6 +15,7 @@ import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
 import { Button, Identicon, StateIcon, StateLabel } from "../ui/primitives"
 import { relationRequest, Sidebar, type IssueActions, type RelationKind } from "./issue/Sidebar"
 import { ActivityRow, CommentBox, CommentItem, EventItem } from "./issue/Timeline"
+import { appPath } from "../lib/site"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
   return (
@@ -330,7 +331,7 @@ function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: 
                 Edit
               </Button>
             )}
-            <Link href={`/${app.slug}/new`} className="btn" data-variant="primary" data-size="small">
+            <Link href={appPath(app.slug, "/new")} className="btn" data-variant="primary" data-size="small">
               New issue
             </Link>
           </div>

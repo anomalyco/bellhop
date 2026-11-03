@@ -8,6 +8,7 @@ import { UserAvatar } from "../ui/Actor"
 import { PlusIcon } from "../ui/icons"
 import { AppLayout, Page } from "../ui/Shell"
 import { Button, Label } from "../ui/primitives"
+import { appLabel, appPath, signInHref } from "../lib/site"
 
 type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members"
 
@@ -35,9 +36,9 @@ function SettingsBody({ app, section }: { app: AppDetail; section: Section }) {
         <div className="blank">
           <h1 className="blank-title">Members only</h1>
           <p className="muted-text">Sign in with an account that belongs to this application.</p>
-          <Link href={`/?next=${encodeURIComponent(`/${app.slug}/settings`)}`} className="btn">
+          <a href={signInHref()} className="btn">
             Sign in
-          </Link>
+          </a>
         </div>
       </Page>
     )
@@ -59,7 +60,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
       <div className="settings">
         <nav className="settings-nav" aria-label="Settings" ref={nav}>
           {visible.map((s) => (
-            <Link key={s.id} href={`/${app.slug}/settings${s.id === "general" ? "" : `/${s.id}`}`} aria-current={active === s.id ? "page" : undefined}>
+            <Link key={s.id} href={appPath(app.slug, s.id === "general" ? "/settings" : `/settings/${s.id}`)} aria-current={active === s.id ? "page" : undefined}>
               {s.label}
             </Link>
           ))}
@@ -152,8 +153,8 @@ function General({ app }: { app: AppDetail }) {
       </div>
       <div className="field">
         <span className="field-label">Public page</span>
-        <a className="mono" href={`/${app.slug}`}>
-          {location.host}/{app.slug}
+        <a className="mono" href={appPath(app.slug)}>
+          {appLabel(app.slug)}
         </a>
       </div>
       <Flash error={error} />

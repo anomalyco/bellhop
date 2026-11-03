@@ -9,6 +9,7 @@ import { SettingsIcon, StatusIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Button, Label } from "../../ui/primitives"
 import { AttachmentList } from "./Timeline"
+import { appPath } from "../../lib/site"
 
 export interface IssueActions {
   setStatus(status: IssueStatus): void
@@ -154,7 +155,7 @@ export function Sidebar({ app, issue, me, actions }: { app: AppDetail; issue: Is
         {issue.labels.length ? (
           <div className="sidebar-labels">
             {issue.labels.map((l) => (
-              <Link key={l.id} href={`/${app.slug}?q=${encodeURIComponent(`is:open label:${/\s/.test(l.name) ? `"${l.name}"` : l.name}`)}`} title={l.description}>
+              <Link key={l.id} href={appPath(app.slug, `?q=${encodeURIComponent(`is:open label:${/\s/.test(l.name) ? `"${l.name}"` : l.name}`)}`)} title={l.description}>
                 <Label name={l.name} color={l.color} />
               </Link>
             ))}
@@ -176,7 +177,7 @@ export function Sidebar({ app, issue, me, actions }: { app: AppDetail; issue: Is
                   <span className="state-icon" data-state={visibleState(r.issue)}>
                     <G size={14} />
                   </span>
-                  <Link href={`/${app.slug}/issues/${r.issue.number}`} className="relation-link">
+                  <Link href={appPath(app.slug, `/issues/${r.issue.number}`)} className="relation-link">
                     {r.issue.title} <span className="mono relation-number">#{r.issue.number}</span>
                   </Link>
                   {member && (
@@ -288,7 +289,7 @@ function LabelMenu({ app, selected, onToggle }: { app: AppDetail; selected: stri
             ))}
             {shown.length === 0 && (
               <div className="menu-empty">
-                No labels. {app.role && <Link href={`/${app.slug}/settings/labels`}>Manage labels</Link>}
+                No labels. {app.role && <Link href={appPath(app.slug, "/settings/labels")}>Manage labels</Link>}
               </div>
             )}
           </div>

@@ -22,6 +22,7 @@ import {
   missing,
   now,
   owner,
+  reservedSlugs,
   rows,
   secret,
   sha256,
@@ -167,7 +168,7 @@ apps.post("/api/apps", async (c) => {
   if (!u) fail(401, "sign_in", "Sign in to create an app")
   const b = await body(c),
     slug = str(b.slug, "slug", 40)
-  if (!/^[a-z0-9-]{2,40}$/.test(slug) || ["api", "auth", "media", "mcp", "new", "settings"].includes(slug))
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(slug) || slug.length < 2 || reservedSlugs.has(slug))
     bad("Invalid or reserved slug")
   const app: App = {
     id: uid(),

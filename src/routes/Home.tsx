@@ -5,6 +5,8 @@ import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { setData, useResource } from "../lib/cache"
 import { Header, Page, useMe } from "../ui/Shell"
 import { Button, Logo } from "../ui/primitives"
+import { appLabel, appPath, isAbsolute } from "../lib/site"
+import { SiteLink } from "../ui/SiteLink"
 
 export function Home() {
   const { data: me, error } = useMe()
@@ -23,7 +25,8 @@ function SignIn() {
   const { data: config } = useResource<Config>(keys.config, api.config, 60_000)
   const search = useSearch()
   const raw = new URLSearchParams(search).get("next") ?? "/"
-  const next = raw.startsWith("/") && !raw.startsWith("//") ? raw : "/"
+  // Absolute next URLs come from app subdomains; the Worker only follows them back onto this site.
+  const next = (raw.startsWith("/") && !raw.startsWith("//")) || isAbsolute(raw) ? raw : "/"
   const [email, setEmail] = useState("")
 
   const devLogin = (e: FormEvent) => {
@@ -95,16 +98,16 @@ function Apps() {
             {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
             {apps?.length === 0 && <div className="box-row muted-text">No applications yet.</div>}
             {apps?.map((app) => (
-              <Link key={app.id} href={`/${app.slug}`} className="box-row app-row">
+              <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
                 <div className="app-row-main">
                   <div className="app-row-title">
                     <span className="issue-title">{app.name}</span>
-                    <span className="mono app-row-slug">/{app.slug}</span>
+                    <span className="mono app-row-slug">{appLabel(app.slug)}</span>
                   </div>
                   {app.description && <div className="issue-meta">{app.description}</div>}
                 </div>
                 <span className="role-badge">{app.role === "owner" ? "Owner" : "Member"}</span>
-              </Link>
+              </SiteLink>
             ))}
           </section>
           <NewApp />
@@ -153,7 +156,9 @@ function NewApp() {
       const app = await api.createApp({ name: name.trim(), slug: effectiveSlug, description: description.trim() || undefined })
       setData(keys.app(app.slug), app)
       setData<App[]>(keys.apps, (apps) => [...(apps ?? []), app].sort((a, b) => a.name.localeCompare(b.name)))
-      navigate(`/${app.slug}/settings`)
+      const settings = appPath(app.slug, "/settings")
+      if (isAbsolute(settings)) window.location.assign(settings)
+      else navigate(settings)
     } catch (err) {
       setError(err instanceof ApiFailure && err.status === 409 ? "That slug is taken." : errorMessage(err))
       setSaving(false)

@@ -11,6 +11,7 @@ import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, XIcon } from "../ui
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppLayout, Page } from "../ui/Shell"
 import { Button, Dots, Label, StateIcon } from "../ui/primitives"
+import { appPath } from "../lib/site"
 
 export function Issues({ slug }: { slug: string }) {
   return <AppLayout slug={slug} tab="issues">{(app) => <IssuesBody app={app} />}</AppLayout>
@@ -32,7 +33,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
 
   const go = (f: Filter) => {
     const next = formatQuery(f)
-    navigate(next === "is:open" ? `/${slug}` : `/${slug}?q=${encodeURIComponent(next)}`)
+    navigate(appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`))
   }
 
   useLive(
@@ -95,7 +96,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
             </button>
           )}
         </form>
-        <Link href={`/${slug}/new`} className="btn" data-variant="primary">
+        <Link href={appPath(slug, "/new")} className="btn" data-variant="primary">
           <PlusIcon />
           New issue
         </Link>
@@ -104,7 +105,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
       <section className="box">
         <div className="box-header list-header">
           <Link
-            href={`/${slug}${formatQuery({ ...filter, state: "open" }) === "is:open" ? "" : `?q=${encodeURIComponent(formatQuery({ ...filter, state: "open" }))}`}`}
+            href={appPath(slug, formatQuery({ ...filter, state: "open" }) === "is:open" ? "" : `?q=${encodeURIComponent(formatQuery({ ...filter, state: "open" }))}`)}
             className="tab-link"
             aria-current={filter.state === "open" ? "page" : undefined}
           >
@@ -112,7 +113,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
             {counts ? <span className="mono-num">{counts.open}</span> : null} Open
           </Link>
           <Link
-            href={`/${slug}?q=${encodeURIComponent(formatQuery({ ...filter, state: "closed" }))}`}
+            href={appPath(slug, `?q=${encodeURIComponent(formatQuery({ ...filter, state: "closed" }))}`)}
             className="tab-link"
             aria-current={filter.state === "closed" ? "page" : undefined}
           >
@@ -136,7 +137,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
               </>
             ) : filter.state === "open" ? (
               <>
-                No open issues. <Link href={`/${slug}/new`}>Open one</Link>
+                No open issues. <Link href={appPath(slug, "/new")}>Open one</Link>
               </>
             ) : (
               "No closed issues."
@@ -233,7 +234,7 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
 function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary; onLabel: (name: string) => void }) {
   const warm = () => prefetchIssue(slug, issue.number)
   const active = useUntil(issue.activity?.expires_at)
-  const href = `/${slug}/issues/${issue.number}`
+  const href = appPath(slug, `/issues/${issue.number}`)
   return (
     <div className="box-row issue-row">
       <StateIcon state={visibleState(issue)} />

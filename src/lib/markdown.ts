@@ -1,4 +1,5 @@
 import MarkdownIt, { type Token } from "markdown-it"
+import { appPath } from "./site"
 
 // Loaded lazily (see ui/Markdown.tsx) so the list page never pays for the parser.
 
@@ -67,7 +68,7 @@ md.core.ruler.after("linkify", "bellhop", (state) => {
         }
         const open = new state.Token("link_open", "a", 1)
         open.attrs = [
-          ["href", `/${slug}/issues/${m[2]}`],
+          ["href", appPath(slug, `/issues/${m[2]}`)],
           ["class", "issue-ref"],
         ]
         const text = new state.Token("text", "", 0)
