@@ -19,5 +19,32 @@
   "vars": {
     // Cloudflare's always-pass test key; replace per environment.
     "TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+  },
+  "env": {
+    // Build with CLOUDFLARE_ENV=production; deploy with the work account (wwrangler).
+    // Secrets: TURNSTILE_SECRET_KEY, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, COOKIE_SECRET. Never DEV_LOGIN.
+    "production": {
+      "name": "bellhop",
+      "account_id": "15d29c8639fd3733b1b5486a2acfd968",
+      "routes": [{ "pattern": "blhp.app", "custom_domain": true }],
+      "workers_dev": false,
+      "preview_urls": false,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "bellhop",
+          "database_id": "d58d04f7-4a16-462e-8524-97ca755c1cf2",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
+      "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+      "queues": {
+        "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
+        "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
+      },
+      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22" },
+      "observability": { "enabled": true }
+    }
   }
 }
