@@ -21,7 +21,7 @@ function mapActors<T>(value: T, fn: (a: Human) => Human): T {
   if (value && typeof value === "object") {
     let copy: Record<string, unknown> | undefined
     for (const [k, v] of Object.entries(value)) {
-      if (k === "system_info" || k === "fields") continue
+      if (k === "system_info" || k === "fields" || k === "details") continue
       const next = mapActors(v, fn)
       if (next !== v) {
         copy ??= Object.assign(Array.isArray(value) ? [] : {}, value) as Record<string, unknown>
@@ -41,8 +41,8 @@ export function projectActor(a: Actor, tiers?: TierMap): Actor {
 export function projectTiers<T>(value: T, tiers?: TierMap): T {
   return mapActors(value, (a) => projectActor(a, tiers) as Human)
 }
-export const tierReplacer = (tiers?: TierMap) => (_key: string, value: unknown) =>
-  human(value) ? projectActor(value, tiers) : value
+export const tierReplacer = (tiers?: TierMap) => (key: string, value: unknown) =>
+  key !== "details" && human(value) ? projectActor(value, tiers) : value
 export function actorIdsIn(value: unknown) {
   const ids = new Set<string>()
   mapActors(value, (a) => {

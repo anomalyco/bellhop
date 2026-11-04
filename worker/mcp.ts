@@ -37,6 +37,7 @@ import {
   setRequestType
 } from "./mutations"
 import { types as requestTypes } from "./request-types"
+import { requestApproval, getApproval } from "./approvals"
 import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
@@ -58,6 +59,8 @@ export const toolRoles = {
   list_request_types: "read",
   set_request_type: "triage",
   request_verification: "respond",
+  request_approval: "respond",
+  get_approval: "read",
   set_tier: "triage",
   list_mentionables: "read",
   transfer_issue: "triage",
@@ -131,6 +134,23 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool(
+    "request_approval",
+    "Ask a member to approve an action on this help desk request.",
+    {
+      number,
+      action: { ...text, pattern: "^[a-z0-9_]{1,40}$" },
+      summary: { ...text, maxLength: 300 },
+      details: { type: "object", maxProperties: 20, additionalProperties: { type: ["string", "number", "boolean"] } }
+    },
+    ["number", "action", "summary"]
+  ),
+  tool(
+    "get_approval",
+    "Read an approval. Only its requesting agent can retrieve its short-lived signed token.",
+    { id: text },
+    ["id"]
+  ),
   tool(
     "list_request_types",
     "Read this help desk’s request types, field schemas, routing and autonomy (including archived types).",
@@ -220,26 +240,25 @@ export const tools = [
     { name: text, slug: text, description: text, public: { type: "boolean" } },
     ["name", "slug"]
   ),
-  tool(
-    "list_issues",
-    `List issues by state, label, or search terms. ${replyLanguage}`,
-    {
-      sort: { type: "string", enum: ["newest", "oldest", "votes", "updated", "comments"] },
-      state: { ...text, enum: states },
-      label: text,
-      query: text,
-      limit
-    }
-  ),
+  tool("list_issues", `List issues by state, label, or search terms. ${replyLanguage}`, {
+    sort: { type: "string", enum: ["newest", "oldest", "votes", "updated", "comments"] },
+    state: { ...text, enum: states },
+    label: text,
+    query: text,
+    limit
+  }),
   tool(
     "get_issue",
     `Read an issue with its timeline, attachments, relations, and system info. ${replyLanguage}`,
     { number },
     ["number"]
   ),
-  tool("search_issues", `Search titles, bodies, and comments across open and closed issues. ${replyLanguage}`, { query: text, limit }, [
-    "query"
-  ]),
+  tool(
+    "search_issues",
+    `Search titles, bodies, and comments across open and closed issues. ${replyLanguage}`,
+    { query: text, limit },
+    ["query"]
+  ),
   tool(
     "get_metadata",
     "Read a workspace report, its system specs, context, diagnostic log attachments and fingerprint matches.",
@@ -260,7 +279,7 @@ export const tools = [
   ]),
   tool(
     "comment",
-    "Post a comment or a team-only internal note.",
+    "Post a reply or team-only note. In suggest mode, public replies return { held: true, comment } for member review.",
     { number, body: text, internal: { type: "boolean" }, metadata_id: text },
     ["number", "body"]
   ),
@@ -381,6 +400,14 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "request_approval":
+    case "get_approval":
+      if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND mode='helpdesk'", app.id).first()))
+        fail(403, "helpdesk_only", "Help desk workspace required")
+      c.header("Cache-Control", "no-store")
+      return textResult(
+        name === "request_approval" ? await requestApproval(a, n(), b) : await getApproval(a, str(b.id, "id", 64))
+      )
     case "list_request_types":
     case "set_request_type": {
       if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND mode='helpdesk'", app.id).first()))
@@ -575,8 +602,10 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
         chunks.push(btoa(String.fromCharCode(...bytes.subarray(i, i + 24576))))
       return { content: [{ type: "image", mimeType: row.mime, data: chunks.join("") }] }
     }
-    case "comment":
-      return textResult(await addComment(a, n(), b))
+    case "comment": {
+      const comment = await addComment(a, n(), b)
+      return textResult(comment.held ? { held: true, comment } : comment)
+    }
     case "edit_comment": {
       const id = str(b.comment_id, "comment_id", 64),
         num = await sql(

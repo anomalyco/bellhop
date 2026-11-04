@@ -97,6 +97,8 @@ type PolicyRow = {
   pinned: number
 }
 type CommentRow = {
+  held_at: string | null
+  sent_by: string | null
   report_logs: string
   via: Comment["via"]
   tier_bag: string | null
@@ -266,7 +268,7 @@ export class Room extends DurableObject<Env> {
             this.env,
             `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,c.via,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
       ,(SELECT json_group_array(json_object('id',l.id,'name',l.name,'size',l.size,'metadata_id',md.id)) FROM report_metadata md JOIN report_logs l ON l.metadata_id=md.id WHERE md.app_id=i.app_id AND md.comment_id=c.id AND md.issue_id=i.id) report_logs
-      FROM comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
+      ,c.held_at,c.sent_by FROM team_comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
         ) - 1
@@ -369,13 +371,15 @@ export class Room extends DurableObject<Env> {
       }
       const shape = (c: Comment) => {
         const row = current.get(c.id)
-        if (!row || !includesComment(v, !!row.internal)) return null
+        if (!row || !!row.held_at !== !!c.held || !includesComment(v, !!row.internal || !!row.held_at)) return null
         const author: Actor = JSON.parse(row.author)
         if (author.type === "member") author.role = row.role
         if (author.type === "guest") author.name ??= null
         return commentView(
           {
             ...c,
+            held: row.held_at ? { at: row.held_at } : null,
+            sent_by: row.sent_by ? JSON.parse(row.sent_by) : null,
             attachments: [
               ...c.attachments.filter((l) => !l.id.startsWith("ml_")),
               ...(v.team || actorIds(v).includes(author.id)
@@ -454,7 +458,13 @@ export class Room extends DurableObject<Env> {
               if (!c) continue
               e = { ...e, item: { kind: "comment", comment: c } }
             } else {
-              if (!v.team && (e.item.event.data.rule || ["hidden", "unhidden", "routed"].includes(e.item.event.type)))
+              if (
+                !v.team &&
+                (e.item.event.data.rule ||
+                  ["hidden", "unhidden", "routed", "approval.requested", "approval.decided"].includes(
+                    e.item.event.type
+                  ))
+              )
                 continue
               const other = relationId(e.item)
               if (other && !allowed(other)) continue

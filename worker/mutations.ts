@@ -37,6 +37,7 @@ import { attachReport, getReport } from "./report-data"
 import { requestLocale } from "./locale"
 import { contactActor } from "./contact-session"
 import { prepareForm, type FormCaller } from "./request-form"
+import { decideApproval, memberGrant, responderGrant } from "./approvals"
 import { typeGuard, requestJson, typeInfo, retireFormReplays } from "./request-types"
 
 export interface Access {
@@ -440,6 +441,53 @@ export async function addComment(
   const via = inbound ? "email" : actor.type === "agent" ? "mcp" : "web"
   const mentions = await mentionsIn(env, app.id, text, v.team)
   if (!text.trim() && !links.length && b.metadata_id === undefined) bad("A comment needs text or an attachment")
+  if (actor.type === "agent" && !internal) {
+    const [, draft] = await env.DB.batch([
+      typeGuard(env, `EXISTS(${responderGrant})`, app.id, actor.id),
+      sql(
+        env,
+        `INSERT INTO held_replies(id,issue_id,author,body,mentions,created_at,metadata_id) SELECT ?,id,?,?,?,?,? FROM suggest_issues WHERE id=? AND app_id=?`,
+        id,
+        JSON.stringify(actor),
+        text,
+        JSON.stringify(mentions),
+        at,
+        b.metadata_id === undefined ? null : str(b.metadata_id, "metadata_id", 80),
+        s.id,
+        app.id
+      ),
+      entry(env, app.id, actor, "reply.held", { type: "comment", id, number: n }),
+      ...(b.metadata_id === undefined
+        ? []
+        : [
+            sql(
+              env,
+              "INSERT INTO pending_report(id,app_id) SELECT metadata_id,? FROM held_replies WHERE id=?",
+              app.id,
+              id
+            )
+          ])
+    ])
+    if (draft!.meta.changes) {
+      const comment = findComment(await full(a, n), id)
+      emit(env, a.ctx, {
+        app,
+        origin: a.origin,
+        actor,
+        type: "issue.updated",
+        issue: s,
+        internalOnly: true,
+        liveOnly: true,
+        items: [{ kind: "comment", comment }]
+      })
+      a.ctx.waitUntil(
+        enqueueWebhooks(env, a.origin, app, actor, s, [
+          { type: "reply.held", comment: { ...comment, viewer_is_author: false } }
+        ])
+      )
+      return comment
+    }
+  }
   await env.DB.batch([
     ...(inbound
       ? [
@@ -456,6 +504,7 @@ export async function addComment(
           )
         ]
       : []),
+    ...(actor.type === "agent" && !internal ? [typeGuard(env, `EXISTS(${responderGrant})`, app.id, actor.id)] : []),
     sql(
       env,
       `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,via,locale,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,?,?,1)`,
@@ -489,6 +538,8 @@ export async function addComment(
     : []
   const report = b.metadata_id === undefined ? null : await getReport(env, app.id, b.metadata_id as string, v)
   const comment: Comment = {
+    held: null,
+    sent_by: null,
     via,
     id,
     author: actor,
@@ -751,6 +802,7 @@ async function react(a: Access, n: number, commentId: string | null, on: boolean
   if (!sees(v, gateOf(issue))) missing()
   if (c && !seesComment(v, c.hidden)) missing()
   if (c?.viewer_is_author) denied()
+  if (c?.held) bad("A held reply cannot receive reactions")
   const q = commentId
     ? sql(
         a.env,
@@ -973,6 +1025,7 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
     text = str(b.body, "body", 65536, true),
     at = now()
   if (!old.viewer_is_author) denied()
+  if (old.held) fail(409, "reply_held", "A member can edit the draft when sending it")
   if (!seesComment({ team: can(a.role, "read"), actorId: a.actor.id }, old.hidden)) missing()
   if (!text.trim() && !old.attachments.length) bad("A comment needs text or an attachment")
   if (text === old.body) return old
@@ -1004,7 +1057,10 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
     ),
     ...guestNameGuard(a),
     stillHere(a, issue.id),
-    ...(!old.internal ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)] : [])
+    ...(!old.internal ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)] : []),
+    ...(a.actor.type === "agent" && !old.internal
+      ? [typeGuard(a.env, "NOT EXISTS(SELECT 1 FROM suggest_issues WHERE id=?)", issue.id)]
+      : [])
   ])
   const latest = await full(a, n),
     comment = findComment(latest, id)
@@ -1031,6 +1087,37 @@ async function deleteComment(a: Access, n: number, id: string) {
   const issue = await full(a, n),
     c = findComment(issue, id)
   if (!c.viewer_is_author && !can(a.role, "triage")) denied()
+  if (c.held) {
+    const [, d] = await a.env.DB.batch([
+      typeGuard(a.env, `EXISTS(${memberGrant})`, a.app.id, a.actor.id),
+      sql(
+        a.env,
+        "DELETE FROM held_replies WHERE id=? AND issue_id=(SELECT id FROM issues WHERE app_id=? AND number=?)",
+        id,
+        a.app.id,
+        n
+      ),
+      entry(a.env, a.app.id, a.actor, "reply.discarded", { type: "comment", id, number: n }),
+      sql(
+        a.env,
+        "DELETE FROM webhook_deliveries WHERE app_id=? AND event='reply.held' AND json_extract(payload,'$.comment.id')=?",
+        a.app.id,
+        id
+      )
+    ])
+    if (!d!.meta.changes) missing()
+    emit(a.env, a.ctx, {
+      app: a.app,
+      actor: a.actor,
+      origin: a.origin,
+      type: "issue.updated",
+      issue: summaryOf(issue),
+      deletedComment: id,
+      internalOnly: true,
+      liveOnly: true
+    })
+    return
+  }
   const v = who(a)
   const [files, deleted] = await a.env.DB.batch<{ object_key: string }>([
     sql(
@@ -1084,6 +1171,7 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
       : null
   const q: D1PreparedStatement[] = [],
     items: TimelineItem[] = []
+  if (c?.held) bad("Send or discard the held reply instead")
   if ((c ? c.hidden : issue.hidden)?.reason === hidden?.reason) return c ?? issue
   if (c)
     q.push(
@@ -1235,6 +1323,16 @@ async function history(a: Access, n: number, id?: string) {
     roles(a)
   ])
   const result = versions.map((r) => ({ ...r, actor: parseActor(r.actor, team) }))
+  if (v.team && id) {
+    const draft = await sql(
+      a.env,
+      "SELECT h.actor,h.body,h.created_at FROM held_edits h JOIN comments c ON c.id=h.comment_id JOIN issues i ON i.id=c.issue_id WHERE i.app_id=? AND i.id=? AND h.comment_id=?",
+      a.app.id,
+      issue.id,
+      id
+    ).first<{ actor: string; body: string; created_at: string }>()
+    if (draft) result.push({ ...draft, id: "draft:" + id, title: null, actor: parseActor(draft.actor, team) })
+  }
   return v.team ? teamProjection(a.env, a.app.id, result) : result
 }
 async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block> {
@@ -1388,6 +1486,79 @@ issues.delete(path, async (c) => {
 })
 issues.get(`${path}/history`, async (c) => c.json(await history(access(c), issueNumber(c.req.param("number")))))
 const commentPath = `${path}/comments/:id`
+issues.post(`${commentPath}/send`, async (c) => {
+  requireTeam(c, "triage")
+  if (!c.var.desk) fail(403, "helpdesk_only", "Help desk workspace required")
+  const a = access(c),
+    n = issueNumber(c.req.param("number")),
+    id = c.req.param("id"),
+    b = await body(c),
+    issue = await full(a, n),
+    draft = findComment(issue, id)
+  if (!draft.held) fail(409, "not_held", "Reply is not held")
+  const text = b.body === undefined ? draft.body : str(b.body, "body", 65536),
+    at = now(),
+    edited = text !== draft.body,
+    ms = await mentionsIn(a.env, a.app.id, text, true)
+  const metadata = await sql(
+    a.env,
+    "SELECT metadata_id FROM held_replies WHERE id=? AND issue_id=?",
+    id,
+    issue.id
+  ).first<string>("metadata_id")
+  await a.env.DB.batch([
+    typeGuard(
+      a.env,
+      `EXISTS(${memberGrant}) AND EXISTS(SELECT 1 FROM held_replies h JOIN issues i ON i.id=h.issue_id WHERE i.app_id=? AND i.id=? AND h.id=? AND h.body=?)`,
+      a.app.id,
+      a.actor.id,
+      a.app.id,
+      issue.id,
+      id,
+      draft.body
+    ),
+    sql(
+      a.env,
+      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,edited_at,mentions,via,writer_version,sent_by) SELECT id,issue_id,author,?,?,?,?,?,'mcp',1,? FROM held_replies WHERE id=?`,
+      text,
+      at,
+      at,
+      edited ? at : null,
+      JSON.stringify(ms),
+      JSON.stringify(a.actor),
+      id
+    ),
+    ...(edited
+      ? [
+          sql(
+            a.env,
+            "INSERT INTO held_edits SELECT id,body,?,? FROM held_replies WHERE id=?",
+            JSON.stringify(a.actor),
+            at,
+            id
+          )
+        ]
+      : []),
+    ...attachReport(a.env, a.app.id, metadata ?? undefined, issue.id, id),
+    sql(a.env, "DELETE FROM held_replies WHERE id=?", id),
+    entry(a.env, a.app.id, a.actor, "reply.sent", { type: "comment", id, number: n }, { edited }),
+    sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)
+  ])
+  const latest = await full(a, n),
+    comment = findComment(latest, id)
+  notify(a, {
+    type: "comment.created",
+    issue: summaryOf(latest),
+    items: [{ kind: "comment", comment }],
+    mentioned: addedMentions(ms, [], a.actor)
+  })
+  return c.json(comment)
+})
+issues.post(`${path}/approvals/:id/decide`, async (c) => {
+  requireTeam(c, "triage")
+  if (!c.var.desk) fail(403, "helpdesk_only", "Help desk workspace required")
+  return c.json(await decideApproval(access(c), issueNumber(c.req.param("number")), c.req.param("id"), await body(c)))
+})
 issues.get(`${commentPath}/history`, async (c) =>
   c.json(await history(access(c), issueNumber(c.req.param("number")), c.req.param("id")))
 )

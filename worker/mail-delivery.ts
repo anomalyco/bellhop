@@ -30,6 +30,13 @@ export async function enqueueDue(env: Env) {
   )
   if (jobs.length)
     await env.MAIL.sendBatch(jobs.map((j) => ({ body: { id: j.id }, delaySeconds: Math.max(0, j.due - at) })))
+  const reviews = await rows<{ id: string }>(
+    sql(
+      env,
+      "UPDATE review_mail SET wake=unixepoch()+600 WHERE id IN(SELECT id FROM review_mail WHERE wake<=unixepoch() ORDER BY wake LIMIT 100) RETURNING id"
+    )
+  )
+  if (reviews.length) await env.MAIL.sendBatch(reviews.map((r) => ({ body: { id: "review-" + r.id } })))
 }
 type Recipient = TokenRow & {
   mode: string
@@ -45,6 +52,27 @@ type Recipient = TokenRow & {
 }
 type Item = { kind: string; description: string | null; author: string | null; internal: number }
 export async function deliverBatch(env: Env, id: string) {
+  if (id.startsWith("review-")) {
+    const key = id.slice(7),
+      r = await sql(
+        env,
+        `SELECT r.email,a.slug,a.name,a.trusted,i.number,m.kind FROM review_mail m JOIN review_recipients r ON r.user_id=m.user_id AND r.issue_id=m.issue_id JOIN issues i ON i.id=m.issue_id JOIN apps a ON a.id=i.app_id WHERE m.id=? AND (EXISTS(SELECT 1 FROM held_replies h WHERE h.id=m.ref AND h.issue_id=i.id) OR EXISTS(SELECT 1 FROM approvals p WHERE p.id=m.ref AND p.issue_id=i.id AND p.state='pending' AND p.expires>unixepoch()))`,
+        key
+      ).first<{ email: string; slug: string; name: string; trusted: number; number: number; kind: string }>()
+    if (r) {
+      const url = appUrl(env, mailOrigin(env), r.slug, `/issues/${r.number}`),
+        subject = `${r.kind === "held" ? "Reply" : "Action"} awaiting review on #${r.number}`
+      await sendMail(env, id, {
+        to: r.email,
+        fromName: workspaceSender(r.name, !!r.trusted),
+        subject,
+        text: `${subject}\n${url}`,
+        html: `<p>${esc(subject)}</p><a href="${esc(url)}">Review request</a>`
+      })
+    }
+    await sql(env, "DELETE FROM review_mail WHERE id=?", key).run()
+    return
+  }
   const [claim, recipient, items] = await env.DB.batch([
     sql(
       env,
@@ -140,6 +168,11 @@ export async function mailQueue(batch: MessageBatch<{ id: string }>, env: Env) {
       })
       if (e instanceof ProviderError && [400, 409, 413, 422].includes(e.status)) {
         // Invalid/screened content or an ambiguous idempotency conflict: never try a different key.
+        if (m.body.id.startsWith('review-')) {
+          await sql(env, 'UPDATE review_mail SET wake=9223372036854775807 WHERE id=?', m.body.id.slice(7)).run()
+          m.ack()
+          continue
+        }
         await sql(
           env,
           "UPDATE mail_batches SET wake=9223372036854775807,lease=9223372036854775807 WHERE id=?",

@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { bad, denied, fail, input, missing, sha256, type Bindings, type Ctx } from "../core"
 import * as server from "./server"
+import { consume, jwks, listApprovals } from "../approvals"
 import { enforce, clientIP } from "../rate-limits"
 import { authorize, checkHost, cors, preflightAllowed, type Auth, type Scope } from "./access"
 import { mintTicket, upgrade, revokeStream } from "./realtime"
@@ -27,6 +28,27 @@ type Route = {
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  approvalKeys: {
+    method: "GET",
+    path: "/approvals/jwks.json",
+    auth: "public",
+    response: "JWKS",
+    run: (c) => jwks(c.env)
+  },
+  consumeApproval: {
+    method: "POST",
+    path: "/approvals/:id/consume",
+    auth: "server",
+    response: "Approval",
+    run: (c, s, _b, id) => consume(c, s, id)
+  },
+  listApprovals: {
+    method: "GET",
+    path: conv + "/approvals",
+    auth: "server",
+    response: "Approvals",
+    run: (c, s, _b, id) => listApprovals(c, s, id)
+  },
   workspace: { method: "GET", path: "/workspace", auth: "widget", response: "Workspace", run: workspace },
   refreshSession: { method: "POST", path: "/session/refresh", auth: "session", response: "Session", run: refresh },
   listContacts: {
@@ -234,8 +256,9 @@ function document() {
         }))
       )
     const idempotent =
-      (r.method === "POST" && !["/realtime", "/session/refresh"].includes(r.path)) ||
-      (r.auth === "server" && r.method !== "GET")
+      name !== "consumeApproval" &&
+      ((r.method === "POST" && !["/realtime", "/session/refresh"].includes(r.path)) ||
+        (r.auth === "server" && r.method !== "GET"))
     if (idempotent) parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
     if (name === "verifyEmail" || name === "startEmail")
       parameters.push({ in: "header", name: "Challenge-Token", required: name === "verifyEmail", schema: string })
@@ -253,6 +276,7 @@ function document() {
       }
     }
     for (const [code, description] of Object.entries({
+      ...(name === "consumeApproval" ? { 409: "Already used", 410: "Pending, rejected, or expired" } : {}),
       404: "not_found: unknown host, resource not found or not owned",
       429: "rate_limited, idempotency_limit or code_limit; retry after the indicated delay",
       500: "internal_error",
@@ -398,7 +422,13 @@ export function publicApi() {
   }
   for (const r of Object.values(routes))
     api.on(r.method, r.path, async (c) => {
-      if (r.auth === "public") return c.json(document())
+      if (r.auth === "public") {
+        if (r.response === "JWKS") {
+          c.header("Cache-Control", "public, max-age=300")
+          return c.json(await jwks(c.env))
+        }
+        return c.json(document())
+      }
       if (r.auth === "ticket") return upgrade(c)
       // Malformed mint attempts pay only the ingress IP check: no D1 or key budget.
       if (r.method === "POST" && r.path.startsWith("/sessions")) {
@@ -475,6 +505,7 @@ export function publicApi() {
               (c.req.param("external_id") !== undefined
                 ? "/v1/contacts/by-external-id/" + (await sha256(c.req.param("external_id")!))
                 : pathname)
+      if (r.path === "/approvals/:id/consume") return run() // A replay must never authorize a second action.
       return (r.method === "POST" && !["/realtime", "/session/refresh"].includes(r.path)) ||
         (workspace && r.method !== "GET")
         ? replay(c, s, route, raw, run)

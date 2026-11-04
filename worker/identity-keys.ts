@@ -5,11 +5,12 @@ import { body, denied, fail, missing, now, secret, sql, str, uid, type Bindings,
 import { can } from "./permissions"
 
 const enc = new TextEncoder()
-async function wrappingKey(env: Env) {
+type KeyPurpose = "host-identity/v1" | "approval-signing/v1"
+async function wrappingKey(env: Env, purpose: KeyPurpose) {
   if (!env.COOKIE_SECRET || env.COOKIE_SECRET.length < 32) fail(503, "misconfigured", "Identity encryption unavailable")
   const material = await crypto.subtle.importKey("raw", enc.encode(env.COOKIE_SECRET), "HKDF", false, ["deriveKey"])
   return crypto.subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: enc.encode("Bellhop"), info: enc.encode("host-identity/v1") },
+    { name: "HKDF", hash: "SHA-256", salt: enc.encode("Bellhop"), info: enc.encode(purpose) },
     material,
     { name: "AES-GCM", length: 256 },
     false,
@@ -17,23 +18,31 @@ async function wrappingKey(env: Env) {
   )
 }
 const aad = (app: string, id: string) => enc.encode(JSON.stringify([app, id]))
-async function seal(env: Env, app: string, id: string, value: string) {
+export async function seal(env: Env, app: string, id: string, value: string, purpose: KeyPurpose = "host-identity/v1") {
   const iv = crypto.getRandomValues(new Uint8Array(12))
   const ciphertext = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: aad(app, id) },
-    await wrappingKey(env),
+    await wrappingKey(env, purpose),
     enc.encode(value)
   )
   return btoa(String.fromCharCode(...iv, ...new Uint8Array(ciphertext)))
 }
-export async function verifier(env: Env, app: string, id: string, cipher: string) {
+export async function unseal(env: Env, app: string, id: string, cipher: string, purpose: KeyPurpose) {
   const bytes = Uint8Array.from(atob(cipher), (x) => x.charCodeAt(0))
-  const raw = await crypto.subtle.decrypt(
+  return crypto.subtle.decrypt(
     { name: "AES-GCM", iv: bytes.subarray(0, 12), additionalData: aad(app, id) },
-    await wrappingKey(env),
+    await wrappingKey(env, purpose),
     bytes.subarray(12)
   )
-  return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["verify"])
+}
+export async function verifier(env: Env, app: string, id: string, cipher: string) {
+  return crypto.subtle.importKey(
+    "raw",
+    await unseal(env, app, id, cipher, "host-identity/v1"),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["verify"]
+  )
 }
 
 export const identityKeys = new Hono<Bindings>()
