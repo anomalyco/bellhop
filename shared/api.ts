@@ -1,8 +1,13 @@
 // The contract between the Worker (worker/) and the web app (src/). JSON over HTTP; times are ISO 8601 strings.
 //
 // Roles
-// - guest: anyone, no account. Identified by an HttpOnly `bh_guest` cookie the Worker sets on first contact.
+// - guest: anyone, no account. Identified by an HttpOnly `bh_guest` cookie the Worker sets on first contact, so
+//   one browser (one machine) is one guest. A guest picks a display name before their first post; it's kept per
+//   browser and stamped on what they write.
 //   Writing (uploads, new issues, comments) also needs the `bh_human` cookie, set by POST /api/human after Turnstile.
+// - account: signed in with Google. Posts as their account on every app (no Turnstile), whether or not they're on
+//   that app's team. Signing in claims everything this browser wrote as a guest: those posts move to the account
+//   and open pages update live (`actor.updated`).
 // - member: signed in with Google, owner or member of the application.
 // - agent: an MCP token scoped to one application (POST /mcp). Its posts carry the AI badge.
 //
@@ -10,6 +15,7 @@
 //   GET    /api/config                                   -> Config
 //   GET    /api/me                                       -> Me
 //   POST   /api/human              { token }             -> { ok: true }       Turnstile check, sets bh_human (1 hour)
+//   PUT    /api/me/guest           { name }              -> Me                 guest + human; sets the display name
 //   GET    /api/apps                                     -> App[]              member: applications I own or belong to
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
@@ -47,7 +53,8 @@
 //   POST   /mcp                                          MCP, Streamable HTTP, Authorization: Bearer <token>
 //
 // Errors: non-2xx responses carry ApiError. 401 = sign in, 403 = not allowed, 404, 409 (slug taken), 413 (too
-// large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited.
+// large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited. A guest posting without a
+// display name (none saved and no guest_name sent) gets 400 with code "name_required".
 
 export type IssueStatus = "open" | "in_progress" | "waiting" | "closed"
 /** Only set when status is "closed". */
@@ -55,10 +62,12 @@ export type CloseReason = "completed" | "not_planned" | "duplicate"
 /** Stored one way. `blocks` reads as "blocked by" from the other side; `duplicate_of` as "duplicates". */
 export type RelationType = "duplicate_of" | "related" | "blocks"
 
-/** Who wrote or did something. Guests get an identicon seeded by `id` and a handle like `guest-7f3a`. */
+/** Who wrote or did something. Guests have a handle like `guest-7f3a` and, once chosen, a display name. */
 export type Actor =
-  | { type: "guest"; id: string; handle: string }
-  | { type: "member"; id: string; name: string; avatar_url: string | null }
+  | { type: "guest"; id: string; handle: string; name: string | null }
+  // A signed-in account (the type name predates non-team accounts). `role` is its current role in this app, filled
+  // in on read; null or absent means signed in but not on the team.
+  | { type: "member"; id: string; name: string; avatar_url: string | null; role?: "owner" | "member" | null }
   | { type: "agent"; id: string; name: string }
 
 export interface ApiError {
@@ -73,7 +82,8 @@ export interface Config {
 
 export interface Me {
   user: { id: string; email: string; name: string; avatar_url: string | null } | null
-  guest: { id: string; handle: string }
+  /** `name` is the display name this browser chose (null until set); the same across apps. */
+  guest: { id: string; handle: string; name: string | null }
   /** True while the bh_human cookie is valid; otherwise run Turnstile and POST /api/human before writing. */
   human: boolean
 }
@@ -252,6 +262,8 @@ export interface NewIssue {
   /** Uploads from POST /uploads by the same guest/member, not yet attached. */
   attachment_ids?: string[]
   system_info?: SystemInfo
+  /** Guests only: sets the display name (1–40 characters) before posting, same as PUT /api/me/guest. */
+  guest_name?: string
 }
 
 export interface IssuePatch {
@@ -268,6 +280,8 @@ export interface IssuePatch {
 export interface NewComment {
   body: string
   attachment_ids?: string[]
+  /** Guests only: sets the display name (1–40 characters) before posting, same as PUT /api/me/guest. */
+  guest_name?: string
 }
 
 export interface Comment {
@@ -311,6 +325,9 @@ export type LiveEvent =
   | { type: "issue.updated"; issue: IssueSummary } // list and issue rooms
   | { type: "timeline.added"; issue_id: string; item: TimelineItem } // issue room
   | { type: "activity"; issue_id: string; activity: Activity | null } // list and issue rooms
+  // An actor changed identity: a guest renamed, or a guest's posts moved to their account on sign-in. Sent to the
+  // app room and every issue room where `previous_id` appears; clients replace that actor everywhere they show it.
+  | { type: "actor.updated"; previous_id: string; actor: Actor }
 
 // Webhooks. POST to the application's URL with JSON WebhookPayload and headers:
 //   Bellhop-Event: <type>          Bellhop-Delivery: <delivery id>

@@ -44,7 +44,7 @@ export async function loadApp(c: Ctx) {
   ).first<App>()
   if (!app) missing()
   c.set("app", app)
-  const guest = await guestActor(c.var.guestId, app.id)
+  const guest = await guestActor(c, app.id)
   c.set("appGuestId", guest.id)
   c.set("actor", app.role && c.var.user ? memberActor(c.var.user) : guest)
 }

@@ -73,7 +73,14 @@ const tools = [
 ]
 
 const textResult = (value: unknown) => ({
-  content: [{ type: "text", text: typeof value === "string" ? value : JSON.stringify(value) }]
+  content: [{
+    type: "text",
+    text: typeof value === "string" ? value : JSON.stringify(value, (key, v) =>
+      (key === "author" || key === "actor") && v?.type === "guest" && v.name
+        ? { ...v, display_name: `${v.name} (${v.handle})` }
+        : v
+    )
+  }]
 })
 function integer(v: unknown, field: string, max = Number.MAX_SAFE_INTEGER) {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > max) bad(`Invalid ${field}`)

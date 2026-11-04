@@ -23,9 +23,14 @@ type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "la
   activity: string | null
   labels: string
 }
+function normalizeActor(actor: Actor): Actor {
+  if (actor.type === "guest") actor.name ??= null
+  return actor
+}
+const parseActor = (json: string) => normalizeActor(JSON.parse(json))
 export function currentActivity(json: string | null): Activity | null {
   const activity: Activity | null = json && JSON.parse(json)
-  return activity && activity.expires_at > now() ? activity : null
+  return activity && activity.expires_at > now() ? { ...activity, actor: normalizeActor(activity.actor) } : null
 }
 function summary(r: StoredSummary): IssueSummary {
   const { id, number, title, status, close_reason, created_at, updated_at, comment_count } = r
@@ -38,8 +43,8 @@ function summary(r: StoredSummary): IssueSummary {
     created_at,
     updated_at,
     comment_count,
-    author: JSON.parse(r.author),
-    assignee: r.assignee && JSON.parse(r.assignee),
+    author: parseActor(r.author),
+    assignee: r.assignee ? parseActor(r.assignee) : null,
     activity: currentActivity(r.activity),
     labels: JSON.parse(r.labels)
   }
@@ -177,14 +182,14 @@ export async function getIssue(
   const s = summary(r),
     timeline: TimelineItem[] = []
   for (const c of comments) {
-    const author: Actor = JSON.parse(c.author)
+    const author = parseActor(c.author)
     timeline.push({
       kind: "comment",
       comment: { ...c, author, by_issue_author: author.id === s.author.id, attachments: byParent.get(c.id) ?? [] }
     })
   }
   for (const e of events)
-    timeline.push({ kind: "event", event: { ...e, actor: JSON.parse(e.actor), data: JSON.parse(e.data) } })
+    timeline.push({ kind: "event", event: { ...e, actor: parseActor(e.actor), data: JSON.parse(e.data) } })
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
   timeline.sort((a, b) => time(a).localeCompare(time(b)))
   return {

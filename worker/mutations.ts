@@ -12,7 +12,7 @@ import type {
   TimelineItem
 } from "../shared/api"
 import { assignee, labelCols, selectedLabels } from "./apps"
-import { allowWrite } from "./auth"
+import { allowWrite, postBody } from "./auth"
 import { bad, body, choice, denied, ids, input, member, missing, now, rows, sql, str, uid } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { emit, setActivity } from "./events"
@@ -26,6 +26,7 @@ export interface Access {
   app: Pick<App, "id" | "slug" | "name">
   actor: Actor
   guestId?: string
+  guestHash?: string
   privileged: boolean
   origin: string
 }
@@ -36,11 +37,18 @@ function access(c: Ctx): Access {
     app: c.var.app,
     actor: c.var.actor,
     guestId: c.var.appGuestId,
+    guestHash: c.var.guestHash,
     privileged: !!c.var.app.role,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
 const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, a.privileged, a.guestId)
+// A rename can commit between loading the request actor and writing its JSON snapshot. Usually this
+// matches no rows; a stale guest would violate NOT NULL and roll back the entire post or event.
+function guestNameGuard(a: Access) {
+  return a.actor.type === "guest" ? [sql(a.env,
+    "UPDATE guest_names SET name=NULL WHERE guest_hash=? AND name IS NOT ?", a.guestHash, a.actor.name)] : []
+}
 function notify(a: Access, payload: Pick<Change, "type" | "issue" | "items" | "changes">) {
   emit(a.env, a.ctx, { app: a.app, origin: a.origin, actor: a.actor, ...payload })
 }
@@ -118,7 +126,8 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       at,
       app.id
     ),
-    ...attach(env, id, null, b.attachment_ids)
+    ...attach(env, id, null, b.attachment_ids),
+    ...guestNameGuard(a)
   ]
   const items: TimelineItem[] = []
   for (const label of labels) {
@@ -142,6 +151,7 @@ export async function addComment(a: Access, n: number, b: Record<string, unknown
   await env.DB.batch([
     sql(env, "INSERT INTO comments VALUES(?,?,?,?,?,?)", id, s.id, JSON.stringify(actor), text, at, at),
     ...links,
+    ...guestNameGuard(a),
     sql(env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, s.id)
   ])
   const files = links.length
@@ -254,7 +264,7 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       issue.id
     )
   )
-  await env.DB.batch(q)
+  await env.DB.batch([...q, ...guestNameGuard(a)])
   const next = await full(a, n)
   notify(a, { type: "issue.updated", issue: summaryOf(next), changes, items })
   return next
@@ -331,8 +341,8 @@ issues.get(base, async (c) => {
   return c.json(await listIssues(c.env, c.var.app.id, { state, label, cursor, query: q }))
 })
 issues.post(base, async (c) => {
-  await allowWrite(c)
-  return c.json(await createIssue(access(c), await body(c)), 201)
+  const b = await postBody(c)
+  return c.json(await createIssue(access(c), b), 201)
 })
 issues.get(path, async (c) => c.json(await full(access(c), issueNumber(c.req.param("number")))))
 issues.patch(path, async (c) => {
@@ -340,8 +350,8 @@ issues.patch(path, async (c) => {
   return c.json(await updateIssue(access(c), issueNumber(c.req.param("number")), await body(c)))
 })
 issues.post(`${path}/comments`, async (c) => {
-  await allowWrite(c)
-  return c.json(await addComment(access(c), issueNumber(c.req.param("number")), await body(c)), 201)
+  const b = await postBody(c)
+  return c.json(await addComment(access(c), issueNumber(c.req.param("number")), b), 201)
 })
 issues.post(`${path}/relations`, async (c) => {
   member(c)

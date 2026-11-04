@@ -1,11 +1,11 @@
 import { Hono } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
 import type { Actor, Config, Me } from "../shared/api"
-import { bad, body, denied, email, fail, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
+import { bad, body, denied, email, fail, hex, missing, now, rows, secret, sha256, sql, str, uid } from "./core"
 import type { Bindings, Ctx, User } from "./core"
 
 const month = 30 * 86400
-/** `shared` cookies (the session) cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
+/** Shared cookies cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
 function cookie(c: Ctx, name: string, value: string, maxAge: number, shared = false) {
   const host = new URL(c.req.url).hostname
   const local = ["localhost", "127.0.0.1"].includes(host)
@@ -16,15 +16,71 @@ function cookie(c: Ctx, name: string, value: string, maxAge: number, shared = fa
 const onSite = (site: string, host: string) => host === site || host.endsWith(`.${site}`)
 export function firstContact(c: Ctx) {
   let id = getCookie(c, "bh_guest")
+  // An older host-only cookie can shadow the shared cookie on a previously visited app.
+  // Both have Path=/; browsers send the older one first. Don't delete a distinct legacy identity.
+  const site = c.env.APP_DOMAIN
+  if (id && site?.includes(".") && onSite(site, new URL(c.req.url).hostname)) {
+    const ids = [...(c.req.header("Cookie") ?? "").matchAll(/(?:^|;\s*)bh_guest=([0-9a-f]{64})(?=;|$)/g)]
+    if (ids.length > 1) id = ids.at(-1)![1]
+  }
   if (!id || !/^[0-9a-f]{64}$/.test(id)) {
     id = secret()
-    cookie(c, "bh_guest", id, 365 * 86400)
+    cookie(c, "bh_guest", id, 365 * 86400, true)
   }
   c.set("guestId", id)
 }
-export async function guestActor(id: string, scope: string): Promise<Extract<Actor, { type: "guest" }>> {
-  const hash = (await sha256(`${id}:${scope}`)).slice(0, 32)
-  return { type: "guest", id: hash, handle: "guest-" + hash.slice(0, 4) }
+const scopedGuestId = async (id: string, scope: string) => (await sha256(`${id}:${scope}`)).slice(0, 32)
+async function guestName(c: Ctx) {
+  const hash = c.var.guestHash ?? await sha256(c.var.guestId)
+  c.set("guestHash", hash)
+  return sql(c.env, "SELECT name FROM guest_names WHERE guest_hash=?", hash).first<string>("name")
+}
+export async function guestActor(c: Ctx, scope: string): Promise<Extract<Actor, { type: "guest" }>> {
+  const [id, name] = await Promise.all([scopedGuestId(c.var.guestId, scope), guestName(c)])
+  return { type: "guest", id, handle: "guest-" + id.slice(0, 4), name }
+}
+async function saveGuestName(c: Ctx, value: unknown, previous: string | null) {
+  if (typeof value !== "string" || /\p{Cc}/u.test(value)) bad("Invalid guest name")
+  const name = value.trim()
+  if (!name || [...name].length > 40) bad("Guest names must be 1–40 characters")
+  if (previous === name) return name
+
+  const statements: D1PreparedStatement[] = []
+  // No cross-app identifier is stored on posts. Derive possible scoped IDs for populated apps;
+  // update via the actor-ID indexes, in groups rather than one D1 call per app or per post.
+  let after = "", populated = 0
+  for (;;) {
+    const apps = await rows<{ id: string }>(
+      sql(c.env, "SELECT id FROM apps WHERE issue_seq>0 AND id>? ORDER BY id LIMIT 128", after)
+    )
+    if (!apps.length) break
+    populated += apps.length
+    const ids = JSON.stringify(await Promise.all(apps.map((app) => scopedGuestId(c.var.guestId, app.id))))
+    for (const [table, column] of [["issues", "author"], ["comments", "author"], ["issue_events", "actor"]]) {
+      statements.push(sql(c.env,
+        `UPDATE ${table} SET ${column}=json_set(${column},'$.name',?)
+         WHERE json_extract(${column},'$.id') IN (SELECT value FROM json_each(?))
+         AND json_extract(${column},'$.type')='guest'`, name, ids))
+    }
+    if (apps.length < 128) break
+    after = apps[apps.length - 1]!.id
+  }
+  // If an app gained its very first issue during discovery it could contain a guest ID we missed.
+  // A NOT NULL conflict aborts the whole rename, exactly like the issue revision guard.
+  statements.unshift(sql(c.env,
+    `INSERT INTO guest_names(guest_hash,name,updated_at)
+     VALUES(?,CASE WHEN (SELECT count(*) FROM apps WHERE issue_seq>0)=? THEN ? END,?)
+     ON CONFLICT(guest_hash) DO UPDATE SET name=excluded.name,updated_at=excluded.updated_at`,
+    c.var.guestHash, populated, name, now()))
+  await c.env.DB.batch(statements)
+
+  // Promote a pre-profile, host-only cookie when its owner chooses a shared name.
+  const site = c.env.APP_DOMAIN
+  if (site?.includes(".") && onSite(site, new URL(c.req.url).hostname)) {
+    if (getCookie(c, "bh_guest") === c.var.guestId) cookie(c, "bh_guest", "", 0)
+    cookie(c, "bh_guest", c.var.guestId, 365 * 86400, true)
+  }
+  return name
 }
 export async function currentUser(c: Ctx) {
   const token = getCookie(c, "bh_session")
@@ -58,8 +114,22 @@ export async function human(c: Ctx): Promise<boolean> {
   const sig = Uint8Array.from(match[2]!.match(/../g)!, (h) => parseInt(h, 16))
   return crypto.subtle.verify("HMAC", await signingKey(c), sig, proofData(c.var.guestId, match[1]!))
 }
+async function requireHuman(c: Ctx) {
+  if (!(await human(c))) fail(428, "human_required", "Complete the human check to continue")
+}
 export async function allowWrite(c: Ctx) {
-  if (!c.var.app.role && !(await human(c))) fail(428, "human_required", "Complete the human check to continue")
+  if (!c.var.app.role) await requireHuman(c)
+}
+export async function postBody(c: Ctx) {
+  await allowWrite(c)
+  const b = await body(c),
+    actor = c.var.actor
+  if (actor.type === "guest") {
+    const name = b.guest_name === undefined ? actor.name : await saveGuestName(c, b.guest_name, actor.name)
+    if (!name) fail(400, "name_required", "Choose a display name before posting")
+    c.set("actor", { ...actor, name })
+  }
+  return b
 }
 function nextPath(c: Ctx, input?: string) {
   const origin = new URL(c.req.url).origin
@@ -121,9 +191,17 @@ auth.get("/api/config", (c) =>
     dev_login: c.env.DEV_LOGIN === "1"
   } satisfies Config)
 )
-auth.get("/api/me", async (c) => {
-  const { id, handle } = await guestActor(c.var.guestId, "me")
-  return c.json({ user: c.var.user, guest: { id, handle }, human: await human(c) } satisfies Me)
+async function me(c: Ctx): Promise<Me> {
+  const [{ id, handle, name }, verified] = await Promise.all([guestActor(c, "me"), human(c)])
+  return { user: c.var.user, guest: { id, handle, name }, human: verified }
+}
+auth.get("/api/me", async (c) => c.json(await me(c)))
+auth.put("/api/me/guest", async (c) => {
+  if (c.var.user) bad("Signed-in users cannot set a guest profile here")
+  await requireHuman(c)
+  const b = await body(c)
+  await saveGuestName(c, b.name, await guestName(c))
+  return c.json(await me(c))
 })
 auth.post("/api/human", async (c) => {
   const token = str((await body(c)).token, "token", 2048)

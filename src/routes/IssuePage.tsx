@@ -172,7 +172,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const viewerActor: Actor | null = me
     ? me.user
       ? { type: "member", id: me.user.id, name: me.user.name, avatar_url: me.user.avatar_url }
-      : { type: "guest", id: me.guest.id, handle: me.guest.handle }
+      : { type: "guest", id: me.guest.id, handle: me.guest.handle, name: me.guest.name ?? null }
     : null
 
   return (

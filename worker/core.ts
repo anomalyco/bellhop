@@ -4,7 +4,7 @@ import type { Actor, App, Me } from "../shared/api"
 export type User = NonNullable<Me["user"]>
 export type Bindings = {
   Bindings: Env
-  Variables: { guestId: string; appGuestId: string; user: User | null; app: App; actor: Actor }
+  Variables: { guestId: string; guestHash: string; appGuestId: string; user: User | null; app: App; actor: Actor }
 }
 export type Ctx = Context<Bindings>
 export const now = () => new Date().toISOString()
@@ -98,5 +98,7 @@ export function dbError(e: Error): ApiFailure | null {
   if (message.includes("UNIQUE constraint failed")) return new ApiFailure(409, "conflict", "Already exists")
   if (message.includes("NOT NULL constraint failed: issues.revision"))
     return new ApiFailure(409, "conflict", "Issue changed; refresh and try again")
+  if (message.includes("NOT NULL constraint failed: guest_names.name"))
+    return new ApiFailure(409, "conflict", "Guest profile changed; try again")
   return null
 }
