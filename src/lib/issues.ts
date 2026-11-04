@@ -2,6 +2,7 @@ import type { Activity, Actor, AppDetail, Comment, Issue, IssueList, IssueRef, I
 import type { VisibleState } from "../ui/primitives"
 import { api, keys } from "./api"
 import { entries, load, peek, setData, updateAll } from "./cache"
+import { t } from "../i18n/core"
 
 export interface Filter {
   state: "open" | "closed"
@@ -54,7 +55,7 @@ export function visibleState(issue: Pick<IssueRef, "status" | "close_reason">): 
 }
 
 export function stateText(issue: Pick<IssueRef, "status" | "close_reason">) {
-  if (issue.status === "closed" && issue.close_reason === "duplicate") return "Duplicate"
+  if (issue.status === "closed" && issue.close_reason === "duplicate") return t("state.duplicate")
   return undefined
 }
 

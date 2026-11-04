@@ -9,6 +9,7 @@ import { reduced, SPRING_25 } from "../lib/motion"
 import { signInHref } from "../lib/site"
 import { Button } from "./primitives"
 import { SiteLink } from "./SiteLink"
+import { tr, useT } from "../i18n/core"
 
 /** Phones get a bottom sheet; wider screens a popover growing out of the control that asked. */
 const sheetQuery = "(max-width: 640px)"
@@ -56,6 +57,7 @@ export function useNamePrompt() {
 }
 
 function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
+  const t = useT()
   const me = peek<Me>(keys.me)
   const saved = me && !me.user ? me.guest.name : null
   const [sheet] = useState(() => window.matchMedia(sheetQuery).matches)
@@ -146,8 +148,8 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
   useEffect(() => {
     if (!closing) return
     if (refocus.current) ask.anchor?.focus({ preventScroll: true })
-    const t = window.setTimeout(onRemove, reduced() ? 150 : sheet ? 200 : SPRING_25)
-    return () => window.clearTimeout(t)
+    const timer = window.setTimeout(onRemove, reduced() ? 150 : sheet ? 200 : SPRING_25)
+    return () => window.clearTimeout(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closing])
 
@@ -177,7 +179,7 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
     if (busy) return
     const value = name.trim()
     if (!validGuestName(value)) {
-      setError(value ? "Up to 40 characters." : "Add a name so people know who wrote it.")
+      setError(value ? t("name.tooLong") : t("name.required"))
       input.current?.focus()
       return
     }
@@ -198,8 +200,8 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
     }
   }
 
-  const title = ask.mode === "edit" ? "Change your name" : "What should we call you?"
-  const action = ask.mode === "edit" ? "Save" : (ask.action ?? "Post")
+  const title = ask.mode === "edit" ? t("name.change") : t("name.ask")
+  const action = ask.mode === "edit" ? t("common.save") : (ask.action ?? t("composer.post"))
   return createPortal(
     <>
       {sheet && <div className="menu-scrim name-prompt-scrim" data-closing={closing || undefined} aria-hidden="true" />}
@@ -219,18 +221,18 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
           <h2 id="name-prompt-title" className="name-prompt-title">
             {title}
           </h2>
-          <p className="name-prompt-text">Shown next to what you post. This browser remembers it.</p>
+          <p className="name-prompt-text">{t("name.text")}</p>
         </div>
         <div className="input" data-size="large" data-invalid={error ? "" : undefined}>
           <input
             ref={input}
-            aria-label="Your name"
+            aria-label={t("name.yours")}
             value={name}
             onChange={(e) => {
               setName(e.target.value)
               if (error) setError(null)
             }}
-            placeholder="Your name"
+            placeholder={t("name.yours")}
             autoComplete="name"
             enterKeyHint="send"
             maxLength={40}
@@ -247,15 +249,15 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
         <div className="name-prompt-foot">
           {ask.mode === "first" && (
             <SiteLink href={signInHref()} className="name-prompt-signin">
-              Sign in instead
+              {t("common.signInInstead")}
             </SiteLink>
           )}
           <span className="spacer" />
           <Button variant="invisible" onClick={() => close(null)}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" disabled={busy}>
-            {busy && ask.mode === "edit" ? "Saving…" : action}
+            {busy && ask.mode === "edit" ? t("common.saving") : action}
           </Button>
         </div>
       </form>
@@ -266,20 +268,21 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
 
 /** "Posting as Alex · Change name · Sign in" for guests (or "Posting as a guest" before they've chosen a name). */
 export function GuestLine({ name, onChange, placeholder }: { name: string | null; onChange: (anchor: HTMLElement) => void; placeholder?: boolean }): ReactNode {
+  const t = useT()
   return (
     <div className="guest-bar" aria-hidden={placeholder || undefined} data-placeholder={placeholder || undefined}>
-      <span className="guest-bar-text">{name ? <>Posting as <strong>{name}</strong></> : "Posting as a guest"}</span>
+      <span className="guest-bar-text">{name ? tr("guest.postingAs", { name: <strong>{name}</strong> }) : t("guest.postingAsGuest")}</span>
       {name && (
         <>
           <span aria-hidden="true">·</span>
           <button type="button" className="guest-bar-link" onClick={(e) => onChange(e.currentTarget)} tabIndex={placeholder ? -1 : undefined}>
-            Change name
+            {t("guest.changeName")}
           </button>
         </>
       )}
       <span aria-hidden="true">·</span>
       <SiteLink href={signInHref()} className="guest-bar-link" tabIndex={placeholder ? -1 : undefined}>
-        Sign in
+        {t("common.signIn")}
       </SiteLink>
     </div>
   )

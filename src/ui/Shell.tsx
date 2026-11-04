@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { useLocation } from "wouter"
 import type { AppDetail, Me } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
@@ -11,8 +11,14 @@ import { Menu, MenuHeader, MenuItem } from "./Menu"
 import { AppIcon, Counter, Logo } from "./primitives"
 import { AppLink, SiteLink } from "./SiteLink"
 import { InvitationDot } from "./features/Invitations"
+import { LanguageButton, LanguageItems } from "./LanguageMenu"
+import { useLocale } from "../i18n"
+import { t, useT } from "../i18n/core"
+import { LANGUAGE_NAMES } from "../i18n/locale"
+import { ChevronDownIcon } from "./icons"
 import "../lib/motion"
 import "../styles/motion.css"
+import "../styles/i18n.css"
 
 export function useMe() {
   return useResource<Me>(keys.me, api.me, 30_000)
@@ -54,18 +60,28 @@ function writeCachedApp(app: AppDetail) {
 function UserMenu() {
   const { data: me } = useMe()
   const [, navigate] = useLocation()
+  const t = useT()
+  const locale = useLocale()
+  // The account menu shows its links, or (after "Language") the language list in the same panel
+  const [view, setView] = useState<"main" | "language">("main")
   if (!me) {
     return (
-      <span className="btn header-user-placeholder" data-variant="default" aria-hidden="true">
-        Sign in
+      <span className="header-user header-user-placeholder" aria-hidden="true">
+        <span className="btn header-language" data-variant="ghost-muted" data-icon-only="" />
+        <span className="btn" data-variant="default">
+          {t("common.signIn")}
+        </span>
       </span>
     )
   }
   if (!me.user) {
     return (
-      <SiteLink href={signInHref()} className="btn" data-variant="default">
-        Sign in
-      </SiteLink>
+      <span className="header-user">
+        <LanguageButton />
+        <SiteLink href={signInHref()} className="btn" data-variant="default">
+          {t("common.signIn")}
+        </SiteLink>
+      </span>
     )
   }
   const user = me.user
@@ -73,49 +89,65 @@ function UserMenu() {
     <Menu
       align="end"
       width={256}
+      onOpenChange={(open) => open && setView("main")}
       trigger={(props) => (
-        <button type="button" className="header-avatar" aria-label="Account" {...props}>
+        <button type="button" className="header-avatar" aria-label={t("header.account")} {...props}>
           <UserAvatar user={user} size={24} />
           <InvitationDot />
         </button>
       )}
     >
-      {(close) => (
-        <>
-          <MenuHeader>
-            <strong>{user.name}</strong>
-            <span className="menu-item-description">{user.email}</span>
-          </MenuHeader>
-          {(
-            [
-              ["Your workspaces", homeUrl("/workspaces")],
-              ["Agents", homeUrl("/agents")],
-              ["Your reports", homeUrl("/reports")],
-              ["Notifications", homeUrl("/settings/notifications")],
-            ] as const
-          ).map(([label, href]) => (
+      {(close) =>
+        view === "language" ? (
+          <>
+            <MenuItem onSelect={() => setView("main")}>
+              <span className="menu-back">
+                <ChevronDownIcon size={12} />
+                {t("menu.language")}
+              </span>
+            </MenuItem>
+            <LanguageItems onDone={close} />
+          </>
+        ) : (
+          <>
+            <MenuHeader>
+              <strong>{user.name}</strong>
+              <span className="menu-item-description">{user.email}</span>
+            </MenuHeader>
+            {(
+              [
+                [t("menu.workspaces"), homeUrl("/workspaces")],
+                [t("menu.agents"), homeUrl("/agents")],
+                [t("menu.reports"), homeUrl("/reports")],
+                [t("menu.notifications"), homeUrl("/settings/notifications")],
+              ] as const
+            ).map(([label, href]) => (
+              <MenuItem
+                key={href}
+                onSelect={() => {
+                  close()
+                  if (isAbsolute(href)) window.location.assign(href)
+                  else navigate(href)
+                }}
+              >
+                {label}
+              </MenuItem>
+            ))}
+            <MenuItem onSelect={() => setView("language")} description={LANGUAGE_NAMES[locale]}>
+              {t("menu.language")}
+            </MenuItem>
             <MenuItem
-              key={href}
-              onSelect={() => {
+              onSelect={async () => {
                 close()
-                if (isAbsolute(href)) window.location.assign(href)
-                else navigate(href)
+                await api.logout()
+                window.location.assign("/")
               }}
             >
-              {label}
+              {t("menu.signOut")}
             </MenuItem>
-          ))}
-          <MenuItem
-            onSelect={async () => {
-              close()
-              await api.logout()
-              window.location.assign("/")
-            }}
-          >
-            Sign out
-          </MenuItem>
-        </>
-      )}
+          </>
+        )
+      }
     </Menu>
   )
 }
@@ -141,6 +173,7 @@ export function Header({
   pendingApp?: boolean
   crumb?: Crumb
 }) {
+  useT()
   const detail = app && "counts" in app ? app : null
   const iconUrl = detail ? detail.icon_url : app && "icon_url" in app ? app.icon_url : null
   const openCount = detail ? detail.counts.open : app && "open" in app ? app.open : null
@@ -152,7 +185,7 @@ export function Header({
           // Inside a workspace it is the product: its icon and name lead to its issues. Until the name is known
           // (nothing cached) only the icon shows; the name, crumb and nav arrive together, so nothing moves.
           <div className="header-crumbs">
-            <AppLink slug={workspace} href={appPath(workspace)} className="header-home" aria-label={app ? undefined : "Issues"}>
+            <AppLink slug={workspace} href={appPath(workspace)} className="header-home" aria-label={app ? undefined : t("header.issues")}>
               <AppIcon src={iconUrl} size={22} />
               {app && <span className="header-app">{app.name}</span>}
             </AppLink>
@@ -168,7 +201,7 @@ export function Header({
             )}
           </div>
         ) : (
-          <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
+          <SiteLink href={homeUrl()} className="header-logo" aria-label={t("header.home")}>
             <Logo size={22} />
           </SiteLink>
         )}
@@ -177,17 +210,17 @@ export function Header({
             {/* The Issues tab renders before the app loads (its count held invisibly) so the header doesn't shift */}
             <AppLink slug={app.slug} href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
               <IssueOpenIcon size={14} />
-              Issues <Counter>{openCount !== null ? openCount : <span className="counter-pending">0</span>}</Counter>
+              {t("header.issues")} <Counter>{openCount !== null ? openCount : <span className="counter-pending">0</span>}</Counter>
             </AppLink>
             {detail?.role && (
               <AppLink
                 slug={app.slug}
                 href={appPath(app.slug, "/settings")}
                 aria-current={tab === "settings" ? "page" : undefined}
-                aria-label="Settings"
+                aria-label={t("header.settings")}
               >
                 <SettingsIcon size={14} />
-                <span className="nav-label">Settings</span>
+                <span className="nav-label">{t("header.settings")}</span>
               </AppLink>
             )}
           </nav>
@@ -248,14 +281,15 @@ export function AppLayout({
 }
 
 export function ErrorPage({ error }: { error: unknown }) {
+  useT()
   const notFound = error instanceof ApiFailure && error.status === 404
   return (
     <Page>
       <div className="blank">
-        <h1 className="blank-title">{notFound ? "Not found" : "Something went wrong"}</h1>
-        <p className="muted-text">{notFound ? "This page doesn't exist or was removed." : errorMessage(error)}</p>
+        <h1 className="blank-title">{notFound ? t("error.notFound") : t("error.generic")}</h1>
+        <p className="muted-text">{notFound ? t("error.notFoundText") : errorMessage(error)}</p>
         <SiteLink href={homeUrl()} className="btn">
-          Go home
+          {t("error.goHome")}
         </SiteLink>
       </div>
     </Page>

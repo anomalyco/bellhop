@@ -19,8 +19,10 @@ import { AppLayout, Page, useMe } from "../ui/Shell"
 import { AppLink } from "../ui/SiteLink"
 import { MetadataBlocked, MetadataPanel, MetadataMatches } from "../ui/features/ReportMetadata"
 import { SimilarIssues } from "../ui/features/SimilarIssues"
+import { useT } from "../i18n/core"
 
 export function NewIssue({ slug }: { slug: string }) {
+  const t = useT()
   useEffect(() => {
     void loadMarkdown()
   }, [])
@@ -28,10 +30,10 @@ export function NewIssue({ slug }: { slug: string }) {
     <AppLayout
       slug={slug}
       tab="issues"
-      crumb={{ label: "New issue", href: appPath(slug, "/new") }}
+      crumb={{ label: t("new.title"), href: appPath(slug, "/new") }}
       loading={
         <Page narrow>
-          <h1 className="page-title">New issue</h1>
+          <h1 className="page-title">{t("new.title")}</h1>
           <div className="skeleton" style={{ width: "100%", height: 180 }} />
         </Page>
       }
@@ -58,9 +60,10 @@ function WithMetadata({ app, id }: { app: AppDetail; id: string }) {
 }
 
 function FormLoading() {
+  const t = useT()
   return (
     <Page narrow>
-      <h1 className="page-title">New issue</h1>
+      <h1 className="page-title">{t("new.title")}</h1>
       <div className="skeleton" style={{ width: "100%", height: 180 }} />
     </Page>
   )
@@ -79,30 +82,32 @@ function Form({ app, metadata }: { app: AppDetail; metadata?: ReportMetadata }) 
 }
 
 function TemplatePicker({ app, templates }: { app: AppDetail; templates: Template[] }) {
+  const t = useT()
   return (
     <Page narrow>
-      <h1 className="page-title">New issue</h1>
+      <h1 className="page-title">{t("new.title")}</h1>
       <section className="box">
-        {templates.map((t) => (
-          <div key={t.id} className="box-row template-row">
+        {templates.map((tpl) => (
+          <div key={tpl.id} className="box-row template-row">
             <div className="template-row-main">
-              <div className="template-row-name">{t.name}</div>
-              {t.description && <div className="issue-meta">{t.description}</div>}
+              <div className="template-row-name">{tpl.name}</div>
+              {tpl.description && <div className="issue-meta">{tpl.description}</div>}
             </div>
-            <AppLink slug={app.slug} href={appPath(app.slug, `/new?template=${encodeURIComponent(t.id)}`)} className="btn" data-variant="primary" data-size="small">
-              Get started
+            <AppLink slug={app.slug} href={appPath(app.slug, `/new?template=${encodeURIComponent(tpl.id)}`)} className="btn" data-variant="primary" data-size="small">
+              {t("new.getStarted")}
             </AppLink>
           </div>
         ))}
       </section>
       <p className="template-blank">
-        <AppLink slug={app.slug} href={appPath(app.slug, "/new?template=")}>Open a blank issue</AppLink>
+        <AppLink slug={app.slug} href={appPath(app.slug, "/new?template=")}>{t("new.blank")}</AppLink>
       </p>
     </Page>
   )
 }
 
 function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetail; template?: Template; metadata?: ReportMetadata }) {
+  const t = useT()
   const [, navigate] = useLocation()
   const member = !!app.role
   const { data: me } = useMe()
@@ -140,7 +145,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
     if (!title.trim() || busy || submitting) return
     let guestName = askedName
     if (guest && !guest.name && !guestName) {
-      const name = await ask({ anchor: submitButton.current, mode: "first", action: "Submit issue" })
+      const name = await ask({ anchor: submitButton.current, mode: "first", action: t("new.submitAction") })
       if (!name) return
       guestName = name
     }
@@ -167,7 +172,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
       if (err instanceof ApiFailure && err.code === "name_required" && !askedName) {
         // The server has no name for this browser after all: ask now and submit again.
         setGuestNameLocally(null)
-        const name = await ask({ anchor: submitButton.current, mode: "first", action: "Submit issue" })
+        const name = await ask({ anchor: submitButton.current, mode: "first", action: t("new.submitAction") })
         if (name) await submit(undefined, name)
       } else setError(errorMessage(err))
     }
@@ -176,14 +181,14 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
   return (
     <Page narrow>
       <h1 className="page-title">
-        New issue
+        {t("new.title")}
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
       {metadata && metadata.matches.length > 0 && <MetadataMatches app={app} metadata={metadata} />}
       <form className="issue-form" onSubmit={submit}>
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
-            Title
+            {t("field.title")}
           </label>
           <SimilarIssues slug={app.slug} title={title} exclude={metadata?.matches.map((m) => m.number)}>
             <div className="input" data-size="large">
@@ -191,7 +196,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
                 id="issue-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Title"
+                placeholder={t("field.title")}
                 autoFocus={!template?.title && !metadata?.title}
                 required
                 maxLength={256}
@@ -201,7 +206,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           </SimilarIssues>
         </div>
         <div className="field">
-          <span className="field-label">Description</span>
+          <span className="field-label">{t("field.description")}</span>
           <Editor
             slug={app.slug}
             value={body}
@@ -211,15 +216,15 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
             onAttachment={(a) => setAttachments((list) => [...list, a])}
             onSubmit={submit}
             onBusyChange={setBusy}
-            placeholder="Describe what happened, what you expected and how to reproduce it. Paste or drop screenshots and videos."
+            placeholder={t("new.descriptionPlaceholder")}
             minHeight={220}
-            label="Description"
+            label={t("field.description")}
           />
         </div>
 
         {labels.length > 0 && (
           <div className="form-labels">
-            <span className="muted-text">Labels</span>
+            <span className="muted-text">{t("new.labels")}</span>
             {labels.map((l) => (
               <Label key={l.id} name={l.name} color={l.color} />
             ))}
@@ -241,15 +246,15 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           <div className="sysinfo-toggle">
             <label className="checkbox">
               <input type="checkbox" checked={sendInfo} onChange={(e) => setSendInfo(e.target.checked)} />
-              Attach system info
+              {t("new.attachInfo")}
             </label>
             <button type="button" className="link-button" onClick={() => setShowInfo((s) => !s)} aria-expanded={showInfo}>
-              {showInfo ? "Hide details" : "Show what's sent"}
+              {showInfo ? t("new.hideDetails") : t("new.showSent")}
             </button>
             {showInfo && sendInfo && (
               <div className="sysinfo-preview">
-                {!info && <div className="muted-text">Collecting…</div>}
-                {info && Object.keys(info).length === 0 && <div className="muted-text">Nothing left to send.</div>}
+                {!info && <div className="muted-text">{t("new.collecting")}</div>}
+                {info && Object.keys(info).length === 0 && <div className="muted-text">{t("diag.nothingLeft")}</div>}
                 {info &&
                   Object.entries(info).map(([k, v]) => (
                     <div key={k} className="kv-row">
@@ -258,8 +263,8 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
                       <button
                         type="button"
                         className="kv-remove"
-                        aria-label={`Don't send ${k}`}
-                        title="Don't send"
+                        aria-label={t("diag.dontSendItem", { name: k })}
+                        title={t("diag.dontSend")}
                         onClick={() =>
                           setInfo((i) => {
                             if (!i) return i
@@ -274,7 +279,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
                   ))}
               </div>
             )}
-            {showInfo && !sendInfo && <div className="muted-text">System info won't be attached.</div>}
+            {showInfo && !sendInfo && <div className="muted-text">{t("new.infoOff")}</div>}
           </div>
         )}
 
@@ -283,15 +288,15 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
             <input id="issue-private" type="checkbox" checked={isPrivate} onChange={(e) => setPrivate(e.target.checked)} />
             <span className="visibility-text">
               <span className="visibility-title">
-                <LockIcon size={12} /> Private
+                <LockIcon size={12} /> {t("new.private")}
               </span>
-              <span className="visibility-hint">Only the team and {member ? "the reporter" : "you"} can see it. Otherwise anyone with the link can.</span>
+              <span className="visibility-hint">{member ? t("new.privateHintMember") : t("new.privateHintYou")}</span>
             </span>
           </label>
         ) : (
           visibility.default === "private" && (
             <p className="issue-private-note">
-              <LockIcon size={12} /> Issues here are private: only the team and you can see them.
+              <LockIcon size={12} /> {t("new.privateNote")}
             </p>
           )
         )}
@@ -307,10 +312,10 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           )}
           <span className="spacer" />
           <AppLink slug={app.slug} href={appPath(app.slug)} className="btn" data-variant="invisible">
-            Cancel
+            {t("common.cancel")}
           </AppLink>
           <Button ref={submitButton} type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>
-            {submitting ? "Submitting…" : busy ? "Uploading…" : "Submit new issue"}
+            {submitting ? t("new.submitting") : busy ? t("composer.uploading") : t("new.submit")}
           </Button>
         </div>
       </form>

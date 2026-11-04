@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react"
 import { jacketPath, jacketTransform } from "./mark"
 import { StatusIcon } from "./icons"
+import { t, useT } from "../i18n/core"
 
 /** primary: OpenCode's "submit" button, flat. default: "neutral". invisible: ghost. ghost-muted: a quieter ghost for
  *  toolbars and row actions. */
@@ -49,15 +50,27 @@ export function Counter({ children }: { children: ReactNode }) {
 
 export type VisibleState = "open" | "in_progress" | "waiting" | "closed" | "not_planned"
 
-const stateText: Record<VisibleState, string> = {
-  open: "Open",
-  in_progress: "In progress",
-  waiting: "Waiting on reporter",
-  closed: "Closed",
-  not_planned: "Not planned",
+/** Each state's name in the active language (read at render). */
+export const stateText: Record<VisibleState, string> = {
+  get open() {
+    return t("state.open")
+  },
+  get in_progress() {
+    return t("state.in_progress")
+  },
+  get waiting() {
+    return t("state.waiting")
+  },
+  get closed() {
+    return t("state.closed")
+  },
+  get not_planned() {
+    return t("state.not_planned")
+  },
 }
 
 export function StateLabel({ state, size, text }: { state: VisibleState; size?: "small"; text?: string }) {
+  useT()
   const Glyph = StatusIcon[state]
   return (
     <span className="state" data-state={state} data-size={size}>
@@ -95,7 +108,7 @@ export function Label({ name, color }: { name: string; color: string }) {
 }
 
 export function AiBadge() {
-  return <span className="ai-badge">AI</span>
+  return <span className="ai-badge">{t("actor.ai")}</span>
 }
 
 /** FNV-1a, enough to spread ids over the avatar palette. */

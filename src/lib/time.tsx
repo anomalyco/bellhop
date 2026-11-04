@@ -1,4 +1,6 @@
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from "react"
+import { getLocale, useLocale } from "../i18n"
+import { t } from "../i18n/core"
 
 // The server's clock, as far as this page knows: boot data carries the server time, so relative times read the
 // same as on the server even when this device's clock is off.
@@ -32,25 +34,43 @@ function subscribe(listener: () => void) {
   }
 }
 
-const short = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" })
-const long = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
-const full = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+// Formatters in the active language, made once per language
+const formats = new Map<string, { short: Intl.DateTimeFormat; long: Intl.DateTimeFormat; full: Intl.DateTimeFormat; rel: Intl.RelativeTimeFormat }>()
+function formatsFor(locale: string) {
+  let f = formats.get(locale)
+  if (!f) {
+    f = {
+      short: new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" }),
+      long: new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", year: "numeric" }),
+      full: new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" }),
+      // English reads "5m ago"; other languages use their short forms ("vor 5 Min.", "5分前")
+      rel: new Intl.RelativeTimeFormat(locale, { style: locale === "en" ? "narrow" : "short", numeric: "always" }),
+    }
+    formats.set(locale, f)
+  }
+  return f
+}
+
+/** A date and time in full, in the active language ("Nov 4, 2026, 3:12 PM"). */
+export const fullDate = (iso: string) => formatsFor(getLocale()).full.format(new Date(iso))
 
 export function relative(iso: string, now = clockNow()) {
   const date = new Date(iso)
+  const f = formatsFor(getLocale())
   const s = Math.max(0, (now - date.getTime()) / 1000)
-  if (s < 45) return "just now"
-  if (s < 3600) return `${Math.max(1, Math.round(s / 60))}m ago`
-  if (s < 86400) return `${Math.round(s / 3600)}h ago`
-  if (s < 86400 * 30) return `${Math.round(s / 86400)}d ago`
-  return `on ${(date.getFullYear() === new Date(now).getFullYear() ? short : long).format(date)}`
+  if (s < 45) return t("time.justNow")
+  if (s < 3600) return f.rel.format(-Math.max(1, Math.round(s / 60)), "minute")
+  if (s < 86400) return f.rel.format(-Math.round(s / 3600), "hour")
+  if (s < 86400 * 30) return f.rel.format(-Math.round(s / 86400), "day")
+  return t("time.onDate", { date: (date.getFullYear() === new Date(now).getFullYear() ? f.short : f.long).format(date) })
 }
 
 export const Time = memo(function Time({ iso }: { iso: string }) {
   const now = useSyncExternalStore(subscribe, () => minute)
+  const locale = useLocale()
   // A freshly mounted time should not lag the shared minute tick.
   const [mountedAt] = useState(clockNow)
-  const title = useMemo(() => full.format(new Date(iso)), [iso])
+  const title = useMemo(() => formatsFor(locale).full.format(new Date(iso)), [iso, locale])
   return (
     <time className="time" dateTime={iso} title={title}>
       {relative(iso, Math.max(now, mountedAt))}

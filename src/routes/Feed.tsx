@@ -17,6 +17,8 @@ import { NoClosed, NoOpen, NoPublicWorkspaces, NoResults } from "../ui/onboardin
 import { IssueRow, SearchBox, SkeletonRows } from "./Issues"
 import { FilterMenu } from "../ui/features/FilterMenu"
 import "../styles/feed.css"
+import { useT } from "../i18n/core"
+import { formatNumber } from "../i18n"
 
 export { feedKey }
 export const fetchFeed = (f: Pick<Filter, "state" | "text">, cursor?: string) => api.feed({ state: f.state, q: f.text || undefined, cursor })
@@ -33,6 +35,7 @@ const byActivity = (a: FeedIssue, b: FeedIssue) => Date.parse(b.updated_at) - Da
  * your workspaces (signed in) and the public ones; on narrow screens the rail follows the feed.
  */
 export function Feed() {
+  const t = useT()
   const { data: me } = useMe()
   const signedIn = !!me?.user
   const search = useSearch()
@@ -150,22 +153,22 @@ export function Feed() {
           <div className="feed-main">
             {/* Held invisible until the counts arrive, so the tabs don't widen under the reader */}
             <div className="list-toolbar feed-toolbar" data-loading={!counts || undefined}>
-              <nav className="segmented list-states" aria-label="Issue state">
+              <nav className="segmented list-states" aria-label={t("list.states")}>
                 <SiteLink href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
                   <StateIcon state="open" size={14} />
-                  Open
-                  <span className="segmented-count">{counts?.open ?? 0}</span>
+                  {t("state.open")}
+                  <span className="segmented-count">{formatNumber(counts?.open ?? 0)}</span>
                 </SiteLink>
                 <SiteLink href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
                   <StateIcon state="closed" size={14} />
-                  Closed
-                  <span className="segmented-count">{counts?.closed ?? 0}</span>
+                  {t("state.closed")}
+                  <span className="segmented-count">{formatNumber(counts?.closed ?? 0)}</span>
                 </SiteLink>
               </nav>
               <SearchBox
                 query={q}
                 filtered={searching}
-                placeholder="Search public issues"
+                placeholder={t("feed.search")}
                 onSubmit={(draft) => go(parseQuery(draft))}
                 onClear={() => go({ ...filter, text: "" })}
               />
@@ -179,7 +182,7 @@ export function Feed() {
               {newer.length > 0 && (
                 <button type="button" className="feed-newer" onClick={showNewer}>
                   <ArrowUpIcon size={14} />
-                  {newer.length === 1 ? "1 newer issue" : `${newer.length} newer issues`}
+                  {t("feed.newer", { count: newer.length })}
                 </button>
               )}
             </div>
@@ -187,7 +190,7 @@ export function Feed() {
             <section
               ref={listEl}
               className="issue-list"
-              aria-label="Public issues"
+              aria-label={t("feed.label")}
               data-pending={pending || undefined}
               data-reveal={(hadSkeleton.current && !!shown) || undefined}
               aria-busy={pending || !shown || undefined}
@@ -209,7 +212,7 @@ export function Feed() {
               {shown?.next_cursor && (
                 <div className="list-footer">
                   <Button onClick={loadMore} disabled={loadingMore || pending}>
-                    {loadingMore ? "Loading…" : "Load more"}
+                    {loadingMore ? t("common.loading") : t("common.loadMore")}
                   </Button>
                   {moreError && <span className="field-error">{moreError}</span>}
                 </div>
@@ -234,6 +237,7 @@ function applyFeedActivity(issueId: string, activity: Activity | null) {
  * and after the feed, so on narrow screens (where it follows the feed) it never pushes anything around.
  */
 function Rail({ feedReady }: { feedReady: boolean }) {
+  const t = useT()
   const { data: me } = useMe()
   const signedIn = !!me?.user
   const { data: mine, error: mineError } = useResource<App[]>(signedIn ? keys.apps : null, api.apps, 10_000)
@@ -244,24 +248,24 @@ function Rail({ feedReady }: { feedReady: boolean }) {
   const yours = mine ?? []
   const publicApps = open ?? []
   return (
-    <aside className="feed-rail" aria-label="Workspaces">
+    <aside className="feed-rail" aria-label={t("rail.label")}>
       <RailReports />
       {signedIn && (
         <section className="rail-section">
           <div className="rail-head">
-            <h2 className="rail-title">Your workspaces</h2>
+            <h2 className="rail-title">{t("rail.yours")}</h2>
             {yours.length > 0 && (
               <SiteLink href="/new" className="btn" data-variant="default" data-size="small">
                 <PlusIcon size={12} />
-                New workspace
+                {t("rail.newWorkspace")}
               </SiteLink>
             )}
           </div>
           {yours.length === 0 ? (
             <div className="rail-prompt">
-              <p className="rail-prompt-text">Create your workspace: a support site for your product, answered by your agent.</p>
+              <p className="rail-prompt-text">{t("rail.createPrompt")}</p>
               <SiteLink href="/new" className="btn" data-variant="default" data-size="small">
-                Create your workspace
+                {t("rail.create")}
               </SiteLink>
             </div>
           ) : (
@@ -277,7 +281,7 @@ function Rail({ feedReady }: { feedReady: boolean }) {
               {yours.length > 6 && (
                 <li>
                   <SiteLink href="/workspaces" className="rail-row rail-more">
-                    All {yours.length} workspaces
+                    {t("rail.all", { count: yours.length })}
                   </SiteLink>
                 </li>
               )}
@@ -289,7 +293,7 @@ function Rail({ feedReady }: { feedReady: boolean }) {
       {publicApps.length > 0 && (
         <section className="rail-section">
           <div className="rail-head">
-            <h2 className="rail-title">Public workspaces</h2>
+            <h2 className="rail-title">{t("rail.public")}</h2>
           </div>
           <ul className="rail-list">
             {publicApps.map((app) => (
@@ -297,8 +301,8 @@ function Rail({ feedReady }: { feedReady: boolean }) {
                 <AppLink slug={app.slug} href={appPath(app.slug)} className="rail-row" title={app.description || undefined}>
                   <AppIcon src={app.icon_url} size={20} />
                   <span className="rail-name">{app.name}</span>
-                  <span className="rail-count" aria-label={`${app.open_count} open`}>
-                    {app.open_count}
+                  <span className="rail-count" aria-label={t("rail.openCount", { count: app.open_count })}>
+                    {formatNumber(app.open_count)}
                   </span>
                 </AppLink>
               </li>

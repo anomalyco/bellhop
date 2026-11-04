@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from "react"
 import { Button } from "../primitives"
 import "../../styles/onboarding.css"
+import { useT } from "../../i18n/core"
 
 /** Copies `text`; says "Copied" for a moment. `onCopied` runs after a successful copy. */
-export function CopyButton({ text, label = "Copy", onCopied }: { text: string; label?: string; onCopied?: () => void }) {
+export function CopyButton({ text, label, onCopied }: { text: string; label?: string; onCopied?: () => void }) {
+  const t = useT()
+  label ??= t("common.copy")
   const [copied, setCopied] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   useEffect(() => () => clearTimeout(timer.current), [])
@@ -19,10 +22,10 @@ export function CopyButton({ text, label = "Copy", onCopied }: { text: string; l
     timer.current = setTimeout(() => setCopied(false), 1500)
   }
   return (
-    <Button size="small" onClick={copy} aria-label={copied ? "Copied" : `${label}: ${text}`}>
+    <Button size="small" onClick={copy} aria-label={copied ? t("common.copied") : t("copy.label", { label, text })}>
       <span className="copy-label" data-copied={copied || undefined}>
         <span>{label}</span>
-        <span aria-hidden="true">Copied</span>
+        <span aria-hidden="true">{t("common.copied")}</span>
       </span>
     </Button>
   )

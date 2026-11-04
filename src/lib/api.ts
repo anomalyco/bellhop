@@ -51,6 +51,7 @@ import type {
 } from "../../shared/api"
 import { load, peek } from "./cache"
 import { runHumanCheck } from "./human"
+import { t } from "../i18n/core"
 
 export class ApiFailure extends Error {
   constructor(
@@ -66,11 +67,11 @@ export class ApiFailure extends Error {
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiFailure) {
-    if (error.status === 501) return "This isn't available yet."
+    if (error.status === 501) return t("error.unavailable")
     return error.message
   }
-  if (error instanceof Error && error.name === "TypeError") return "Can't reach Bellhop. Check your connection."
-  return error instanceof Error ? error.message : "Something went wrong."
+  if (error instanceof Error && error.name === "TypeError") return t("error.offline")
+  return error instanceof Error ? error.message : t("error.unknown")
 }
 
 /** An error response as an ApiFailure (for callers that read the response themselves, like /api/page). */

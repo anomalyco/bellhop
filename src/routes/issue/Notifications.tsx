@@ -6,13 +6,14 @@ import { ensureHuman } from "../../lib/human"
 import { Button } from "../../ui/primitives"
 import type { IssueModel } from "./model"
 import "../../styles/features.css"
+import { tKey, tr, useT, type PlainKey } from "../../i18n/core"
 
-const reasonText: Record<NonNullable<IssueSubscription["reason"]>, string> = {
-  opened: "You're following because you opened this.",
-  replied: "You're following because you replied.",
-  mentioned: "You're following because you were mentioned.",
-  assigned: "You're following because it's assigned to you.",
-  manual: "You're following this issue.",
+const reasonText: Record<NonNullable<IssueSubscription["reason"]>, PlainKey> = {
+  opened: "notify.opened",
+  replied: "notify.replied",
+  mentioned: "notify.mentioned",
+  assigned: "notify.assigned",
+  manual: "notify.manual",
 }
 
 /**
@@ -21,6 +22,7 @@ const reasonText: Record<NonNullable<IssueSubscription["reason"]>, string> = {
  * slot, so loading and switching states never move the sidebar.
  */
 export function NotificationsSection({ model }: { model: IssueModel }) {
+  const t = useT()
   const { app, issue, me } = model
   const slug = app.slug
   const key = keys.subscription(slug, issue.number)
@@ -71,7 +73,7 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
     e.preventDefault()
     const address = email.trim()
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(address)) {
-      setFailure("Enter an email address.")
+      setFailure(t("notify.enterEmail"))
       input.current?.focus()
       return
     }
@@ -92,16 +94,16 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
     body = sub.subscribed ? (
       <>
         <Button size="small" className="btn notify-button" onClick={() => void put(false)} disabled={busy}>
-          Unfollow
+          {t("notify.unfollow")}
         </Button>
-        <p className="notify-text">{reasonText[sub.reason ?? "manual"]}</p>
+        <p className="notify-text">{tKey(reasonText[sub.reason ?? "manual"])}</p>
       </>
     ) : (
       <>
         <Button size="small" className="btn notify-button" onClick={() => void put(true)} disabled={busy}>
-          Follow
+          {t("notify.follow")}
         </Button>
-        <p className="notify-text">Get an email when someone replies or the status changes.</p>
+        <p className="notify-text">{t("notify.followText")}</p>
       </>
     )
   } else if (asking) {
@@ -118,20 +120,20 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
                 setFailure(null)
               }}
               placeholder="you@example.com"
-              aria-label="Your email"
+              aria-label={t("notify.yourEmail")}
               autoComplete="email"
               enterKeyHint="send"
               aria-invalid={!!failure}
             />
           </div>
           <Button type="submit" size="small" variant="primary" disabled={busy}>
-            {busy ? "Sending…" : "Send link"}
+            {busy ? t("notify.sending") : t("notify.sendLink")}
           </Button>
         </div>
         <p className="notify-text">
-          We'll send a link to confirm it's yours.{" "}
+          {t("notify.confirmText")}{" "}
           <button type="button" className="link-button notify-cancel" onClick={() => (setAsking(false), setFailure(null))}>
-            Cancel
+            {t("common.cancel")}
           </button>
         </p>
       </form>
@@ -139,11 +141,11 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
   } else if (sub.pending) {
     body = (
       <>
-        <p className="notify-status">Check your inbox to confirm</p>
+        <p className="notify-status">{t("notify.checkInbox")}</p>
         <p className="notify-text">
-          We sent a link to <span className="notify-address">{sub.email}</span>.{" "}
+          {tr("notify.sentTo", { email: <span className="notify-address">{sub.email}</span> })}{" "}
           <button type="button" className="link-button" onClick={() => void put(false)} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </button>
         </p>
       </>
@@ -152,20 +154,18 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
     body = (
       <>
         <Button size="small" className="btn notify-button" onClick={() => void put(false)} disabled={busy}>
-          Stop emails
+          {t("notify.stop")}
         </Button>
-        <p className="notify-text">
-          Replies go to <span className="notify-address">{sub.email}</span>.
-        </p>
+        <p className="notify-text">{tr("notify.repliesTo", { email: <span className="notify-address">{sub.email}</span> })}</p>
       </>
     )
   } else {
     body = (
       <>
         <Button size="small" className="btn notify-button" onClick={() => setAsking(true)}>
-          Get replies by email
+          {t("notify.byEmail")}
         </Button>
-        <p className="notify-text">No account needed. Stop any time.</p>
+        <p className="notify-text">{t("notify.byEmailText")}</p>
       </>
     )
   }
@@ -173,7 +173,7 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
   return (
     <section className="side-section notify">
       <div className="side-head">
-        <h3>Notifications</h3>
+        <h3>{t("notify.title")}</h3>
       </div>
       <div className="notify-body" aria-live="polite">
         {body}

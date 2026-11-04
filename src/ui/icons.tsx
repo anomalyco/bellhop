@@ -211,6 +211,13 @@ export const SettingsIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const GlobeIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="6.25" />
+    <path d="M1.75 8h12.5M8 1.75c1.7 1.75 2.5 3.8 2.5 6.25S9.7 12.5 8 14.25M8 1.75C6.3 3.5 5.5 5.55 5.5 8s.8 4.5 2.5 6.25" />
+  </Icon>
+)
+
 export const StatusIcon = {
   open: IssueOpenIcon,
   in_progress: IssueProgressIcon,

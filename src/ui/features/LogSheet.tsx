@@ -5,6 +5,7 @@ import { formatSize } from "../../lib/upload"
 import { SearchIcon, XIcon } from "../icons"
 import { Button } from "../primitives"
 import "../../styles/features.css"
+import { useT } from "../../i18n/core"
 
 /** Past this the viewer shows the start of the file and offers the rest as a download. */
 const shownLimit = 2 * 1024 * 1024
@@ -14,6 +15,7 @@ const shownLimit = 2 * 1024 * 1024
  * centred panel on wide screens, a bottom sheet on phones. Escape or the scrim closes it.
  */
 export function LogSheet({ log, onClose }: { log: Attachment; onClose: () => void }) {
+  const t = useT()
   const [text, setText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [query, setQuery] = useState("")
@@ -24,11 +26,11 @@ export function LogSheet({ log, onClose }: { log: Attachment; onClose: () => voi
     let live = true
     fetch(log.url, { credentials: "same-origin" })
       .then(async (res) => {
-        if (!res.ok) throw new Error(res.status === 404 ? "This log is no longer available." : `Couldn't load the log (${res.status}).`)
+        if (!res.ok) throw new Error(res.status === 404 ? t("log.gone") : t("log.failedStatus", { status: res.status }))
         return res.text()
       })
-      .then((t) => live && setText(t))
-      .catch((e: unknown) => live && setError(e instanceof Error && e.name !== "TypeError" ? e.message : "Couldn't load the log."))
+      .then((body) => live && setText(body))
+      .catch((e: unknown) => live && setError(e instanceof Error && e.name !== "TypeError" ? e.message : t("log.failed")))
     return () => {
       live = false
     }
@@ -77,9 +79,9 @@ export function LogSheet({ log, onClose }: { log: Attachment; onClose: () => voi
             <span className="mono log-size">{formatSize(log.size)}</span>
             <span className="spacer" />
             <a className="btn log-download" data-variant="invisible" data-size="small" href={log.url} download={log.name}>
-              Download
+              {t("log.download")}
             </a>
-            <Button iconOnly size="small" variant="ghost-muted" aria-label="Close" icon={<XIcon size={14} />} onClick={onClose} />
+            <Button iconOnly size="small" variant="ghost-muted" aria-label={t("common.close")} icon={<XIcon size={14} />} onClick={onClose} />
           </div>
           <div className="log-search-row">
             <div className="input log-search">
@@ -89,21 +91,21 @@ export function LogSheet({ log, onClose }: { log: Attachment; onClose: () => voi
                 type="search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search this log"
-                aria-label="Search this log"
+                placeholder={t("log.search")}
+                aria-label={t("log.search")}
                 spellCheck={false}
                 autoComplete="off"
               />
             </div>
             <span className="log-count" aria-live="polite">
-              {matches ? `${matches.length} ${matches.length === 1 ? "line" : "lines"}` : text !== null ? `${lines.length} ${lines.length === 1 ? "line" : "lines"}` : ""}
+              {matches ? t("log.lines", { count: matches.length }) : text !== null ? t("log.lines", { count: lines.length }) : ""}
             </span>
           </div>
         </header>
-        <div className="log-body" tabIndex={0} aria-label={`${log.name} contents`}>
+        <div className="log-body" tabIndex={0} aria-label={t("log.contents", { name: log.name })}>
           {error && <p className="log-note">{error}</p>}
-          {!error && text === null && <p className="log-note">Loading…</p>}
-          {text !== null && text.length === 0 && <p className="log-note">This log is empty.</p>}
+          {!error && text === null && <p className="log-note">{t("common.loading")}</p>}
+          {text !== null && text.length === 0 && <p className="log-note">{t("log.empty")}</p>}
           {text !== null && text.length > 0 && (
             <pre className="log-text" style={{ ["--gutter" as string]: `${digits + 1}ch` }}>
               {matches
@@ -111,10 +113,10 @@ export function LogSheet({ log, onClose }: { log: Attachment; onClose: () => voi
                 : lines.map((l, i) => <Line key={i} n={i + 1} text={l} />)}
             </pre>
           )}
-          {matches?.length === 0 && <p className="log-note">No lines match “{query.trim()}”.</p>}
+          {matches?.length === 0 && <p className="log-note">{t("log.noMatch", { query: query.trim() })}</p>}
           {text !== null && text.length > shownLimit && (
             <p className="log-note">
-              Showing the first {formatSize(shownLimit)} of {formatSize(text.length)}. Download it for the rest.
+              {t("log.truncated", { shown: formatSize(shownLimit), total: formatSize(text.length) })}
             </p>
           )}
         </div>

@@ -9,6 +9,7 @@ import { StatusIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Button } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
+import { t, tKey } from "../../i18n/core"
 
 type Trigger = Parameters<typeof Menu>[0]["trigger"]
 
@@ -22,13 +23,14 @@ export interface IssueActions {
 
 export type RelationKind = "duplicate_of" | "duplicated_by" | "related" | "blocks" | "blocked_by"
 
-export const relationKinds: { kind: RelationKind; label: string }[] = [
-  { kind: "duplicate_of", label: "Duplicate of" },
-  { kind: "duplicated_by", label: "Duplicated by" },
-  { kind: "related", label: "Related" },
-  { kind: "blocks", label: "Blocks" },
-  { kind: "blocked_by", label: "Blocked by" },
-]
+export const relationKinds: { kind: RelationKind; readonly label: string }[] = (["duplicate_of", "duplicated_by", "related", "blocks", "blocked_by"] as const).map(
+  (kind) => ({
+    kind,
+    get label() {
+      return tKey(`relation.${kind}`)
+    },
+  }),
+)
 
 export function relationKind(r: Relation): RelationKind {
   if (r.type === "related") return "related"
@@ -52,11 +54,17 @@ export function relationRequest(kind: RelationKind): { type: RelationType; outgo
   }
 }
 
-export const statusOptions: { status: IssueStatus; label: string; description: string }[] = [
-  { status: "open", label: "Open", description: "Not started yet" },
-  { status: "in_progress", label: "In progress", description: "Someone is working on it" },
-  { status: "waiting", label: "Waiting on reporter", description: "Needs more information" },
-]
+export const statusOptions: { status: IssueStatus; readonly label: string; readonly description: string }[] = (["open", "in_progress", "waiting"] as const).map(
+  (status) => ({
+    status,
+    get label() {
+      return tKey(`state.${status}`)
+    },
+    get description() {
+      return tKey(`status.${status}Text`)
+    },
+  }),
+)
 
 export function StatusMenu({ issue, onSet, trigger }: { issue: Issue; onSet: (s: IssueStatus) => void; trigger: Trigger }) {
   return (
@@ -85,7 +93,7 @@ export function RelationList({ app, issue, onRemove }: { app: AppDetail; issue: 
   const groups = relationKinds
     .map((k) => ({ ...k, items: issue.relations.filter((r) => relationKind(r) === k.kind) }))
     .filter((g) => g.items.length)
-  if (!groups.length) return <div className="sidebar-empty">None yet</div>
+  if (!groups.length) return <div className="sidebar-empty">{t("side.noneYet")}</div>
   return (
     <>
       {groups.map((g) => (
@@ -102,7 +110,7 @@ export function RelationList({ app, issue, onRemove }: { app: AppDetail; issue: 
                   {r.issue.title} <span className="mono relation-number">#{r.issue.number}</span>
                 </AppLink>
                 {onRemove && (
-                  <button type="button" className="relation-remove" aria-label={`Remove relation to #${r.issue.number}`} onClick={() => onRemove(r)}>
+                  <button type="button" className="relation-remove" aria-label={t("relation.remove", { number: String(r.issue.number) })} onClick={() => onRemove(r)}>
                     <XIcon size={12} />
                   </button>
                 )}
@@ -116,7 +124,7 @@ export function RelationList({ app, issue, onRemove }: { app: AppDetail; issue: 
 }
 
 export function SystemInfoList({ info }: { info: SystemInfo | "hidden" }) {
-  if (info === "hidden") return <div className="sidebar-empty">Attached. Only members can see it.</div>
+  if (info === "hidden") return <div className="sidebar-empty">{t("sysinfo.hidden")}</div>
   return (
     <dl className="sysinfo">
       {Object.entries(info).map(([k, v]) => (
@@ -150,11 +158,11 @@ export function AssignMenu({ app, issue, onAssign, trigger }: { app: AppDetail; 
                 onAssign(null)
               }}
             >
-              Unassign {actorName(issue.assignee)}
+              {t("assign.unassign", { name: actorName(issue.assignee) })}
             </MenuItem>
           )}
-          {!members && !failed && <div className="menu-empty">Loading…</div>}
-          {failed && <div className="menu-empty">Couldn't load members.</div>}
+          {!members && !failed && <div className="menu-empty">{t("common.loading")}</div>}
+          {failed && <div className="menu-empty">{t("assign.failed")}</div>}
           {members
             ?.filter((m) => m.joined)
             .map((m) => {
@@ -188,7 +196,7 @@ export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail
         <>
           <div className="menu-filter">
             <div className="input" data-size="small">
-              <input placeholder="Filter labels" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter labels" />
+              <input placeholder={t("list.filterLabels")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("list.filterLabels")} />
             </div>
           </div>
           <div className="menu-scroll">
@@ -200,7 +208,7 @@ export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail
             ))}
             {shown.length === 0 && (
               <div className="menu-empty">
-                No labels. {app.role && <AppLink slug={app.slug} href={appPath(app.slug, "/settings/labels")}>Manage labels</AppLink>}
+                {t("labels.none")} {app.role && <AppLink slug={app.slug} href={appPath(app.slug, "/settings/labels")}>{t("labels.manage")}</AppLink>}
               </div>
             )}
           </div>
@@ -218,7 +226,7 @@ export function RelationForm({ onAdd, onDone }: { onAdd: (kind: RelationKind, nu
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     const n = Number(number.replace(/^#/, ""))
-    if (!Number.isInteger(n) || n < 1) return setError("Enter an issue number.")
+    if (!Number.isInteger(n) || n < 1) return setError(t("relation.enterNumber"))
     setSaving(true)
     setError(null)
     try {
@@ -226,7 +234,7 @@ export function RelationForm({ onAdd, onDone }: { onAdd: (kind: RelationKind, nu
       setNumber("")
       onDone?.()
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't add that relationship.")
+      setError(err instanceof Error ? err.message : t("relation.failed"))
     } finally {
       setSaving(false)
     }
@@ -234,7 +242,7 @@ export function RelationForm({ onAdd, onDone }: { onAdd: (kind: RelationKind, nu
   return (
     <form className="relation-form" onSubmit={submit}>
       <label className="field-label" htmlFor="relation-kind">
-        Relationship
+        {t("relation.label")}
       </label>
       <select id="relation-kind" className="select" value={kind} onChange={(e) => setKind(e.target.value as RelationKind)}>
         {relationKinds.map((k) => (
@@ -244,7 +252,7 @@ export function RelationForm({ onAdd, onDone }: { onAdd: (kind: RelationKind, nu
         ))}
       </select>
       <label className="field-label" htmlFor="relation-number">
-        Issue
+        {t("relation.issue")}
       </label>
       <div className="input" data-size="small">
         <span className="input-prefix mono">#</span>
@@ -252,7 +260,7 @@ export function RelationForm({ onAdd, onDone }: { onAdd: (kind: RelationKind, nu
       </div>
       {error && <p className="field-error">{error}</p>}
       <Button type="submit" size="small" variant="primary" disabled={saving}>
-        {saving ? "Adding…" : "Add"}
+        {saving ? t("relation.adding") : t("relation.add")}
       </Button>
     </form>
   )

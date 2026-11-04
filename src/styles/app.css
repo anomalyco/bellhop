@@ -1260,13 +1260,15 @@ a.box-row:hover {
   padding-bottom: 16px;
   border-bottom: 1px solid var(--border-muted);
 }
+/* The actions move under the title rather than squeeze it below 140 px (long button labels in some languages) */
 .report-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 12px;
 }
 .report-title {
-  flex: 1;
+  flex: 1 1 140px;
   min-width: 0;
   margin: 0;
   font-family: var(--font-display);
@@ -2426,11 +2428,15 @@ button.prop:hover,
   .page {
     padding: 16px 16px 48px;
   }
+  /* The tabs share their line only with New issue, so a long language's tabs don't fight the filter buttons below */
   .list-toolbar {
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "states . new"
-      "search search label";
+      "states states new"
+      "search label label";
+  }
+  .list-states {
+    justify-self: start;
   }
   .issue-list {
     margin: 0 -8px;
@@ -2451,6 +2457,13 @@ button.prop:hover,
   }
   .report-head .report-new {
     display: none;
+  }
+  /* The byline wraps rather than cut off "1 viewing" */
+  .report-by {
+    align-items: flex-start;
+  }
+  .report-by > span {
+    white-space: normal;
   }
   .group-msg {
     padding-left: 0;

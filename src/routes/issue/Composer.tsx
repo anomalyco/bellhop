@@ -16,12 +16,17 @@ import { Menu, MenuItem } from "../../ui/Menu"
 import { GuestLine, useNamePrompt } from "../../ui/NamePrompt"
 import { Button, StateIcon } from "../../ui/primitives"
 import type { IssueModel } from "./model"
+import { tKey, useT } from "../../i18n/core"
 
-const closeOptions: { reason: CloseReason; label: string; description: string }[] = [
-  { reason: "completed", label: "Close as completed", description: "Done, closed, fixed, resolved" },
-  { reason: "not_planned", label: "Close as not planned", description: "Won't fix, can't reproduce, stale" },
-  { reason: "duplicate", label: "Close as duplicate", description: "Duplicate of another issue" },
-]
+const closeOptions: { reason: CloseReason; readonly label: string; readonly description: string }[] = (["completed", "not_planned", "duplicate"] as const).map((reason) => ({
+  reason,
+  get label() {
+    return tKey(`close.${reason}`)
+  },
+  get description() {
+    return tKey(`close.${reason}Text`)
+  },
+}))
 
 const sendKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵"
 
@@ -82,6 +87,7 @@ function useDock() {
  * you?"), in a prompt growing from the button they pressed, and the name goes along with that post.
  */
 export function Composer({ model }: { model: IssueModel }) {
+  const t = useT()
   const { app, issue, me, member, onStatus, onDuplicate } = model
   const guest = me && !me.user ? me.guest : null
   // Known on the first paint from the local cache; undefined on a first visit until /api/me answers, when the line
@@ -114,7 +120,7 @@ export function Composer({ model }: { model: IssueModel }) {
   const commentWithMetadata = async (anchor: HTMLElement | null, guestName?: string): Promise<boolean> => {
     if (!metadataId) return true
     if (guest && !guest.name && !guestName) {
-      const name = await ask({ anchor, mode: "first", action: "Post" })
+      const name = await ask({ anchor, mode: "first", action: t("composer.post") })
       if (!name) return false
       guestName = name
     }
@@ -139,10 +145,10 @@ export function Composer({ model }: { model: IssueModel }) {
       if (e instanceof ApiFailure && e.code === "name_required" && !guestName) {
         setGuestNameLocally(null)
         setWorking(false)
-        const name = await ask({ anchor, mode: "first", action: "Post" })
+        const name = await ask({ anchor, mode: "first", action: t("composer.post") })
         return name ? commentWithMetadata(anchor, name) : false
       }
-      setMetadataError(e instanceof ApiFailure && e.status === 410 ? "These diagnostics expired. Remove them to post without." : errorMessage(e))
+      setMetadataError(e instanceof ApiFailure && e.status === 410 ? t("composer.diagExpiredError") : errorMessage(e))
       return false
     } finally {
       setWorking(false)
@@ -155,7 +161,7 @@ export function Composer({ model }: { model: IssueModel }) {
     if (!hasText || busy) return true
     let guestName: string | undefined
     if (guest && !guest.name) {
-      const name = await ask({ anchor, mode: "first", action: "Post" })
+      const name = await ask({ anchor, mode: "first", action: t("composer.post") })
       if (!name) return false
       guestName = name
     }
@@ -167,7 +173,7 @@ export function Composer({ model }: { model: IssueModel }) {
     let result = await model.onComment(text, ids, guestName, note)
     if (result === "name_required") {
       // The server has no name for this browser after all (its cookie was cleared): ask, then send the same post.
-      const name = await ask({ anchor, mode: "first", action: "Post" })
+      const name = await ask({ anchor, mode: "first", action: t("composer.post") })
       if (!name) {
         setBody((b) => b || text)
         setAttachments((l) => (l.length ? l : files))
@@ -182,7 +188,7 @@ export function Composer({ model }: { model: IssueModel }) {
     setDupError(null)
     if (why === "duplicate") {
       const n = Number(dupOf.replace(/^#/, ""))
-      if (!Number.isInteger(n) || n < 1) return setDupError("Enter the issue this duplicates.")
+      if (!Number.isInteger(n) || n < 1) return setDupError(t("composer.enterDuplicate"))
       setWorking(true)
       try {
         if (!(await comment(anchor))) return
@@ -190,7 +196,7 @@ export function Composer({ model }: { model: IssueModel }) {
         setDupOf("")
         setReason("completed")
       } catch (e) {
-        setDupError(e instanceof Error ? e.message : "Couldn't close as duplicate.")
+        setDupError(e instanceof Error ? e.message : t("composer.duplicateFailed"))
       } finally {
         setWorking(false)
       }
@@ -206,8 +212,8 @@ export function Composer({ model }: { model: IssueModel }) {
   }
 
   const option = closeOptions.find((o) => o.reason === reason)!
-  const closeLabel = reason === "completed" ? (hasText ? (note ? "Close with note" : "Close with comment") : "Close issue") : option.label
-  const reopenLabel = hasText ? (note ? "Reopen with note" : "Reopen with comment") : "Reopen issue"
+  const closeLabel = reason === "completed" ? (hasText ? (note ? t("composer.closeWithNote") : t("composer.closeWithComment")) : t("composer.closeIssue")) : option.label
+  const reopenLabel = hasText ? (note ? t("composer.reopenWithNote") : t("composer.reopenWithComment")) : t("composer.reopenIssue")
   const duplicating = member && reason === "duplicate" && issue.status !== "closed"
 
   // The team, and the reporter (completed or not planned; duplicates need the team).
@@ -223,11 +229,11 @@ export function Composer({ model }: { model: IssueModel }) {
         onClick={(e) => void close(reason, e.currentTarget)}
         disabled={busy || working}
         aria-label={closeLabel}
-        title={hasText ? `${closeLabel} (posts your reply first)` : closeLabel}
+        title={hasText ? t("composer.postsFirst", { label: closeLabel }) : closeLabel}
       >
         <span className="close-label">{closeLabel}</span>
       </Button>
-      <Menu align="end" width={300} trigger={(p) => <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon size={14} />} {...p} />}>
+      <Menu align="end" width={300} trigger={(p) => <Button iconOnly aria-label={t("composer.moreClose")} icon={<ChevronDownIcon size={14} />} {...p} />}>
         {(dismiss) =>
           options.map((o) => (
             <MenuItem
@@ -253,16 +259,16 @@ export function Composer({ model }: { model: IssueModel }) {
       <div className="composer" ref={dock} style={dockStyle} data-internal={note || undefined}>
         {member && (
           <div className="composer-mode">
-            <div className="segmented composer-mode-switch" role="radiogroup" aria-label="Post as">
+            <div className="segmented composer-mode-switch" role="radiogroup" aria-label={t("composer.postAs")}>
               <button type="button" role="radio" aria-checked={!note} aria-pressed={!note} onClick={() => setInternal(false)}>
-                Reply
+                {t("composer.reply")}
               </button>
               <button type="button" role="radio" aria-checked={note} aria-pressed={note} onClick={() => setInternal(true)}>
                 <LockIcon size={12} />
-                Internal note
+                {t("composer.note")}
               </button>
             </div>
-            <span className="composer-mode-hint">{note ? "Only the team and agents see this" : "Everyone who can see the issue sees this"}</span>
+            <span className="composer-mode-hint">{note ? t("composer.noteHint") : t("composer.replyHint")}</span>
           </div>
         )}
         {(who === undefined || !who.user) && (
@@ -282,8 +288,8 @@ export function Composer({ model }: { model: IssueModel }) {
           onAttachment={(a) => setAttachments((l) => [...l, a])}
           onBusyChange={setBusy}
           onSubmit={() => void comment()}
-          label={note ? "Internal note" : "Reply"}
-          placeholder={note ? "Add an internal note for the team…" : undefined}
+          label={note ? t("composer.note") : t("composer.reply")}
+          placeholder={note ? t("composer.notePlaceholder") : undefined}
           minHeight={40}
           extra={
             (duplicating || (metadataId && !note)) && (
@@ -292,7 +298,7 @@ export function Composer({ model }: { model: IssueModel }) {
                 {duplicating && (
                   <div className="dup-form">
                     <label className="field-label" htmlFor="dup-of">
-                      Duplicate of
+                      {t("composer.duplicateOf")}
                     </label>
                     <div className="input" data-size="small">
                       <span className="input-prefix mono">#</span>
@@ -324,7 +330,7 @@ export function Composer({ model }: { model: IssueModel }) {
               )}
               {splitControl}
               <Button ref={sendButton} variant="primary" onClick={(e) => void comment(e.currentTarget)} disabled={!canSend || busy || working} trailing={<kbd className="kbd">{sendKey}</kbd>}>
-                {busy ? "Uploading…" : note ? "Add note" : "Send"}
+                {busy ? t("composer.uploading") : note ? t("composer.addNote") : t("composer.send")}
               </Button>
             </>
           }
@@ -337,6 +343,7 @@ export function Composer({ model }: { model: IssueModel }) {
 
 /** "Diagnostics attached" in the composer: what the next post carries, with a way to leave it out. */
 function MetadataChip({ slug, id, error, onRemove }: { slug: string; id: string; error: string | null; onRemove: () => void }) {
+  const t = useT()
   const { data, error: loadError } = useResource<ReportMetadata>(keys.metadata(slug, id), () => api.metadata(slug, id), 60_000)
   const gone = loadError instanceof ApiFailure && (loadError.status === 410 || loadError.status === 404)
   const used = !!data?.attached_to
@@ -346,10 +353,10 @@ function MetadataChip({ slug, id, error, onRemove }: { slug: string; id: string;
       <span className="composer-diag-chip" data-problem={gone || used || undefined}>
         <PaperclipIcon size={12} />
         <span className="composer-diag-text">
-          {gone ? "Diagnostics expired" : used ? "Diagnostics already sent" : "Diagnostics attached"}
+          {gone ? t("composer.diagExpired") : used ? t("composer.diagSent") : t("composer.diagAttached")}
           {detail && !gone && !used && <span className="composer-diag-meta"> · {detail}</span>}
         </span>
-        <button type="button" className="composer-diag-remove" aria-label="Don't attach diagnostics" title="Don't attach" onClick={onRemove}>
+        <button type="button" className="composer-diag-remove" aria-label={t("composer.diagRemove")} title={t("composer.diagRemoveTitle")} onClick={onRemove}>
           <XIcon size={12} />
         </button>
       </span>
@@ -360,9 +367,10 @@ function MetadataChip({ slug, id, error, onRemove }: { slug: string; id: string;
 
 /** In place of the composer on a locked issue, for anyone outside the team. */
 export function LockedComposer() {
+  const t = useT()
   return (
     <div className="composer-locked" role="note">
-      Locked: only the team can reply.
+      {t("composer.locked")}
     </div>
   )
 }

@@ -7,6 +7,7 @@ import { actorName } from "../Actor"
 import { Button } from "../primitives"
 import { AppLink } from "../SiteLink"
 import "../../styles/tiers.css"
+import { tr, useT } from "../../i18n/core"
 
 /** Tiers are for people outside the team: guests and accounts without a role here. Never the team or agents. */
 export const canHaveTier = (a: Actor) => a.type === "guest" || (a.type === "member" && !a.role)
@@ -16,6 +17,7 @@ export const canHaveTier = (a: Actor) => a.type === "guest" || (a.type === "memb
  * a change so the page can take the server's view (their tier shows on everything they wrote).
  */
 export function TierPicker({ slug, actor, onDone, onChanged }: { slug: string; actor: Actor; onDone: () => void; onChanged: () => void }) {
+  const t = useT()
   const { data: tiers, error } = useResource<Tier[]>(keys.tiers(slug), () => api.tiers(slug), 15_000)
   const current = actor.type !== "agent" ? (actor.tier?.id ?? null) : null
   const [busy, setBusy] = useState<string | null>(null)
@@ -38,40 +40,42 @@ export function TierPicker({ slug, actor, onDone, onChanged }: { slug: string; a
   }
 
   return (
-    <div className="tier-picker" role="group" aria-label={`Tier for ${actorName(actor)}`}>
-      <span className="tier-picker-label">Tier for {actorName(actor)}</span>
+    <div className="tier-picker" role="group" aria-label={t("tier.for", { name: actorName(actor) })}>
+      <span className="tier-picker-label">{t("tier.for", { name: actorName(actor) })}</span>
       <div className="tier-picker-options">
-        {!tiers && !error && <span className="tier-picker-note">Loading…</span>}
-        {tiers?.map((t) => (
+        {!tiers && !error && <span className="tier-picker-note">{t("common.loading")}</span>}
+        {tiers?.map((tier) => (
           <button
-            key={t.id}
+            key={tier.id}
             type="button"
             className="tier-option"
-            aria-pressed={current === t.id}
+            aria-pressed={current === tier.id}
             disabled={!!busy}
-            style={{ "--tier": `#${t.color}` } as CSSProperties}
-            onClick={() => choose(t.id)}
+            style={{ "--tier": `#${tier.color}` } as CSSProperties}
+            onClick={() => choose(tier.id)}
           >
             <span className="tier-dot" aria-hidden="true" />
-            {t.name}
+            {tier.name}
           </button>
         ))}
         {!!tiers?.length && (
           <button type="button" className="tier-option" aria-pressed={current === null} disabled={!!busy} onClick={() => choose(null)}>
-            No tier
+            {t("tier.none")}
           </button>
         )}
         <Button size="small" variant="invisible" onClick={onDone} disabled={!!busy}>
-          Cancel
+          {t("common.cancel")}
         </Button>
       </div>
       {tiers?.length === 0 && (
         <p className="tier-picker-note">
-          No tiers yet. Create them in{" "}
-          <AppLink slug={slug} href={appPath(slug, "/settings/tiers")}>
-            Settings → Tiers
-          </AppLink>
-          .
+          {tr("tier.noneYet", {
+            link: (
+              <AppLink slug={slug} href={appPath(slug, "/settings/tiers")}>
+                {t("tier.settings")}
+              </AppLink>
+            ),
+          })}
         </p>
       )}
       {(problem || !!error) && <p className="field-error">{problem ?? errorMessage(error)}</p>}

@@ -7,6 +7,7 @@ import { isAbsolute } from "../../lib/site"
 import { AgentAvatar, Button } from "../../ui/primitives"
 import { useMe } from "../../ui/Shell"
 import "../../styles/onboarding.css"
+import { useT } from "../../i18n/core"
 
 /** Where ?next= may send you after signing in: a path here, or an absolute URL (an app subdomain) the Worker vets. */
 function safeNext(raw: string | null) {
@@ -34,6 +35,7 @@ export function SignInPage() {
 
 /** The sign-in panel. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
 export function SignIn({ back }: { back?: string }) {
+  const t = useT()
   const search = useSearch()
   const next = safeNext(back ?? new URLSearchParams(search).get("next"))
   // Which sign-in methods show depends on the config; the panel is centred, so wait for it rather than re-centre.
@@ -43,7 +45,7 @@ export function SignIn({ back }: { back?: string }) {
     <main className="signin">
       <div className="signin-inner">
         <AgentAvatar size={36} />
-        <h1 className="signin-title">Sign in to Bellhop</h1>
+        <h1 className="signin-title">{t("signin.title")}</h1>
         <SignInActions next={next} />
       </div>
     </main>
@@ -52,6 +54,7 @@ export function SignIn({ back }: { back?: string }) {
 
 /** Continue with Google (and the development sign-in when it's on), returning to `next`. */
 export function SignInActions({ next }: { next: string }) {
+  const t = useT()
   const { data: config } = useResource<Config>(keys.config, api.config, 60_000)
   const [email, setEmail] = useState("")
 
@@ -66,23 +69,23 @@ export function SignInActions({ next }: { next: string }) {
       {(!config || config.google_enabled || !config.dev_login) && (
         <a className="btn signin-google" data-variant="primary" data-size="large" href={`/auth/google?next=${encodeURIComponent(next)}`}>
           <GoogleMark />
-          Continue with Google
+          {t("signin.google")}
         </a>
       )}
       {config?.dev_login && (
         <form className="signin-dev" onSubmit={devLogin}>
           <label className="field-label" htmlFor="dev-email">
-            Development sign-in
+            {t("signin.dev")}
           </label>
           <div className="row">
             <div className="input" style={{ flex: 1 }}>
               <input id="dev-email" type="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
             </div>
-            <Button type="submit">Sign in</Button>
+            <Button type="submit">{t("common.signIn")}</Button>
           </div>
         </form>
       )}
-      <p className="signin-note">Reporting an issue doesn't need an account.</p>
+      <p className="signin-note">{t("signin.note")}</p>
     </div>
   )
 }

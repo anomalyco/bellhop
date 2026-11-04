@@ -16,6 +16,7 @@ import "../styles/agents.css"
 import { CreateWorkspace } from "./home/CreateWorkspace"
 import { SignIn } from "./home/SignIn"
 import "../styles/onboarding.css"
+import { tr, useT } from "../i18n/core"
 
 /** Pages for signed-in accounts only: the sign-in panel (returning here) until then. */
 function Account({ back, children }: { back: string; children: () => ReactNode }) {
@@ -55,6 +56,7 @@ function NewWorkspace() {
 }
 
 function Workspaces() {
+  const t = useT()
   const { data: fetched, error: appsError } = useResource<App[]>(keys.apps, api.apps, 5_000)
   // Invitations sit above the list; it waits for them (an error reads as none) so they never push it down.
   const { data: invitations, error: invitationsError } = useInvitations()
@@ -77,17 +79,17 @@ function Workspaces() {
       <Header />
       <Page narrow>
         <div className="home-head">
-          <h1 className="page-title home-title">Your workspaces</h1>
+          <h1 className="page-title home-title">{t("home.title")}</h1>
           <SiteLink href="/new" className="btn" data-variant="primary">
             <PlusIcon size={14} />
-            New workspace
+            {t("home.newWorkspace")}
           </SiteLink>
         </div>
         {invitations && <InvitationsSection invitations={invitations} />}
         <div className="box home-apps">
           {!apps && !error && <div className="box-row skeleton-row" />}
           {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
-          {apps?.length === 0 && <div className="box-empty">No workspaces yet. Accept an invitation above, or create one.</div>}
+          {apps?.length === 0 && <div className="box-empty">{t("home.none")}</div>}
           {apps?.map((app) => (
             <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
               <AppIcon src={app.icon_url} size={28} />
@@ -111,15 +113,16 @@ function Workspaces() {
 
 /** A short list of the account's agents with a link to manage them; how to connect one when there are none. */
 function ConnectedAgents() {
+  const t = useT()
   const { data: agents, error } = useResource<ConnectedAgent[]>(keys.agents, api.agents, 10_000)
   const manage = homeUrl("/agents")
   return (
     <section className="home-agents">
       <div className="home-agents-head">
-        <h2 className="section-title">Agents</h2>
+        <h2 className="section-title">{t("home.agents")}</h2>
         {!!agents?.length && (
           <SiteLink href={manage} className="home-agents-link">
-            Manage agents
+            {t("home.manageAgents")}
           </SiteLink>
         )}
       </div>
@@ -136,7 +139,7 @@ function ConnectedAgents() {
       {agents?.length === 0 && (
         <div className="home-agents-empty">
           <p className="muted-text">
-            Connect your agent so it can answer issues in your workspaces, or <SiteLink href={manage}>create a token agent</SiteLink>.
+            {tr("home.connectAgent", { link: <SiteLink href={manage}>{t("home.createToken")}</SiteLink> })}
           </p>
           <AgentSetup />
         </div>
@@ -149,7 +152,7 @@ function ConnectedAgents() {
               <div className="app-row-main">
                 <div className="app-row-title">
                   <span className="app-row-name">{agent.client_name}</span>
-                  <span className="agent-kind">{agent.kind === "token" ? "Token agent" : "Connected app"}</span>
+                  <span className="agent-kind">{agent.kind === "token" ? t("editor.tokenAgent") : t("editor.connectedApp")}</span>
                 </div>
                 <div className="issue-meta">{accessSummary(agent)}</div>
               </div>
@@ -157,7 +160,7 @@ function ConnectedAgents() {
           ))}
           {agents.length > 4 && (
             <SiteLink href={manage} className="box-row home-agents-more">
-              {agents.length - 4} more
+              {t("home.more", { count: agents.length - 4 })}
             </SiteLink>
           )}
         </div>

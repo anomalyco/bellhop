@@ -4,6 +4,7 @@ import { useLocation } from "wouter"
 import type { Mention } from "../../shared/api"
 import { actorName } from "./Actor"
 import { navigateAppHref, prefetchAppHref } from "./SiteLink"
+import { useT } from "../i18n/core"
 
 type Renderer = typeof import("../lib/markdown")
 let renderer: Renderer | null = null
@@ -34,6 +35,7 @@ function sameAppHref(target: EventTarget | null) {
 
 /** Rendered markdown. Until the parser chunk arrives, shows the plain text. */
 export const Markdown = memo(function Markdown({ source, slug, mentions }: { source: string; slug: string; mentions?: Mention[] }) {
+  const t = useT()
   const [ready, setReady] = useState(!!renderer)
   const [, navigate] = useLocation()
 
@@ -55,7 +57,7 @@ export const Markdown = memo(function Markdown({ source, slug, mentions }: { sou
     navigateAppHref(slug, href, navigate)
   }
 
-  if (!source.trim()) return <p className="muted-text">No description provided.</p>
+  if (!source.trim()) return <p className="muted-text">{t("markdown.empty")}</p>
   if (!renderer) return <div className="markdown markdown-plain">{source}</div>
   const resolved = mentions?.map((m) => ({ handle: m.handle, name: actorName(m.actor), agent: m.actor.type === "agent" }))
   return <Rendered html={renderer.render(source, slug, resolved)} onClick={onClick} onWarm={warm} />

@@ -9,6 +9,8 @@ import { SiteLink } from "../ui/SiteLink"
 import { IssueRow, SkeletonRows } from "./Issues"
 import "../styles/feed.css"
 import "../styles/features.css"
+import { useT } from "../i18n/core"
+import { formatNumber } from "../i18n"
 
 type State = "open" | "closed"
 
@@ -17,6 +19,7 @@ type State = "open" | "closed"
  * across workspaces, newest activity first. Private ones are included and marked; nothing hidden or deleted.
  */
 export function ReportsPage() {
+  const t = useT()
   const { data: me } = useMe()
   const state: State = new URLSearchParams(useSearch()).get("state") === "closed" ? "closed" : "open"
   const key = `${keys.reports}${state}`
@@ -50,37 +53,37 @@ export function ReportsPage() {
       <Page>
         <div className="reports">
           <div className="reports-head">
-            <h1 className="page-title">Your reports</h1>
+            <h1 className="page-title">{t("reports.title")}</h1>
             <p className="reports-lede">
               {signedIn === false
-                ? "Issues you opened from this browser, in every workspace. Sign in to keep them with your account."
-                : "Issues you opened, in every workspace, including from this browser before you signed in."}
+                ? t("reports.ledeGuest")
+                : t("reports.lede")}
             </p>
           </div>
           <div className="reports-toolbar" data-loading={!counts || undefined}>
-            <nav className="segmented list-states" aria-label="Issue state">
+            <nav className="segmented list-states" aria-label={t("list.states")}>
               <SiteLink href="/reports" aria-current={state === "open" ? "page" : undefined}>
                 <StateIcon state="open" size={14} />
-                Open
-                <span className="segmented-count">{counts?.open ?? 0}</span>
+                {t("state.open")}
+                <span className="segmented-count">{formatNumber(counts?.open ?? 0)}</span>
               </SiteLink>
               <SiteLink href="/reports?state=closed" aria-current={state === "closed" ? "page" : undefined}>
                 <StateIcon state="closed" size={14} />
-                Closed
-                <span className="segmented-count">{counts?.closed ?? 0}</span>
+                {t("state.closed")}
+                <span className="segmented-count">{formatNumber(counts?.closed ?? 0)}</span>
               </SiteLink>
             </nav>
           </div>
-          <section className="issue-list" aria-label="Your reports" aria-busy={!data || undefined}>
+          <section className="issue-list" aria-label={t("reports.title")} aria-busy={!data || undefined}>
             {!!error && !data && <div className="list-empty">{errorMessage(error)}</div>}
             {!data && !error && <SkeletonRows />}
             {data?.issues.length === 0 && (
               <div className="blank">
-                <h2 className="blank-title">{state === "open" ? "No open reports" : "No closed reports"}</h2>
+                <h2 className="blank-title">{state === "open" ? t("reports.noOpen") : t("reports.noClosed")}</h2>
                 <p>
                   {state === "open"
-                    ? "When you open an issue in any workspace, it shows up here so you can find your way back."
-                    : "Issues you opened that were closed show up here."}
+                    ? t("reports.noOpenText")
+                    : t("reports.noClosedText")}
                 </p>
               </div>
             )}
@@ -88,7 +91,7 @@ export function ReportsPage() {
             {data?.next_cursor && (
               <div className="list-footer">
                 <Button onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? "Loading…" : "Load more"}
+                  {loadingMore ? t("common.loading") : t("common.loadMore")}
                 </Button>
                 {moreError && <span className="field-error">{moreError}</span>}
               </div>

@@ -6,6 +6,7 @@ import { ChevronDownIcon } from "../icons"
 import { Menu } from "../Menu"
 import { Button } from "../primitives"
 import "../../styles/insights.css"
+import { tKey, useT, type PlainKey } from "../../i18n/core"
 
 // The search box's qualifiers, edited as text: each control adds, swaps or removes one `key:value` token and leaves
 // the rest of the query (is:open, label:, free text) alone.
@@ -49,24 +50,25 @@ const toggle = (q: string, key: string, value: string) =>
 
 type Scope = "workspace" | "feed"
 
-const statuses: [string, string][] = [
-  ["open", "Open"],
-  ["in_progress", "In progress"],
-  ["waiting", "Waiting"],
-  ["closed", "Closed"],
+const statuses: [string, PlainKey][] = [
+  ["open", "state.open"],
+  ["in_progress", "state.in_progress"],
+  ["waiting", "filter.waiting"],
+  ["closed", "state.closed"],
 ]
-const reasons: [string, string][] = [
-  ["completed", "Completed"],
-  ["not_planned", "Not planned"],
-  ["duplicate", "Duplicate"],
+const reasons: [string, PlainKey][] = [
+  ["completed", "filter.completed"],
+  ["not_planned", "state.not_planned"],
+  ["duplicate", "state.duplicate"],
 ]
-const sorts: [IssueSort, string][] = [
-  ["newest", "Newest"],
-  ["oldest", "Oldest"],
-  ["votes", "Most votes"],
-  ["updated", "Recently updated"],
-  ["comments", "Most comments"],
+export const sorts: [IssueSort, PlainKey][] = [
+  ["newest", "sort.newest"],
+  ["oldest", "sort.oldest"],
+  ["votes", "sort.votes"],
+  ["updated", "sort.updated"],
+  ["comments", "sort.comments"],
 ]
+const label = tKey
 
 /** Which qualifiers this menu manages, to count and to clear. */
 function managed(t: Token, scope: Scope) {
@@ -82,20 +84,20 @@ export function activeFilters(q: string, scope: Scope = "workspace") {
   return tokens(q).filter((t) => managed(t, scope)).length
 }
 
-const help: { q: string; text: string; scope: Scope[] }[] = [
-  { q: "is:open · is:closed", text: "Open or closed", scope: ["workspace", "feed"] },
-  { q: "status:in_progress", text: "open, in_progress, waiting or closed", scope: ["workspace", "feed"] },
-  { q: "reason:not_planned", text: "completed, not_planned or duplicate", scope: ["workspace", "feed"] },
-  { q: "label:bug", text: "Has the label (repeat for all of several)", scope: ["workspace", "feed"] },
-  { q: 'label:"needs info"', text: "Quote names with spaces", scope: ["workspace", "feed"] },
-  { q: "no:label · no:assignee", text: "Without any label, or unassigned", scope: ["workspace", "feed"] },
-  { q: "assignee:@me", text: "Assigned to you, or to @handle", scope: ["workspace"] },
-  { q: "author:@me", text: "Opened by you (this browser or account), or by @handle", scope: ["workspace"] },
-  { q: "has:metadata", text: "Has diagnostics from an app", scope: ["workspace", "feed"] },
-  { q: "is:private · is:locked · is:pinned", text: "Private (team and reporter), locked or pinned", scope: ["workspace"] },
-  { q: "is:locked · is:pinned", text: "Locked or pinned", scope: ["feed"] },
-  { q: "is:hidden", text: "Hidden by a moderator (team only)", scope: ["workspace"] },
-  { q: "sort:votes", text: "newest, oldest, votes, updated or comments", scope: ["workspace", "feed"] },
+const help: { q: string; text: PlainKey; scope: Scope[] }[] = [
+  { q: "is:open · is:closed", text: "filter.help.state", scope: ["workspace", "feed"] },
+  { q: "status:in_progress", text: "filter.help.status", scope: ["workspace", "feed"] },
+  { q: "reason:not_planned", text: "filter.help.reason", scope: ["workspace", "feed"] },
+  { q: "label:bug", text: "filter.help.label", scope: ["workspace", "feed"] },
+  { q: 'label:"needs info"', text: "filter.help.quote", scope: ["workspace", "feed"] },
+  { q: "no:label · no:assignee", text: "filter.help.no", scope: ["workspace", "feed"] },
+  { q: "assignee:@me", text: "filter.help.assignee", scope: ["workspace"] },
+  { q: "author:@me", text: "filter.help.author", scope: ["workspace"] },
+  { q: "has:metadata", text: "filter.help.metadata", scope: ["workspace", "feed"] },
+  { q: "is:private · is:locked · is:pinned", text: "filter.help.isWorkspace", scope: ["workspace"] },
+  { q: "is:locked · is:pinned", text: "filter.help.isFeed", scope: ["feed"] },
+  { q: "is:hidden", text: "filter.help.hidden", scope: ["workspace"] },
+  { q: "sort:votes", text: "filter.help.sort", scope: ["workspace", "feed"] },
 ]
 
 /**
@@ -121,6 +123,7 @@ export function FilterMenu({
   /** The loading skeleton: the button holds its place. */
   disabled?: boolean
 }) {
+  const t = useT()
   const [helping, setHelping] = useState(false)
   const count = activeFilters(query, scope)
   const change = (next: string) => onChange?.(next)
@@ -135,12 +138,12 @@ export function FilterMenu({
           className="btn filter-button"
           data-variant="default"
           data-active={count ? "" : undefined}
-          aria-label={count ? `Filters, ${count} on` : "Filters"}
+          aria-label={count ? t("filter.buttonOn", { count }) : t("filter.button")}
           disabled={disabled}
           {...p}
         >
           <FilterIcon />
-          <span className="filter-text">Filters</span>
+          <span className="filter-text">{t("filter.button")}</span>
           {count > 0 && <span className="filter-count">{count}</span>}
           <ChevronDownIcon size={14} />
         </button>
@@ -172,6 +175,7 @@ function Groups({
   onChange: (next: string) => void
   onHelp: () => void
 }) {
+  const t = useT()
   const team = scope === "workspace" && member && !!slug
   const { data: people } = useResource<Mentionable[]>(team ? keys.mentionables(slug!) : null, () => api.mentionables(slug!), 60_000)
   const status = valueOf(query, "status")
@@ -183,33 +187,33 @@ function Groups({
 
   return (
     <div className="filter-menu">
-      <Group title="Status">
+      <Group title={t("filter.status")}>
         <Chip on={!status} onClick={() => onChange(setOne(query, "status", null))} radio>
-          Any
+          {t("filter.any")}
         </Chip>
-        {statuses.map(([v, label]) => (
+        {statuses.map(([v, name]) => (
           <Chip key={v} on={status === v} onClick={() => onChange(setOne(query, "status", status === v ? null : v))} radio>
-            {label}
+            {label(name)}
           </Chip>
         ))}
       </Group>
-      <Group title="Closed as">
+      <Group title={t("filter.closedAs")}>
         <Chip on={!reason} onClick={() => onChange(setOne(query, "reason", null))} radio>
-          Any
+          {t("filter.any")}
         </Chip>
-        {reasons.map(([v, label]) => (
+        {reasons.map(([v, name]) => (
           <Chip key={v} on={reason === v} onClick={() => onChange(setOne(query, "reason", reason === v ? null : v))} radio>
-            {label}
+            {label(name)}
           </Chip>
         ))}
       </Group>
-      <Group title="Assignee">
+      <Group title={t("filter.assignee")}>
         <Chip on={!assignee} onClick={() => onChange(setOne(query, "assignee", null, (t) => t.key === "no" && t.value === "assignee"))} radio>
-          Anyone
+          {t("filter.anyone")}
         </Chip>
         {team && (
           <Chip on={assignee === "@me"} onClick={() => onChange(setOne(query, "assignee", "@me", (t) => t.key === "no" && t.value === "assignee"))} radio>
-            Me
+            {t("filter.me")}
           </Chip>
         )}
         <Chip
@@ -217,7 +221,7 @@ function Groups({
           onClick={() => onChange(assignee === "-" ? editQuery(query, (t) => t.key === "no" && t.value === "assignee") : editQuery(query, (t) => t.key === "assignee" || (t.key === "no" && t.value === "assignee"), "no:assignee"))}
           radio
         >
-          No one
+          {t("filter.noOne")}
         </Chip>
         {team &&
           handles.map((m) => (
@@ -227,12 +231,12 @@ function Groups({
           ))}
       </Group>
       {scope === "workspace" && (
-        <Group title="Author">
+        <Group title={t("filter.author")}>
           <Chip on={!author} onClick={() => onChange(setOne(query, "author", null))} radio>
-            Anyone
+            {t("filter.anyone")}
           </Chip>
           <Chip on={author === "@me"} onClick={() => onChange(setOne(query, "author", author === "@me" ? null : "@me"))} radio>
-            Me
+            {t("filter.me")}
           </Chip>
           {team &&
             handles.map((m) => (
@@ -242,30 +246,30 @@ function Groups({
             ))}
         </Group>
       )}
-      <Group title="Has">
+      <Group title={t("filter.has")}>
         <Chip on={hasQualifier(query, "no", "label")} onClick={() => onChange(toggle(query, "no", "label"))}>
-          No label
+          {t("filter.noLabel")}
         </Chip>
         <Chip on={hasQualifier(query, "has", "metadata")} onClick={() => onChange(toggle(query, "has", "metadata"))}>
-          Diagnostics
+          {t("filter.diagnostics")}
         </Chip>
         {scope === "workspace" && member && (
           <Chip on={hasQualifier(query, "is", "private")} onClick={() => onChange(toggle(query, "is", "private"))}>
-            Private
+            {t("filter.private")}
           </Chip>
         )}
         <Chip on={hasQualifier(query, "is", "locked")} onClick={() => onChange(toggle(query, "is", "locked"))}>
-          Locked
+          {t("filter.locked")}
         </Chip>
         <Chip on={hasQualifier(query, "is", "pinned")} onClick={() => onChange(toggle(query, "is", "pinned"))}>
-          Pinned
+          {t("filter.pinned")}
         </Chip>
       </Group>
       {scope === "feed" && (
-        <Group title="Sort">
-          {sorts.map(([v, label]) => (
+        <Group title={t("filter.sort")}>
+          {sorts.map(([v, name]) => (
             <Chip key={v} on={sort === v} onClick={() => onChange(setOne(query, "sort", v === "newest" ? null : v))} radio>
-              {label}
+              {label(name)}
             </Chip>
           ))}
         </Group>
@@ -277,10 +281,10 @@ function Groups({
         <span className="filter-foot-actions">
           {activeFilters(query, scope) > 0 && (
             <Button size="small" variant="invisible" onClick={() => onChange(editQuery(query, (t) => managed(t, scope)))}>
-              Clear
+              {t("filter.clear")}
             </Button>
           )}
-          <Button size="small" variant="ghost-muted" iconOnly aria-label="Search qualifiers" title="Search qualifiers" onClick={onHelp}>
+          <Button size="small" variant="ghost-muted" iconOnly aria-label={t("filter.qualifiers")} title={t("filter.qualifiers")} onClick={onHelp}>
             ?
           </Button>
         </span>
@@ -307,22 +311,23 @@ function Chip({ on, onClick, radio, children }: { on: boolean; onClick: () => vo
 }
 
 function Help({ scope, onBack }: { scope: Scope; onBack: () => void }) {
+  const t = useT()
   return (
     <div className="filter-help">
-      <p className="filter-group-title">Search qualifiers</p>
+      <p className="filter-group-title">{t("filter.qualifiers")}</p>
       {help
         .filter((h) => h.scope.includes(scope))
         .map((h) => (
           <div key={h.q} className="filter-help-row">
             <code>{h.q}</code>
-            <span>{h.text}</span>
+            <span>{label(h.text)}</span>
           </div>
         ))}
-      <p className="filter-help-note">Combine them with words: qualifiers narrow, words search titles, bodies and comments.</p>
+      <p className="filter-help-note">{t("filter.helpNote")}</p>
       <div className="filter-foot">
         <span />
         <Button size="small" variant="invisible" role="menuitem" onClick={onBack}>
-          Back to filters
+          {t("filter.backToFilters")}
         </Button>
       </div>
     </div>

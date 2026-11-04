@@ -1,0 +1,60 @@
+/* Languages. Inter has no CJK glyphs, so Japanese, Chinese and Korean fall through to the system's own CJK face
+   (per language: the same Han character is drawn differently in each). Latin and digits stay in Inter, and the
+   mono accents keep mono digits with CJK text in the system face. CJK isn't tracked tighter. */
+html[lang="ja"] {
+  --cjk: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic UI", "Meiryo", "Noto Sans JP", "Noto Sans CJK JP";
+}
+html[lang="zh-CN"] {
+  --cjk: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Noto Sans CJK SC";
+}
+html[lang="ko"] {
+  --cjk: "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", "Noto Sans CJK KR";
+}
+html:is([lang="ja"], [lang="zh-CN"], [lang="ko"]) {
+  --font-sans: "Inter", var(--cjk), ui-sans-serif, system-ui, sans-serif;
+  --font-accent: "OpenTUI Mono", var(--cjk), ui-monospace, monospace;
+}
+html:is([lang="ja"], [lang="zh-CN"], [lang="ko"]) * {
+  letter-spacing: 0;
+}
+
+/* The guest's header corner: language, then Sign in */
+.header-user {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+/* Back to the account menu from its language list */
+.menu-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-muted);
+}
+.menu-back .icon {
+  transform: rotate(90deg);
+}
+
+/* Phones: where "Open · Closed" and "New issue" can't share a line, New issue keeps just its + (named for screen
+   readers by its aria-label) */
+@media (max-width: 640px) {
+  html:is([lang="es"], [lang="pt-BR"], [lang="fr"], [lang="de"], [lang="ja"]) .list-new-text {
+    display: none;
+  }
+  /* The docked composer's Preview gets a tighter pad, so the longer word doesn't run under the actions */
+  html:is([lang="es"], [lang="pt-BR"], [lang="fr"], [lang="de"], [lang="ja"]) .editor[data-variant="chat"] .editor-tools > .btn:not([data-icon-only]) {
+    padding: 0 6px;
+  }
+}
+
+/* Page heads with a button: the title never breaks mid-word (CJK breaks anywhere); the button wraps under it when
+   both don't fit on a phone */
+.agents-head,
+.home-head {
+  flex-wrap: wrap;
+}
+.agents-head .agents-title,
+.home-head .home-title {
+  white-space: nowrap;
+}

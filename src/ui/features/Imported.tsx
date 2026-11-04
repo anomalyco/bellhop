@@ -1,16 +1,21 @@
 import type { Issue } from "../../../shared/api"
 import "../../styles/data.css"
+import { tr, useT } from "../../i18n/core"
 
 /** Under an imported issue's title: where it came from, linking the original. */
 export function ImportedMarker({ imported }: { imported: NonNullable<Issue["imported"]> }) {
+  useT()
   return (
     <p className="imported">
       <GitHubMark />
       <span>
-        Imported from{" "}
-        <a href={imported.url} target="_blank" rel="noopener noreferrer">
-          GitHub <span className="mono">#{imported.number}</span> ↗
-        </a>
+        {tr("imported.from", {
+          link: (
+            <a href={imported.url} target="_blank" rel="noopener noreferrer">
+              GitHub <span className="mono">#{imported.number}</span> ↗
+            </a>
+          ),
+        })}
       </span>
     </p>
   )
