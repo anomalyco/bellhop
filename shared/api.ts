@@ -250,13 +250,16 @@
 //     receive review mail. End users never see or receive it until a member sends it.
 //   POST   /api/apps/:slug/issues/:number/comments/:id/send { body? } -> Comment   member; publishes a held reply
 //          (optionally edited first; it stays the agent's reply, with `sent_by`); DELETE .../comments/:id discards it
-//   - Approvals, in any mode: an agent asks before an action with consequences (refund, cancellation, account
+//   - Approvals are help-desk only, at any autonomy level. An agent asks before an action with consequences (refund, cancellation, account
 //     change). The team approves or rejects; an approval then carries a signed token the action's own service
-//     verifies before acting (EdDSA/Ed25519 JWT; public keys at GET https://api.blhp.app/v1/approvals/jwks.json,
+//     verifies before acting (EdDSA/Ed25519 JWT; public keys at GET https://api.blhp.app/v1/approvals/jwks.json?workspace=<expected-slug>,
 //     one `kid` per workspace). "approve_actions" means the agent must not act without one (the agent's tools
 //     enforce it by requiring the token); "autonomous" lets the agent act alone and ask only when it wants to.
-//   POST   /api/apps/:slug/issues/:number/approvals/:id/decide { decision: "approve" | "reject", note? } -> Approval
-//          member; one decision, recorded and audited; approval tokens are never shown in the web UI
+//   POST   /api/apps/:slug/issues/:number/approvals/:id/decide { decision: "approve" | "reject", details_hash: string, note? } -> Approval
+//          member; display details verbatim and echo the hash from that same snapshot. Mismatch: 409 details_changed.
+//          One decision, recorded and audited; approval tokens are never shown in the web UI.
+//   DELETE .../comments/:id?held=1   discard only while held; 409 reply_unavailable if already sent/discarded
+//          A plain DELETE also discards a held reply. Once sent, deleting that published reply requires ?held=0.
 //   POST   /v1/approvals/:id/consume (secret key)        -> Approval           optional online single-use check for
 //          the action service: marks it "used" (409 if already used, 410 if expired or rejected)
 //   GET    /api/apps/:slug/api-keys                      -> ApiKey[]           admin; public API v1 keys (shared/v1.ts)
@@ -1086,7 +1089,7 @@ export interface Comment {
   mentions: Mention[]
   /** A held agent reply (autonomy "suggest"): team and agents only, not emailed, until a member sends it. */
   held: { at: string } | null
-  /** Set when a member sent a held reply (with or without edits). */
+  /** Member who sent a held reply. Team only; always null for requesters. */
   sent_by: Actor | null
 }
 
@@ -1096,10 +1099,12 @@ export interface Approval {
   issue_number: number
   /** Machine name of the action, e.g. "refund", "cancel_subscription", "change_email". */
   action: string
-  /** What the team reads on the card, e.g. "Refund $20.00 for invoice in_123 (duplicate charge)". */
+  /** Advisory only. `details` is what's signed and what the member must check. */
   summary: string
   /** Structured parameters the action service checks against the token (e.g. { amount: 2000, currency: "usd" }). */
   details: Record<string, string | number | boolean>
+  /** Unpadded base64url SHA-256 of flat JSON: keys sorted by UTF-16 code unit, JSON.stringify strings/scalars, no whitespace. */
+  details_hash: string
   state: "pending" | "approved" | "rejected" | "expired" | "used"
   requested_by: Actor
   decided_by: Actor | null

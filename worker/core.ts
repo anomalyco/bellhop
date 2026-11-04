@@ -105,6 +105,8 @@ export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
   if (message.includes("public reply requires review"))
     return new ApiFailure(409, "review_required", "Autonomy changed; submit the reply for review")
+  if (message.includes('reply_unavailable')) return new ApiFailure(409,'reply_unavailable','Reply is no longer available for this action')
+  if (message.includes('approval details changed')) return new ApiFailure(409,'details_changed','Approval details changed; review the parameters again')
   if (message.includes("request_type_changed"))
     return new ApiFailure(409, "request_type_changed", "Request type or permissions changed; reload the form")
   if (message.includes("api_nonce_limit"))

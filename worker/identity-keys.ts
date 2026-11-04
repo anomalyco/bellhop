@@ -7,8 +7,16 @@ import { can } from "./permissions"
 const enc = new TextEncoder()
 type KeyPurpose = "host-identity/v1" | "approval-signing/v1"
 async function wrappingKey(env: Env, purpose: KeyPurpose) {
-  if (!env.COOKIE_SECRET || env.COOKIE_SECRET.length < 32) fail(503, "misconfigured", "Identity encryption unavailable")
-  const material = await crypto.subtle.importKey("raw", enc.encode(env.COOKIE_SECRET), "HKDF", false, ["deriveKey"])
+  const secret = purpose === "approval-signing/v1" ? env.APPROVAL_KEK : env.COOKIE_SECRET
+  if (!secret || secret.length < 32)
+    fail(
+      503,
+      "misconfigured",
+      purpose === "approval-signing/v1"
+        ? "APPROVAL_KEK is required (at least 32 characters)"
+        : "Identity encryption unavailable"
+    )
+  const material = await crypto.subtle.importKey("raw", enc.encode(secret), "HKDF", false, ["deriveKey"])
   return crypto.subtle.deriveKey(
     { name: "HKDF", hash: "SHA-256", salt: enc.encode("Bellhop"), info: enc.encode(purpose) },
     material,

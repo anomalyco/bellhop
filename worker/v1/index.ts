@@ -33,7 +33,8 @@ export const routes: Record<string, Route> = {
     path: "/approvals/jwks.json",
     auth: "public",
     response: "JWKS",
-    run: (c) => jwks(c.env)
+    query:{workspace:string},
+    run: (c) => jwks(c.env,c.req.query('workspace'))
   },
   consumeApproval: {
     method: "POST",
@@ -251,7 +252,7 @@ function document() {
         Object.entries(r.query ?? {}).map(([k, v]) => ({
           in: "query",
           name: k,
-          required: false,
+          required: name==='approvalKeys' && k==='workspace',
           schema: v as typeof string
         }))
       )
@@ -424,8 +425,9 @@ export function publicApi() {
     api.on(r.method, r.path, async (c) => {
       if (r.auth === "public") {
         if (r.response === "JWKS") {
+          const keys=await jwks(c.env,c.req.query('workspace'))
           c.header("Cache-Control", "public, max-age=300")
-          return c.json(await jwks(c.env))
+          return c.json(keys)
         }
         return c.json(document())
       }

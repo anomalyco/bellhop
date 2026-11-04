@@ -141,7 +141,7 @@ const workspaceTools = [
       number,
       action: { ...text, pattern: "^[a-z0-9_]{1,40}$" },
       summary: { ...text, maxLength: 300 },
-      details: { type: "object", maxProperties: 20, additionalProperties: { type: ["string", "number", "boolean"] } }
+      details: { type: "object", description:"Flat signed parameters, at most 4096 UTF-8 bytes as JSON.", maxProperties: 20, additionalProperties: { type: ["string", "number", "boolean"], maxLength:256 } }
     },
     ["number", "action", "summary"]
   ),
@@ -610,7 +610,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       const id = str(b.comment_id, "comment_id", 64),
         num = await sql(
           env,
-          "SELECT i.number FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.id=? AND i.app_id=?",
+          "SELECT i.number FROM team_comments c JOIN issues i ON i.id=c.issue_id WHERE c.id=? AND i.app_id=?",
           id,
           app.id
         ).first<number>("number")
@@ -785,6 +785,10 @@ mcp.post("/mcp", async (c) => {
       } catch (e) {
         const failure = e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null
         if (failure?.status === 429) return mcpLimited(c, id, true, 3600)
+        if ((p.name==='request_approval' && failure?.status===400) || failure?.code==='reply_unavailable') {
+          const status=failure.status===400?400:409
+          return c.json({jsonrpc:'2.0',id,error:{code:status===400?-32602:-32009,message:failure.message,data:{code:failure.code}}},status)
+        }
         if (failure?.code === "humans_only")
           return c.json(
             { jsonrpc: "2.0", id, error: { code: -32003, message: failure.message, data: { code: "humans_only" } } },

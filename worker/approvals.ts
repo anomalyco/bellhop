@@ -49,22 +49,36 @@ export async function requestApproval(a: Access, n: number, b: Record<string, un
   if (!/^[a-z0-9_]{1,40}$/.test(action)) bad("Invalid action")
   if (
     Object.keys(details).length > 20 ||
-    Object.values(details).some(
-      (v) => typeof v !== "string" && typeof v !== "boolean" && !(typeof v === "number" && Number.isFinite(v))
+    Object.values(details).some((v) =>
+      typeof v === "string"
+        ? [...v].length > 256
+        : typeof v !== "boolean" && !(typeof v === "number" && Number.isFinite(v))
     )
   )
-    bad("details must have at most 20 scalar fields")
+    bad("details must have at most 20 scalar fields; strings are limited to 256 characters")
+  // Sort the encoded key/value pairs, not an object: JSON.stringify reorders integer-like object keys.
+  const canonical =
+    "{" +
+    Object.keys(details)
+      .sort()
+      .map((k) => JSON.stringify(k) + ":" + JSON.stringify(details[k]))
+      .join(",") +
+    "}"
+  const bytes = enc.encode(canonical)
+  if (bytes.byteLength > 4096) bad("details JSON exceeds 4 KiB")
+  const detailsHash = url64(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)))
   const id = uid(),
     { env, app, actor } = a
   const [, write, , read] = await env.DB.batch<Doc>([
     typeGuard(env, `EXISTS(${responderGrant})`, app.id, actor.id),
     sql(
       env,
-      `INSERT INTO approvals(id,issue_id,action,summary,details,requested_by,created_at,expires) SELECT ?,i.id,?,?,?,?,?,unixepoch()+604800 FROM issues i JOIN apps w ON w.id=i.app_id AND w.mode='helpdesk' WHERE w.id=? AND i.number=?`,
+      `INSERT INTO approvals(id,issue_id,action,summary,details,details_hash,requested_by,created_at,expires) SELECT ?,i.id,?,?,?,?,?,?,unixepoch()+604800 FROM issues i JOIN apps w ON w.id=i.app_id AND w.mode='helpdesk' WHERE w.id=? AND i.number=?`,
       id,
       action,
       summary,
-      JSON.stringify(details),
+      canonical,
+      detailsHash,
       JSON.stringify(actor),
       now(),
       app.id,
@@ -80,25 +94,37 @@ export async function requestApproval(a: Access, n: number, b: Record<string, un
 }
 export async function decideApproval(a: Access, n: number, id: string, b: Record<string, unknown>) {
   const decision = choice(b.decision, ["approve", "reject"] as const, "decision"),
+    hash = typeof b.details_hash === "string" ? b.details_hash : bad("details_hash is required"),
     note = b.note === undefined ? null : str(b.note, "note", 1000, true),
     { env, app, actor } = a
   const [, write, , read] = await env.DB.batch<Doc>([
     typeGuard(env, `EXISTS(${memberGrant})`, app.id, actor.id),
     sql(
       env,
-      `UPDATE approvals SET state=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),decided_by=?,note=?,expires=unixepoch()+1800 WHERE id=? AND state='pending' AND expires>unixepoch() AND issue_id=(SELECT id FROM issues WHERE app_id=? AND number=?)`,
+      `UPDATE approvals SET state=?,decided_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),decided_by=?,note=?,decision_details_hash=?,expires=unixepoch()+1800 WHERE id=? AND details_hash=? AND state='pending' AND expires>unixepoch() AND issue_id=(SELECT id FROM issues WHERE app_id=? AND number=?)`,
       decision === "approve" ? "approved" : "rejected",
       JSON.stringify(actor),
       note,
+      hash,
       id,
+      hash,
       app.id,
       n
     ),
-    entry(env, app.id, actor, "approval.decided", { type: "approval", id, number: n }, { decision }),
+    entry(
+      env,
+      app.id,
+      actor,
+      "approval.decided",
+      { type: "approval", id, number: n },
+      { decision, details_hash: hash }
+    ),
     readDoc(env, app.id, id)
   ])
   const p = decode(read!.results[0])
   if (p.issue_number !== n) missing()
+  if (!write!.meta.changes && p.details_hash !== hash)
+    fail(409, "details_changed", "Approval details changed; review the parameters again")
   if (!write!.meta.changes)
     fail(p.state === "expired" ? 410 : 409, "approval_unavailable", "Approval cannot be decided again")
   a.ctx.waitUntil(announce(a, p, read!.results[0]!.issue_id, true))
@@ -106,12 +132,12 @@ export async function decideApproval(a: Access, n: number, id: string, b: Record
 }
 
 type SigningKey = { kid: string; cipher: string }
-const enc = new TextEncoder(),
-  url64 = (bytes: Uint8Array) =>
-    btoa(String.fromCharCode(...bytes))
-      .replaceAll("+", "-")
-      .replaceAll("/", "_")
-      .replace(/=+$/, "")
+const enc = new TextEncoder()
+function url64(bytes: Uint8Array) {
+  let binary = ""
+  for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192))
+  return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "")
+}
 async function signingKey(env: Env, app: string) {
   const select = () => sql(env, "SELECT kid,cipher FROM approval_keys WHERE app_id=?", app).first<SigningKey>()
   let row = await select()
@@ -171,12 +197,14 @@ export async function getApproval(a: Access, id: string) {
   const latest = decode(r!.results[0])
   return latest.state === "approved" ? { ...latest, token: payload + "." + signature } : latest
 }
-export async function jwks(env: Env) {
+export async function jwks(env: Env, workspace: string | undefined) {
+  if (!workspace) bad("workspace is required")
   return {
     keys: (
       await sql(
         env,
-        `SELECT 'OKP' kty,'Ed25519' crv,'EdDSA' alg,'sig' AS use,kid,x FROM approval_keys ORDER BY kid`
+        `SELECT 'OKP' kty,'Ed25519' crv,'EdDSA' alg,'sig' AS use,kid,x FROM approval_keys k JOIN apps a ON a.id=k.app_id WHERE a.slug=? AND a.mode='helpdesk' ORDER BY kid`,
+        workspace
       ).all()
     ).results
   }
@@ -186,7 +214,7 @@ export async function consume(c: Ctx, s: Scope, id: string) {
     serverGuard(c.env, s),
     sql(
       c.env,
-      `UPDATE approvals SET state='used' WHERE id=? AND state='approved' AND expires>unixepoch() AND issue_id IN(SELECT id FROM issues WHERE app_id=?)`,
+      `UPDATE approvals SET state='used' WHERE id=? AND state='approved' AND decision_details_hash=details_hash AND expires>unixepoch() AND issue_id IN(SELECT id FROM issues WHERE app_id=?)`,
       id,
       s.app
     ),

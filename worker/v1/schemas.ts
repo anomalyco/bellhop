@@ -22,11 +22,12 @@ const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { 
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
   Approval: obj({
+    details_hash:{type:"string",pattern:"^[A-Za-z0-9_-]{43}$"},
     id: string,
     issue_number: integer,
     action: string,
     summary: string,
-    details: { type: "object", maxProperties: 20, additionalProperties: { type: ["number", "boolean", "string"] } },
+    details: { type: "object", description:"At most 4096 UTF-8 bytes as JSON.", maxProperties: 20, additionalProperties: { type: ["number", "boolean", "string"], maxLength:256 } },
     state: { enum: ["pending", "approved", "rejected", "expired", "used"] },
     requested_by: ref("Actor"),
     decided_by: nullable(ref("Actor")),

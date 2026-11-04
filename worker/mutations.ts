@@ -1015,9 +1015,12 @@ export async function removeLabel(a: Access, id: string) {
 }
 const base = "/api/apps/:slug/issues",
   path = `${base}/:number`
-function findComment(issue: Awaited<ReturnType<typeof full>>, id: string) {
+const replyUnavailable = () => fail(409, "reply_unavailable", "Reply is no longer available for this action")
+const replyGuard = (env: Env, test: string, ...args: unknown[]) =>
+  sql(env, `INSERT INTO held_reply_guard SELECT 0 WHERE NOT (${test})`, ...args)
+function findComment(issue: Awaited<ReturnType<typeof full>>, id: string, onMissing: () => never = missing) {
   for (const item of issue.timeline) if (item.kind === "comment" && item.comment.id === id) return item.comment
-  return missing()
+  return onMissing()
 }
 export async function editComment(a: Access, n: number, id: string, b: Record<string, unknown>) {
   const issue = await full(a, n),
@@ -1025,7 +1028,7 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
     text = str(b.body, "body", 65536, true),
     at = now()
   if (!old.viewer_is_author) denied()
-  if (old.held) fail(409, "reply_held", "A member can edit the draft when sending it")
+  if (old.held) replyUnavailable()
   if (!seesComment({ team: can(a.role, "read"), actorId: a.actor.id }, old.hidden)) missing()
   if (!text.trim() && !old.attachments.length) bad("A comment needs text or an attachment")
   if (text === old.body) return old
@@ -1059,7 +1062,7 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
     stillHere(a, issue.id),
     ...(!old.internal ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)] : []),
     ...(a.actor.type === "agent" && !old.internal
-      ? [typeGuard(a.env, "NOT EXISTS(SELECT 1 FROM suggest_issues WHERE id=?)", issue.id)]
+      ? [replyGuard(a.env, "NOT EXISTS(SELECT 1 FROM suggest_issues WHERE id=?)", issue.id)]
       : [])
   ])
   const latest = await full(a, n),
@@ -1083,13 +1086,26 @@ function purgeFiles(a: Access, files: { object_key: string }[]) {
       })()
     )
 }
-async function deleteComment(a: Access, n: number, id: string) {
-  const issue = await full(a, n),
-    c = findComment(issue, id)
+async function deleteComment(a: Access, n: number, id: string, held?: string) {
+  const heldOnly = held === "1"
+  if (heldOnly && !can(a.role, "triage")) denied()
+  const issue = await full(a, n)
+  const item = issue.timeline.find(t => t.kind === "comment" && t.comment.id === id)
+  if (item?.kind !== "comment") {
+    if (heldOnly || (a.desk && can(a.role, "triage") && await sql(a.env,
+      `SELECT 1 FROM audit_log WHERE app_id=? AND action='reply.discarded' AND json_extract(target,'$.id')=? AND json_extract(target,'$.number')=? LIMIT 1`,
+      a.app.id, id, n).first())) replyUnavailable()
+    return missing()
+  }
+  const c = item.comment
+  if (heldOnly && !c.held) replyUnavailable()
   if (!c.viewer_is_author && !can(a.role, "triage")) denied()
+  // A late, unqualified discard must never delete what another reviewer just published.
+  // An explicit published-state precondition still permits deliberate moderation.
+  if ((c.sent_by && held !== "0") || (c.held && held === "0")) replyUnavailable()
   if (c.held) {
-    const [, d] = await a.env.DB.batch([
-      typeGuard(a.env, `EXISTS(${memberGrant})`, a.app.id, a.actor.id),
+    await a.env.DB.batch([
+      replyGuard(a.env, `EXISTS(${memberGrant}) AND EXISTS(SELECT 1 FROM held_replies h JOIN issues i ON i.id=h.issue_id WHERE h.id=? AND i.app_id=? AND i.id=?)`, a.app.id, a.actor.id,id,a.app.id,issue.id),
       sql(
         a.env,
         "DELETE FROM held_replies WHERE id=? AND issue_id=(SELECT id FROM issues WHERE app_id=? AND number=?)",
@@ -1105,7 +1121,6 @@ async function deleteComment(a: Access, n: number, id: string) {
         id
       )
     ])
-    if (!d!.meta.changes) missing()
     emit(a.env, a.ctx, {
       app: a.app,
       actor: a.actor,
@@ -1494,8 +1509,8 @@ issues.post(`${commentPath}/send`, async (c) => {
     id = c.req.param("id"),
     b = await body(c),
     issue = await full(a, n),
-    draft = findComment(issue, id)
-  if (!draft.held) fail(409, "not_held", "Reply is not held")
+    draft = findComment(issue, id,replyUnavailable)
+  if (!draft.held) replyUnavailable()
   const text = b.body === undefined ? draft.body : str(b.body, "body", 65536),
     at = now(),
     edited = text !== draft.body,
@@ -1507,7 +1522,7 @@ issues.post(`${commentPath}/send`, async (c) => {
     issue.id
   ).first<string>("metadata_id")
   await a.env.DB.batch([
-    typeGuard(
+    replyGuard(
       a.env,
       `EXISTS(${memberGrant}) AND EXISTS(SELECT 1 FROM held_replies h JOIN issues i ON i.id=h.issue_id WHERE i.app_id=? AND i.id=? AND h.id=? AND h.body=?)`,
       a.app.id,
@@ -1568,7 +1583,7 @@ issues.patch(commentPath, async (c) => {
 })
 issues.delete(commentPath, async (c) => {
   await allowWrite(c)
-  await deleteComment(access(c), issueNumber(c.req.param("number")), c.req.param("id"))
+  await deleteComment(access(c), issueNumber(c.req.param("number")), c.req.param("id"),c.req.query('held'))
   return c.json({ ok: true })
 })
 for (const route of [`${path}/hide`, `${commentPath}/hide`])
