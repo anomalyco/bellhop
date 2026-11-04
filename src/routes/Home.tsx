@@ -1,13 +1,26 @@
-import { useEffect, useState, type FormEvent } from "react"
-import { Link, useLocation, useSearch } from "wouter"
-import type { App, Config, ConnectedAgent } from "../../shared/api"
-import { ApiFailure, api, errorMessage, keys } from "../lib/api"
-import { setData, useResource } from "../lib/cache"
-import { Header, Page, useMe } from "../ui/Shell"
+import { useEffect, useState } from "react"
+import { useSearch } from "wouter"
+import type { App, ConnectedAgent } from "../../shared/api"
+import { api, errorMessage, keys } from "../lib/api"
+import { useResource } from "../lib/cache"
+import { appLabel, appPath, homeUrl, isAbsolute } from "../lib/site"
+import { PlusIcon } from "../ui/icons"
 import { AgentAvatar, AppIcon, Button } from "../ui/primitives"
-import { Time } from "../lib/time"
-import { appLabel, appPath, isAbsolute } from "../lib/site"
+import { Header, Page, useMe } from "../ui/Shell"
 import { SiteLink } from "../ui/SiteLink"
+import { AgentSetup } from "../ui/onboarding/AgentSetup"
+import { accessSummary } from "../ui/agents/access"
+import { RoleBadge } from "../ui/roles/RoleSelect"
+import "../styles/agents.css"
+import { CreateWorkspace } from "./home/CreateWorkspace"
+import { Landing, SignInActions } from "./home/Landing"
+import "../styles/onboarding.css"
+
+/** Where ?next= may send you after signing in: a path here, or an absolute URL (an app subdomain) the Worker vets. */
+function safeNext(raw: string | null) {
+  const next = raw ?? "/"
+  return (next.startsWith("/") && !next.startsWith("//")) || isAbsolute(next) ? next : "/"
+}
 
 export function Home() {
   const { data: me, error } = useMe()
@@ -27,286 +40,127 @@ export function Home() {
       </>
     )
   }
-  return me.user ? <Apps /> : <SignIn />
+  if (me.user) return <Workspaces />
+  // Sent here to sign in from somewhere else: just the sign-in. A first visit: the landing.
+  return back ? <SignIn /> : <Landing next="/" />
 }
 
-/** The sign-in page. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
+/** The plain sign-in page. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
 export function SignIn({ back }: { back?: string }) {
-  const { data: config } = useResource<Config>(keys.config, api.config, 60_000)
   const search = useSearch()
-  const raw = back ?? new URLSearchParams(search).get("next") ?? "/"
-  // Absolute next URLs come from app subdomains; the Worker only follows them back onto this site.
-  const next = (raw.startsWith("/") && !raw.startsWith("//")) || isAbsolute(raw) ? raw : "/"
-  const [email, setEmail] = useState("")
-
-  const devLogin = (e: FormEvent) => {
-    e.preventDefault()
-    if (!email.trim()) return
-    window.location.assign(`/auth/dev?email=${encodeURIComponent(email.trim())}&next=${encodeURIComponent(next)}`)
-  }
-
+  const next = safeNext(back ?? new URLSearchParams(search).get("next"))
   return (
     <main className="signin">
       <div className="signin-inner">
         <AgentAvatar size={36} />
         <h1 className="signin-title">Sign in to Bellhop</h1>
-        {(!config || config.google_enabled || !config.dev_login) && (
-          <a className="btn" data-size="large" href={`/auth/google?next=${encodeURIComponent(next)}`}>
-            <GoogleMark />
-            Continue with Google
-          </a>
-        )}
-        {config?.dev_login && (
-          <form className="signin-dev" onSubmit={devLogin}>
-            <label className="field-label" htmlFor="dev-email">
-              Development sign-in
-            </label>
-            <div className="row">
-              <div className="input" style={{ flex: 1 }}>
-                <input
-                  id="dev-email"
-                  type="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                />
-              </div>
-              <Button type="submit">Sign in</Button>
-            </div>
-          </form>
-        )}
-        <p className="signin-note">Reporting an issue doesn't need an account.</p>
+        <SignInActions next={next} />
       </div>
     </main>
   )
 }
 
-function GoogleMark() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 48 48" aria-hidden="true">
-      <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z" />
-      <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
-      <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z" />
-      <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z" />
-    </svg>
-  )
-}
-
-function Apps() {
+/** Signed in: the first-workspace step for a new account, otherwise the workspace list and connected agents. */
+function Workspaces() {
   const { data: apps, error } = useResource<App[]>(keys.apps, api.apps, 5_000)
+  const [creating, setCreating] = useState(false)
+
+  if (apps && (apps.length === 0 || creating))
+    return (
+      <>
+        <Header />
+        <main className="create-page">
+          <CreateWorkspace first={apps.length === 0} onCancel={apps.length ? () => setCreating(false) : undefined} />
+        </main>
+      </>
+    )
+
   return (
     <>
       <Header />
-      <Page>
-        <div className="home-grid">
-          <section>
-            <h2 className="section-title">Your applications</h2>
-            <div className="box">
-            {!apps && !error && <div className="box-row skeleton-row" />}
-            {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
-            {apps?.length === 0 && <div className="box-row muted-text">No applications yet.</div>}
-            {apps?.map((app) => (
-              <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
-                <AppIcon src={app.icon_url} size={28} />
-                <div className="app-row-main">
-                  <div className="app-row-title">
-                    <span className="app-row-name">{app.name}</span>
-                    <span className="mono app-row-slug">{appLabel(app.slug)}</span>
-                  </div>
-                  {app.description && <div className="issue-meta">{app.description}</div>}
-                </div>
-                <span className="role-badge">{app.role === "owner" ? "Owner" : "Member"}</span>
-              </SiteLink>
-            ))}
-            </div>
-            <ConnectedAgents />
-          </section>
-          <NewApp />
+      <Page narrow>
+        <div className="home-head">
+          <h1 className="page-title home-title">Your workspaces</h1>
+          <Button variant="primary" icon={<PlusIcon size={14} />} onClick={() => setCreating(true)} disabled={!apps}>
+            New workspace
+          </Button>
         </div>
+        <div className="box">
+          {!apps && !error && <div className="box-row skeleton-row" />}
+          {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
+          {apps?.map((app) => (
+            <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
+              <AppIcon src={app.icon_url} size={28} />
+              <div className="app-row-main">
+                <div className="app-row-title">
+                  <span className="app-row-name">{app.name}</span>
+                  <span className="mono app-row-slug">{appLabel(app.slug)}</span>
+                </div>
+                {app.description && <div className="issue-meta">{app.description}</div>}
+              </div>
+              {app.role && <RoleBadge role={app.role} />}
+            </SiteLink>
+          ))}
+        </div>
+        <ConnectedAgents />
       </Page>
     </>
   )
 }
 
-const slugify = (name: string) =>
-  name
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40)
-    .replace(/-+$/, "")
-
-// The Worker's reserved slugs (they double as subdomains), plus the home domain's own pages.
-const reserved = new Set(
-  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device _design".split(" "),
-)
-
-function NewApp() {
-  const [, navigate] = useLocation()
-  const [name, setName] = useState("")
-  const [slug, setSlug] = useState("")
-  const [slugEdited, setSlugEdited] = useState(false)
-  const [description, setDescription] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-
-  const effectiveSlug = slugEdited ? slug : slugify(name)
-  const slugProblem = !effectiveSlug
-    ? null
-    : !/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(effectiveSlug)
-      ? "Use 2–40 lowercase letters, digits and hyphens."
-      : reserved.has(effectiveSlug)
-        ? "That slug is reserved."
-        : null
-
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!name.trim() || !effectiveSlug || slugProblem) return
-    setSaving(true)
-    setError(null)
-    try {
-      const app = await api.createApp({ name: name.trim(), slug: effectiveSlug, description: description.trim() || undefined })
-      setData(keys.app(app.slug), app)
-      setData<App[]>(keys.apps, (apps) => [...(apps ?? []), app].sort((a, b) => a.name.localeCompare(b.name)))
-      const settings = appPath(app.slug, "/settings")
-      if (isAbsolute(settings)) window.location.assign(settings)
-      else navigate(settings)
-    } catch (err) {
-      setError(err instanceof ApiFailure && err.status === 409 ? "That slug is taken." : errorMessage(err))
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form className="new-app" onSubmit={submit}>
-      <h2 className="section-title">New application</h2>
-      <div className="field">
-        <label className="field-label" htmlFor="app-name">
-          Name
-        </label>
-        <div className="input">
-          <input id="app-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="OpenCode" required maxLength={80} />
-        </div>
-      </div>
-      <div className="field">
-        <label className="field-label" htmlFor="app-slug">
-          URL
-        </label>
-        <div className="input">
-          <span className="input-prefix mono">{location.host}/</span>
-          <input
-            id="app-slug"
-            className="mono"
-            value={effectiveSlug}
-            onChange={(e) => {
-              setSlugEdited(true)
-              setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-").slice(0, 40))
-            }}
-            placeholder="opencode"
-            required
-          />
-        </div>
-        {slugProblem && <p className="field-error">{slugProblem}</p>}
-      </div>
-      <div className="field">
-        <label className="field-label" htmlFor="app-description">
-          Description <span className="muted-text">(optional)</span>
-        </label>
-        <textarea
-          id="app-description"
-          className="textarea"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          maxLength={500}
-        />
-      </div>
-      {!!error && <p className="flash" data-tone="danger">{error}</p>}
-      <div>
-        <Button type="submit" variant="primary" disabled={saving || !name.trim() || !effectiveSlug || !!slugProblem}>
-          {saving ? "Creating…" : "Create application"}
-        </Button>
-      </div>
-    </form>
-  )
-}
-
-/** Agents the user connected over OAuth, each disconnectable after a small inline confirm. */
+/** A short list of the account's agents with a link to manage them; how to connect one when there are none. */
 function ConnectedAgents() {
   const { data: agents, error } = useResource<ConnectedAgent[]>(keys.agents, api.agents, 10_000)
+  const manage = homeUrl("/agents")
   return (
-    <>
-      <h2 className="section-title section-title-gap">Connected agents</h2>
-      <div className="box">
-        {!agents && !error && <div className="box-row skeleton-row" />}
-        {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {agents?.length === 0 && (
-          <div className="box-row muted-text">
-            <span>
-              Add <code className="mono agent-mcp-url">{window.location.origin}/mcp</code> to your agent's MCP servers.
-            </span>
-          </div>
+    <section className="home-agents">
+      <div className="home-agents-head">
+        <h2 className="section-title">Agents</h2>
+        {!!agents?.length && (
+          <SiteLink href={manage} className="home-agents-link">
+            Manage agents
+          </SiteLink>
         )}
-        {agents?.map((agent) => <AgentRow key={agent.id} agent={agent} />)}
       </div>
-    </>
-  )
-}
-
-function AgentRow({ agent }: { agent: ConnectedAgent }) {
-  const [confirming, setConfirming] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const disconnect = async () => {
-    setBusy(true)
-    setError(null)
-    try {
-      await api.disconnectAgent(agent.id)
-      setData<ConnectedAgent[]>(keys.agents, (list) => list?.filter((a) => a.id !== agent.id))
-    } catch (e) {
-      setError(errorMessage(e))
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="box-row agent-row">
-      <AgentAvatar size={28} />
-      <div className="app-row-main">
-        <div className="app-row-title">
-          <span className="app-row-name">{agent.client_name}</span>
+      {!agents && !error && (
+        <div className="box">
+          <div className="box-row skeleton-row" />
         </div>
-        <div className="issue-meta">
-          {agent.apps.map((a) => a.name).join(", ") || "No workspaces"} · Connected <Time iso={agent.created_at} /> ·{" "}
-          {agent.last_used_at ? (
-            <>
-              last used <Time iso={agent.last_used_at} />
-            </>
-          ) : (
-            "not used yet"
+      )}
+      {!!error && (
+        <div className="box">
+          <div className="box-row muted-text">{errorMessage(error)}</div>
+        </div>
+      )}
+      {agents?.length === 0 && (
+        <div className="home-agents-empty">
+          <p className="muted-text">
+            Connect your agent so it can answer issues in your workspaces, or <SiteLink href={manage}>create a token agent</SiteLink>.
+          </p>
+          <AgentSetup />
+        </div>
+      )}
+      {!!agents?.length && (
+        <div className="box">
+          {agents.slice(0, 4).map((agent) => (
+            <SiteLink key={agent.id} href={manage} className="box-row agent-row home-agent-row">
+              <AgentAvatar size={28} />
+              <div className="app-row-main">
+                <div className="app-row-title">
+                  <span className="app-row-name">{agent.client_name}</span>
+                  <span className="agent-kind">{agent.kind === "token" ? "Token agent" : "Connected app"}</span>
+                </div>
+                <div className="issue-meta">{accessSummary(agent)}</div>
+              </div>
+            </SiteLink>
+          ))}
+          {agents.length > 4 && (
+            <SiteLink href={manage} className="box-row home-agents-more">
+              {agents.length - 4} more
+            </SiteLink>
           )}
         </div>
-        {error && <p className="field-error">{error}</p>}
-      </div>
-      {confirming ? (
-        <div className="agent-confirm">
-          <span className="muted-text">Disconnect?</span>
-          <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
-            Cancel
-          </Button>
-          <Button size="small" variant="danger" onClick={disconnect} disabled={busy}>
-            {busy ? "Disconnecting…" : "Disconnect"}
-          </Button>
-        </div>
-      ) : (
-        <Button size="small" onClick={() => setConfirming(true)}>
-          Disconnect
-        </Button>
       )}
-    </div>
+    </section>
   )
 }

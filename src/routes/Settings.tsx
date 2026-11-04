@@ -1,24 +1,30 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { Link } from "wouter"
-import type { App, AppDetail, AppSettings, Label as LabelType, NewToken, Template, TemplateInput } from "../../shared/api"
+import type { AgentRole, App, AppAgent, AppDetail, AppSettings, Label as LabelType, Member, Role, Template, TemplateInput } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { invalidate, setData, useResource } from "../lib/cache"
 import { Time } from "../lib/time"
 import { UserAvatar } from "../ui/Actor"
-import { PlusIcon } from "../ui/icons"
-import { AppLayout, Page } from "../ui/Shell"
-import { AppIcon, Button, Label } from "../ui/primitives"
-import { appLabel, appPath, signInHref } from "../lib/site"
+import { KebabIcon, PlusIcon } from "../ui/icons"
+import { Menu, MenuItem } from "../ui/Menu"
+import { AppLayout, Page, useMe } from "../ui/Shell"
+import { AgentAvatar, AppIcon, Button, Label } from "../ui/primitives"
+import { RoleBadge, RoleSelect } from "../ui/roles/RoleSelect"
+import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel, roleText, teamRoles } from "../lib/roles"
+import { appLabel, appPath, homeUrl, signInHref } from "../lib/site"
+import { SiteLink } from "../ui/SiteLink"
+import "../styles/agents.css"
 
 type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members"
 
-const sections: { id: Section; label: string; owner?: boolean }[] = [
-  { id: "general", label: "General" },
-  { id: "labels", label: "Labels" },
-  { id: "templates", label: "Templates" },
-  { id: "agents", label: "Agents", owner: true },
-  { id: "webhook", label: "Webhook", owner: true },
-  { id: "members", label: "Members", owner: true },
+// `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
+const sections: { id: Section; label: string; min: Role }[] = [
+  { id: "general", label: "General", min: "viewer" },
+  { id: "labels", label: "Labels", min: "viewer" },
+  { id: "templates", label: "Templates", min: "viewer" },
+  { id: "members", label: "Members", min: "member" },
+  { id: "agents", label: "Agents", min: "admin" },
+  { id: "webhook", label: "Webhook", min: "admin" },
 ]
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
@@ -34,8 +40,8 @@ function SettingsBody({ app, section }: { app: AppDetail; section: Section }) {
     return (
       <Page narrow>
         <div className="blank">
-          <h1 className="blank-title">Members only</h1>
-          <p className="muted-text">Sign in with an account that belongs to this application.</p>
+          <h1 className="blank-title">For this workspace's team</h1>
+          <p className="muted-text">Settings are for the people on this workspace. Sign in with an account that's on its team.</p>
           <a href={signInHref()} className="btn">
             Sign in
           </a>
@@ -47,8 +53,7 @@ function SettingsBody({ app, section }: { app: AppDetail; section: Section }) {
 }
 
 function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) {
-  const owner = app.role === "owner"
-  const visible = sections.filter((s) => !s.owner || owner)
+  const visible = sections.filter((s) => atLeast(app.role, s.min))
   const active = visible.some((s) => s.id === section) ? section : "general"
   const nav = useRef<HTMLElement>(null)
   // On phones the section list scrolls sideways; keep the current one in view.
@@ -102,7 +107,7 @@ function useSettings(slug: string) {
 /* General */
 
 function General({ app }: { app: AppDetail }) {
-  const owner = app.role === "owner"
+  const admin = canSetup(app.role)
   const [name, setName] = useState(app.name)
   const [description, setDescription] = useState(app.description)
   const [saving, setSaving] = useState(false)
@@ -130,28 +135,35 @@ function General({ app }: { app: AppDetail }) {
     <form className="settings-form" onSubmit={save}>
       <Heading title="General" />
       <IconField app={app} />
-      <div className="field">
-        <label className="field-label" htmlFor="set-name">
-          Name
-        </label>
-        <div className="input">
-          <input id="set-name" value={name} onChange={(e) => setName(e.target.value)} disabled={!owner} required maxLength={80} />
-        </div>
-      </div>
-      <div className="field">
-        <label className="field-label" htmlFor="set-description">
-          Description
-        </label>
-        <textarea
-          id="set-description"
-          className="textarea"
-          rows={3}
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          disabled={!owner}
-          maxLength={500}
-        />
-      </div>
+      {admin ? (
+        <>
+          <div className="field">
+            <label className="field-label" htmlFor="set-name">
+              Name
+            </label>
+            <div className="input">
+              <input id="set-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} />
+            </div>
+          </div>
+          <div className="field">
+            <label className="field-label" htmlFor="set-description">
+              Description
+            </label>
+            <textarea id="set-description" className="textarea" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="field">
+            <span className="field-label">Name</span>
+            <p className="settings-value">{app.name}</p>
+          </div>
+          <div className="field">
+            <span className="field-label">Description</span>
+            <p className="settings-value">{app.description || <span className="muted-text">No description</span>}</p>
+          </div>
+        </>
+      )}
       <div className="field">
         <span className="field-label">Public page</span>
         <a className="mono" href={appPath(app.slug)}>
@@ -159,7 +171,7 @@ function General({ app }: { app: AppDetail }) {
         </a>
       </div>
       <Flash error={error} />
-      {owner ? (
+      {admin ? (
         <div className="row">
           <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
             {saving ? "Saving…" : "Save"}
@@ -167,7 +179,7 @@ function General({ app }: { app: AppDetail }) {
           {saved && <span className="muted-text">Saved</span>}
         </div>
       ) : (
-        <p className="muted-text">Only the owner can change these.</p>
+        <p className="muted-text">Only admins and owners can change these. You're {app.role === "member" ? "a member" : "a viewer"} here.</p>
       )}
     </form>
   )
@@ -178,9 +190,9 @@ const iconLimit = 1024 * 1024
 const tooBig = "That image is over 1 MB. Try a smaller export."
 const wrongType = "Use a PNG, JPEG or WebP image."
 
-/** The app's icon: favicon and top-left logo on its pages. Owners upload or remove it. */
+/** The workspace's icon: favicon and top-left logo on its pages. Admins upload or remove it. */
 function IconField({ app }: { app: AppDetail }) {
-  const owner = app.role === "owner"
+  const owner = canSetup(app.role)
   const input = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<"upload" | "remove" | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -261,6 +273,7 @@ const palette = ["fa4d56", "ff832b", "f1c21b", "42be65", "08bdba", "33b1ff", "45
 const randomColor = () => palette[Math.floor(Math.random() * palette.length)]!
 
 function Labels({ app }: { app: AppDetail }) {
+  const admin = canSetup(app.role)
   const [editing, setEditing] = useState<string | "new" | null>(null)
   const labels = app.labels
   const store = (next: LabelType[]) => setData<AppDetail>(keys.app(app.slug), (a) => (a ? { ...a, labels: next.sort((x, y) => x.name.localeCompare(y.name)) } : a))
@@ -283,6 +296,7 @@ function Labels({ app }: { app: AppDetail }) {
       <Heading
         title="Labels"
         action={
+          admin &&
           editing !== "new" && (
             <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setEditing("new")}>
               New label
@@ -291,6 +305,7 @@ function Labels({ app }: { app: AppDetail }) {
         }
       />
       <Flash error={error} />
+      {!admin && <p className="settings-readonly">Only admins and owners can change labels.</p>}
       <section className="box">
         {editing === "new" && (
           <LabelForm
@@ -319,14 +334,16 @@ function Labels({ app }: { app: AppDetail }) {
                 <Label name={label.name} color={label.color} />
               </div>
               <div className="settings-row-main muted-text">{label.description}</div>
-              <div className="settings-row-actions">
-                <Button size="small" variant="invisible" onClick={() => setEditing(label.id)}>
-                  Edit
-                </Button>
-                <Button size="small" variant="invisible" onClick={() => remove(label)}>
-                  Delete
-                </Button>
-              </div>
+              {admin && (
+                <div className="settings-row-actions">
+                  <Button size="small" variant="invisible" onClick={() => setEditing(label.id)}>
+                    Edit
+                  </Button>
+                  <Button size="small" variant="invisible" onClick={() => remove(label)}>
+                    Delete
+                  </Button>
+                </div>
+              )}
             </div>
           ),
         )}
@@ -422,6 +439,7 @@ function LabelForm({ slug, label, onDone }: { slug: string; label?: LabelType; o
 /* Templates */
 
 function Templates({ app }: { app: AppDetail }) {
+  const admin = canSetup(app.role)
   const [editing, setEditing] = useState<string | "new" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const templates = [...app.templates].sort((a, b) => a.position - b.position)
@@ -443,6 +461,7 @@ function Templates({ app }: { app: AppDetail }) {
       <Heading
         title="Templates"
         action={
+          admin &&
           editing !== "new" && (
             <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setEditing("new")}>
               New template
@@ -451,6 +470,7 @@ function Templates({ app }: { app: AppDetail }) {
         }
       />
       <Flash error={error} />
+      {!admin && <p className="settings-readonly">Only admins and owners can change templates.</p>}
       <section className="box">
         {editing === "new" && (
           <TemplateForm
@@ -493,14 +513,16 @@ function Templates({ app }: { app: AppDetail }) {
                   </div>
                 )}
               </div>
-              <div className="settings-row-actions">
-                <Button size="small" variant="invisible" onClick={() => setEditing(t.id)}>
-                  Edit
-                </Button>
-                <Button size="small" variant="invisible" onClick={() => remove(t)}>
-                  Delete
-                </Button>
-              </div>
+              {admin && (
+                <div className="settings-row-actions">
+                  <Button size="small" variant="invisible" onClick={() => setEditing(t.id)}>
+                    Edit
+                  </Button>
+                  <Button size="small" variant="invisible" onClick={() => remove(t)}>
+                    Delete
+                  </Button>
+                </div>
+              )}
             </div>
           ),
         )}
@@ -627,8 +649,6 @@ function TemplateForm({
   )
 }
 
-/* Agents */
-
 function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
@@ -649,101 +669,109 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
   )
 }
 
+/* Agents with access */
+
+/** Agents with access to this workspace, from every account on its team. Admins set each one's role here, up to
+ *  what its account allows, or remove it. Creating agents happens on the account's Agents page. */
 function Agents({ app }: { app: AppDetail }) {
-  const { data: settings, error } = useSettings(app.slug)
-  const [name, setName] = useState("OpenCode")
-  const [created, setCreated] = useState<NewToken | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  const create = async (e: FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    setActionError(null)
-    try {
-      const token = await api.createToken(app.slug, name.trim())
-      setCreated(token)
-      const { token: _secret, ...stored } = token
-      setData<AppSettings>(keys.settings(app.slug), (s) => (s ? { ...s, tokens: [stored, ...s.tokens] } : s))
-    } catch (err) {
-      setActionError(errorMessage(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const remove = async (id: string, tokenName: string) => {
-    if (!confirm(`Delete the “${tokenName}” token? Agents using it lose access at once.`)) return
-    setActionError(null)
-    try {
-      await api.deleteToken(app.slug, id)
-      setData<AppSettings>(keys.settings(app.slug), (s) => (s ? { ...s, tokens: s.tokens.filter((t) => t.id !== id) } : s))
-      if (created?.id === id) setCreated(null)
-    } catch (err) {
-      setActionError(errorMessage(err))
-    }
-  }
-
-  const snippet = created && settings
-    ? JSON.stringify({ mcp: { bellhop: { type: "remote", url: settings.mcp_url, headers: { Authorization: `Bearer ${created.token}` } } } }, null, 2)
-    : ""
-
+  const { data: agents, error } = useResource<AppAgent[]>(keys.appAgents(app.slug), () => api.appAgents(app.slug), 5_000)
   return (
     <div>
-      <Heading title="Agents" />
-      <form className="row settings-inline-form" onSubmit={create}>
-        <div className="input" style={{ flex: 1, maxWidth: 320 }}>
-          <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Token name" placeholder="Agent name" maxLength={40} />
-        </div>
-        <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
-          {saving ? "Creating…" : "Create token"}
-        </Button>
-      </form>
-      <Flash error={actionError} />
+      <Heading title="Agents with access" />
+      <p className="settings-lede">
+        Agents belong to people's accounts and work here with the role set below, never above their owner's. To create a token agent or
+        connect one, use{" "}
+        <SiteLink href={homeUrl("/agents")}>your Agents page</SiteLink>.
+      </p>
+      <section className="box">
+        {!agents && !error && <div className="box-row skeleton-row" />}
+        {!!error && !agents && <div className="box-row muted-text">{errorMessage(error)}</div>}
+        {agents?.length === 0 && <div className="box-empty">No agents have access yet.</div>}
+        {agents?.map((agent) => <AppAgentRow key={agent.id} slug={app.slug} agent={agent} />)}
+      </section>
+    </div>
+  )
+}
 
-      {created && (
-        <div className="secret-panel">
-          <p className="secret-panel-title">Copy this token now. It won't be shown again.</p>
-          <div className="secret-line">
-            <code className="mono">{created.token}</code>
-            <CopyButton text={created.token} />
-          </div>
-          <div className="secret-snippet-head">
-            <span className="field-label">OpenCode config</span>
-            <CopyButton text={snippet} />
-          </div>
-          <pre className="code-block">{snippet}</pre>
+function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const store = (fn: (list: AppAgent[]) => AppAgent[]) => setData<AppAgent[]>(keys.appAgents(slug), (list) => (list ? fn(list) : list))
+
+  const setRole = async (role: AgentRole) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const next = await api.patchAppAgent(slug, agent.id, role)
+      store((list) => list.map((a) => (a.id === next.id ? next : a)))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const remove = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.removeAppAgent(slug, agent.id)
+      store((list) => list.filter((a) => a.id !== agent.id))
+    } catch (e) {
+      setError(errorMessage(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="box-row settings-row app-agent-row">
+      <AgentAvatar size={28} />
+      <div className="settings-row-main">
+        <div className="template-row-name">
+          {agent.client_name} <span className="agent-kind">{agent.kind === "token" ? "Token agent" : "Connected app"}</span>
+        </div>
+        <div className="issue-meta">
+          Approved by {agent.approved_by.name} ·{" "}
+          {agent.last_used_at ? (
+            <>
+              last used <Time iso={agent.last_used_at} />
+            </>
+          ) : (
+            "not used yet"
+          )}
+        </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+      {confirming ? (
+        <div className="agent-confirm-inline">
+          <span className="agent-confirm-text">Remove its access here? If it has all workspaces, this one is excluded.</span>
+          <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="small" variant="danger" onClick={remove} disabled={busy}>
+            Remove
+          </Button>
+        </div>
+      ) : (
+        <div className="settings-row-actions">
+          <RoleSelect
+            value={agent.role}
+            label={`Role for ${agent.client_name}`}
+            disabled={busy}
+            options={agentRoles.map((r) => ({
+              value: r,
+              label: agentRoleLabel[r],
+              description: atLeast(agent.max_role, r) ? agentRoleText[r] : `Above its owner's role (${agentRoleLabel[agent.max_role].toLowerCase()} at most)`,
+              disabled: !atLeast(agent.max_role, r),
+            }))}
+            onChange={setRole}
+          />
+          <Button size="small" variant="invisible" onClick={() => setConfirming(true)}>
+            Remove
+          </Button>
         </div>
       )}
-
-      <section className="box">
-        {!settings && !error && <div className="box-row skeleton-row" />}
-        {!!error && !settings && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {settings?.tokens.length === 0 && <div className="box-empty">No tokens yet.</div>}
-        {settings?.tokens.map((t) => (
-          <div key={t.id} className="box-row settings-row">
-            <div className="settings-row-main">
-              <div className="template-row-name">{t.name}</div>
-              <div className="issue-meta">
-                <span className="mono">{t.preview}</span> · created <Time iso={t.created_at} /> ·{" "}
-                {t.last_used_at ? (
-                  <>
-                    last used <Time iso={t.last_used_at} />
-                  </>
-                ) : (
-                  "never used"
-                )}
-              </div>
-            </div>
-            <div className="settings-row-actions">
-              <Button size="small" variant="danger" onClick={() => remove(t.id, t.name)}>
-                Delete
-              </Button>
-            </div>
-          </div>
-        ))}
-      </section>
     </div>
   )
 }
@@ -891,70 +919,247 @@ function Webhook({ app }: { app: AppDetail }) {
 
 /* Members */
 
+const elevated = (role: Role) => role === "owner" || role === "admin"
+
+/** The server's refusals, in plain words: 403 when an admin touches admins or owners, 409 for the last owner. */
+function memberError(e: unknown) {
+  if (e instanceof ApiFailure && e.code === "last_owner") return "A workspace must keep at least one owner who has signed in."
+  if (e instanceof ApiFailure && e.status === 403) return "Only owners can add, change or remove admins and owners."
+  return errorMessage(e)
+}
+
 function Members({ app }: { app: AppDetail }) {
   const { data: settings, error } = useSettings(app.slug)
+  const { data: me } = useMe()
+  const admin = canSetup(app.role)
+  const owner = app.role === "owner"
+  // Owners first, then admins, members and viewers; by name within each.
+  const members = [...(settings?.members ?? [])].sort(
+    (a, b) => teamRoles.indexOf(a.role) - teamRoles.indexOf(b.role) || (a.name ?? a.email).localeCompare(b.name ?? b.email),
+  )
+  const joinedOwners = members.filter((m) => m.role === "owner" && m.joined).length
+  const [note, setNote] = useState<string | null>(null)
+
+  return (
+    <div>
+      <Heading title="Members" />
+      {admin ? <Invite app={app} owner={owner} /> : <p className="settings-readonly">Only admins and owners can manage members.</p>}
+      {note && <p className="settings-note">{note}</p>}
+      <section className="box">
+        {!settings && !error && <div className="box-row skeleton-row" />}
+        {!!error && !settings && <div className="box-row muted-text">{errorMessage(error)}</div>}
+        {members.map((m) => (
+          <MemberRow
+            key={m.id}
+            app={app}
+            member={m}
+            you={!!me?.user && me.user.id === m.id}
+            canManage={admin && (owner || !elevated(m.role))}
+            owner={owner}
+            lastOwner={m.role === "owner" && m.joined && joinedOwners <= 1}
+            onNote={setNote}
+          />
+        ))}
+      </section>
+    </div>
+  )
+}
+
+function Invite({ app, owner }: { app: AppDetail; owner: boolean }) {
   const [email, setEmail] = useState("")
+  const [role, setRole] = useState<Role>("member")
   const [busy, setBusy] = useState(false)
-  const [actionError, setActionError] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
   const invite = async (e: FormEvent) => {
     e.preventDefault()
-    if (!email.trim()) return
+    if (!email.trim() || busy) return
     setBusy(true)
-    setActionError(null)
+    setError(null)
     try {
-      setData(keys.settings(app.slug), await api.addMember(app.slug, email.trim()))
+      setData(keys.settings(app.slug), await api.addMember(app.slug, email.trim(), role))
       setEmail("")
+      setRole("member")
     } catch (err) {
-      setActionError(errorMessage(err))
+      setError(memberError(err))
     } finally {
       setBusy(false)
     }
   }
 
-  const remove = async (id: string, who: string) => {
-    if (!confirm(`Remove ${who} from ${app.name}?`)) return
-    setActionError(null)
+  return (
+    <form className="member-invite" onSubmit={invite}>
+      <div className="member-invite-row">
+        <div className="input">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label="Email to invite" autoComplete="off" />
+        </div>
+        <RoleSelect
+          value={role}
+          label="Role for the invite"
+          options={teamRoles.map((r) => ({
+            value: r,
+            label: roleLabel[r],
+            description: !owner && elevated(r) ? "Only owners can invite admins and owners" : roleText[r],
+            disabled: !owner && elevated(r),
+          }))}
+          onChange={setRole}
+        />
+        <Button type="submit" variant="primary" disabled={busy || !email.trim()}>
+          {busy ? "Inviting…" : "Invite"}
+        </Button>
+      </div>
+      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">They join when they sign in with that email.</p>}
+    </form>
+  )
+}
+
+function MemberRow({
+  app,
+  member,
+  you,
+  canManage,
+  owner,
+  lastOwner,
+  onNote,
+}: {
+  app: AppDetail
+  member: Member
+  you: boolean
+  canManage: boolean
+  owner: boolean
+  lastOwner: boolean
+  onNote: (note: string | null) => void
+}) {
+  const [confirm, setConfirm] = useState<{ kind: "remove" } | { kind: "role"; role: Role } | { kind: "transfer" } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const who = member.name ?? member.email
+
+  const act = async (fn: () => Promise<AppSettings>, done?: string) => {
+    setBusy(true)
+    setError(null)
+    onNote(null)
     try {
-      setData(keys.settings(app.slug), await api.removeMember(app.slug, id))
-    } catch (err) {
-      setActionError(errorMessage(err))
+      setData(keys.settings(app.slug), await fn())
+      setConfirm(null)
+      if (done) onNote(done)
+    } catch (e) {
+      setError(memberError(e))
+    } finally {
+      setBusy(false)
     }
   }
 
+  const change = (role: Role) => {
+    // Lowering your own role can take these settings away from you; ask first.
+    if (you && !atLeast(role, member.role)) return setConfirm({ kind: "role", role })
+    void act(() => api.patchMember(app.slug, member.id, role))
+  }
+
+  const confirmText =
+    confirm?.kind === "remove"
+      ? you
+        ? "Leave this workspace?"
+        : `Remove ${who}?`
+      : confirm?.kind === "role"
+        ? `Become ${roleLabel[confirm.role].toLowerCase()}? You may lose access to these settings.`
+        : confirm?.kind === "transfer"
+          ? `Make ${who} an owner too?`
+          : ""
+
   return (
-    <div>
-      <Heading title="Members" />
-      <form className="row settings-inline-form" onSubmit={invite}>
-        <div className="input" style={{ flex: 1, maxWidth: 320 }}>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label="Email to invite" />
+    <div className="box-row settings-row member-row">
+      <UserAvatar user={member} size={32} />
+      <div className="settings-row-main">
+        <div className="template-row-name">
+          {who}
+          {you && <span className="member-you"> (you)</span>}
         </div>
-        <Button type="submit" variant="primary" disabled={busy || !email.trim()}>
-          Invite
-        </Button>
-      </form>
-      <Flash error={actionError} />
-      <section className="box">
-        {!settings && !error && <div className="box-row skeleton-row" />}
-        {!!error && !settings && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {settings?.members.map((m) => (
-          <div key={m.id} className="box-row settings-row member-row">
-            <UserAvatar user={m} size={32} />
-            <div className="settings-row-main">
-              <div className="template-row-name">{m.name ?? m.email}</div>
-              <div className="issue-meta">{m.name ? m.email : m.joined ? "" : "Hasn't signed in yet"}</div>
-            </div>
-            <span className="role-badge">{m.role === "owner" ? "Owner" : m.joined ? "Member" : "Invited"}</span>
-            <div className="settings-row-actions">
-              {m.role !== "owner" && (
-                <Button size="small" variant="invisible" onClick={() => remove(m.id, m.name ?? m.email)}>
-                  Remove
-                </Button>
+        <div className="issue-meta">
+          {member.name ? member.email : ""}
+          {!member.joined && `${member.name ? " · " : ""}Invited, hasn't signed in yet`}
+        </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+      {confirm ? (
+        <div className="agent-confirm-inline">
+          <span className="agent-confirm-text">{confirmText}</span>
+          <Button size="small" variant="invisible" onClick={() => setConfirm(null)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button
+            size="small"
+            variant={confirm.kind === "transfer" ? "primary" : "danger"}
+            disabled={busy}
+            onClick={() =>
+              confirm.kind === "remove"
+                ? act(() => api.removeMember(app.slug, member.id))
+                : confirm.kind === "role"
+                  ? act(() => api.patchMember(app.slug, member.id, confirm.role))
+                  : act(() => api.transfer(app.slug, member.id), `${who} is now an owner too. If you're handing over, change your own role.`)
+            }
+          >
+            {confirm.kind === "remove" ? (you ? "Leave" : "Remove") : confirm.kind === "role" ? "Change" : "Make owner"}
+          </Button>
+        </div>
+      ) : (
+        <div className="settings-row-actions member-actions">
+          {canManage ? (
+            <RoleSelect
+              value={member.role}
+              label={`Role for ${who}`}
+              disabled={busy}
+              options={teamRoles.map((r) => {
+                const ownerOnly = !owner && elevated(r)
+                const keepOwner = lastOwner && r !== "owner"
+                return {
+                  value: r,
+                  label: roleLabel[r],
+                  description: keepOwner ? "A workspace needs an owner who has signed in" : ownerOnly ? "Only owners can grant this" : roleText[r],
+                  disabled: ownerOnly || keepOwner,
+                }
+              })}
+              onChange={change}
+            />
+          ) : (
+            <RoleBadge role={member.role} />
+          )}
+          {canManage && (
+            <Menu
+              align="end"
+              width={240}
+              trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label={`More for ${who}`} icon={<KebabIcon />} {...p} />}
+            >
+              {(close) => (
+                <>
+                  {owner && member.joined && member.role !== "owner" && (
+                    <MenuItem
+                      description="They become an owner too; you stay one"
+                      onSelect={() => {
+                        close()
+                        setConfirm({ kind: "transfer" })
+                      }}
+                    >
+                      Transfer ownership
+                    </MenuItem>
+                  )}
+                  <MenuItem
+                    danger
+                    disabled={lastOwner}
+                    description={lastOwner ? "A workspace needs an owner who has signed in" : undefined}
+                    onSelect={() => {
+                      close()
+                      setConfirm({ kind: "remove" })
+                    }}
+                  >
+                    {you ? "Leave workspace" : "Remove"}
+                  </MenuItem>
+                </>
               )}
-            </div>
-          </div>
-        ))}
-      </section>
+            </Menu>
+          )}
+        </div>
+      )}
     </div>
   )
 }

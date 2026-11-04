@@ -35,3 +35,14 @@ export function signInHref() {
 
 /** How an app's public address reads: "acme.blhp.app" in production, "/acme" in path mode. */
 export const appLabel = (slug: string) => (domain ? `${slug}.${domain}` : `/${slug}`)
+
+/** How a workspace address is typed: a subdomain ("<slug>.blhp.app") in production, a path ("host/<slug>") in path mode. */
+export function addressParts(): { prefix: string; suffix: string } {
+  return domain ? { prefix: "", suffix: `.${domain}` } : { prefix: `${window.location.host}/`, suffix: "" }
+}
+
+/** The workspace's full public URL, for copying and sharing. */
+export const appUrl = (slug: string) => new URL(appPath(slug), window.location.href).href
+
+/** The MCP endpoint on the home domain, absolute. */
+export const mcpUrl = () => new URL(homeUrl("/mcp"), window.location.href).href

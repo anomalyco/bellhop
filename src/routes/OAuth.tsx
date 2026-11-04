@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from "react"
 import { useSearch } from "wouter"
-import type { OAuthRequest } from "../../shared/api"
+import type { AgentAccess, OAuthRequest } from "../../shared/api"
 import { ApiFailure, api, errorMessage } from "../lib/api"
 import { useResource } from "../lib/cache"
-import { AppIcon, Button } from "../ui/primitives"
+import { AccessEditor, emptyAccess, grantsAnything } from "../ui/agents/AccessEditor"
+import { Button } from "../ui/primitives"
 import { Header, useMe } from "../ui/Shell"
 import { SignIn } from "./Home"
 
@@ -47,7 +48,7 @@ function Expired() {
 
 /** Who's asking, which workspaces to grant, what it can do there, then Allow or Deny. Shared by both pages. */
 export function ConsentForm({ request }: { request: OAuthRequest }) {
-  const [picked, setPicked] = useState<string[]>([])
+  const [access, setAccess] = useState<AgentAccess>(emptyAccess)
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState<"approved" | "denied" | "expired" | null>(null)
@@ -57,12 +58,13 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
     setBusy(approve ? "approve" : "deny")
     setError(null)
     try {
-      const { redirect_to } = approve ? await api.approve(request.id, picked) : await api.deny(request.id)
+      const { redirect_to } = approve ? await api.approve(request.id, access) : await api.deny(request.id)
       if (redirect_to) return window.location.assign(redirect_to)
       setDone(approve ? "approved" : "denied")
     } catch (e) {
       if (gone(e)) setDone("expired")
-      else if (e instanceof ApiFailure && e.status === 403) setError("You can't grant access to one of those workspaces any more. Reload and choose again.")
+      else if (e instanceof ApiFailure && (e.status === 403 || /exceeds/i.test(e.message)))
+        setError("Your role in one of those workspaces changed, so that access is too much. Reload and choose again.")
       else setError(errorMessage(e))
     } finally {
       setBusy(null)
@@ -78,8 +80,6 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
       </div>
     )
 
-  const toggle = (id: string) => setPicked((list) => (list.includes(id) ? list.filter((x) => x !== id) : [...list, id]))
-
   return (
     <div className="oauth-card">
       <h1 className="oauth-title">{request.client_name} wants to access your workspaces</h1>
@@ -88,24 +88,8 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
           You'll be sent back to <span className="mono">{request.redirect_host}</span>
         </p>
       )}
-
-      {request.apps.length ? (
-        <fieldset className="oauth-apps">
-          <legend className="sr-only">Workspaces</legend>
-          {request.apps.map((app) => (
-            <label key={app.id} className="oauth-app">
-              <input type="checkbox" checked={picked.includes(app.id)} onChange={() => toggle(app.id)} />
-              <AppIcon src={app.icon_url} size={24} />
-              <span className="oauth-app-name">{app.name}</span>
-              <span className="role-badge">{app.role === "owner" ? "Owner" : "Member"}</span>
-            </label>
-          ))}
-        </fieldset>
-      ) : (
-        <p className="muted-text">You aren't on any workspace yet. Create one on the home page first.</p>
-      )}
-
-      <p className="oauth-scope">It can read and reply to issues, update status and labels, and manage webhooks where you're an owner.</p>
+      <p className="oauth-scope">Choose where it can work and what it can do there. It posts as itself, with an AI badge, and you can change this later.</p>
+      <AccessEditor apps={request.apps} value={access} onChange={setAccess} name="consent" />
       {error && (
         <p className="flash" data-tone="danger">
           {error}
@@ -115,8 +99,8 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
         <Button onClick={() => answer(false)} disabled={!!busy}>
           {busy === "deny" ? "Denying…" : "Deny"}
         </Button>
-        <Button variant="primary" onClick={() => answer(true)} disabled={!!busy || picked.length === 0}>
-          {busy === "approve" ? "Allowing…" : picked.length > 1 ? `Allow ${picked.length} workspaces` : "Allow"}
+        <Button variant="primary" onClick={() => answer(true)} disabled={!!busy || !grantsAnything(access)}>
+          {busy === "approve" ? "Allowing…" : "Allow"}
         </Button>
       </div>
     </div>

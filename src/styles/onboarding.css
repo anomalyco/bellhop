@@ -1,0 +1,567 @@
+/* Onboarding: the signed-out landing, the create-workspace step, the setup checklist, agent setup snippets and
+   empty states. Flat on the off-black page: hairlines, no filled panels, no gradients. Loaded before app.css, so
+   it only uses its own class names. */
+
+/* Landing */
+.landing {
+  display: grid;
+  align-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 48px 24px;
+}
+.landing-inner {
+  display: grid;
+  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
+  align-items: center;
+  gap: 64px;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.landing-copy {
+  display: grid;
+  justify-items: start;
+  gap: 18px;
+}
+.landing-title {
+  margin: 14px 0 0;
+  font-size: 32px;
+  font-weight: var(--weight-semibold);
+  line-height: 38px;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.landing-lede {
+  margin: -6px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-title);
+  line-height: 24px;
+  text-wrap: pretty;
+}
+.landing-points {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 0;
+  padding: 16px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--border-muted);
+}
+.landing-points li {
+  position: relative;
+  padding-left: 18px;
+  color: var(--fg);
+  line-height: 20px;
+}
+.landing-points li::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  left: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--fg-faint);
+}
+.landing-address {
+  font-size: 12.5px;
+  color: var(--fg-muted);
+}
+.landing-actions {
+  width: 100%;
+  max-width: 340px;
+  margin-top: 6px;
+}
+.landing-shot {
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  box-shadow: 0 0 0 1px var(--border);
+  aspect-ratio: 2 / 1;
+  background: var(--bg);
+}
+.landing-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* Sign-in actions, shared by the landing and the plain sign-in page */
+.signin-actions {
+  display: grid;
+  gap: 14px;
+  width: 100%;
+}
+.signin-actions > .signin-google {
+  width: 100%;
+}
+.signin-actions > .signin-google svg {
+  flex: none;
+}
+.signin-actions > .signin-note {
+  margin-top: 2px;
+}
+.landing .signin-actions > .signin-note {
+  text-align: left;
+}
+
+/* Signed-in home */
+.home-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.home-head .home-title {
+  margin: 0;
+}
+.home-agents {
+  margin-top: 36px;
+}
+.home-agents-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.home-agents-empty > p {
+  margin: -4px 0 0;
+  font-size: var(--text-ui);
+}
+
+/* Create a workspace: one focused step */
+.create-page {
+  display: grid;
+  justify-items: center;
+  padding: 72px 20px 48px;
+}
+.create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 20px;
+  width: 100%;
+  max-width: 440px;
+}
+.create-head {
+  display: grid;
+  gap: 6px;
+}
+.create-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: var(--weight-semibold);
+  line-height: 30px;
+  letter-spacing: -0.02em;
+}
+.create-sub {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.input.create-url {
+  gap: 0;
+}
+.input.create-url input.mono {
+  width: 0;
+  font-size: 13px;
+}
+.create-url-affix {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.create-note {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.create-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Copy buttons, snippets and copyable values */
+.copy-label {
+  display: inline-grid;
+}
+.copy-label > span {
+  grid-area: 1 / 1;
+  text-align: center;
+}
+.copy-label > span:last-child,
+.copy-label[data-copied] > span:first-child {
+  visibility: hidden;
+}
+.copy-label[data-copied] > span:last-child {
+  visibility: visible;
+}
+.snippet {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 10px 10px 14px;
+  background: var(--bg-deep);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.snippet-code {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 3px 0;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg);
+}
+.snippet-copy {
+  flex: none;
+}
+.copy-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 4px 4px 12px;
+  background: var(--bg-deep);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.copy-field-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Agent setup: tabs per client, then the snippets */
+.agent-setup {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  min-width: 0;
+}
+.agent-setup-tabs {
+  justify-self: start;
+}
+.agent-setup-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.agent-setup-step {
+  margin: 4px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.agent-setup-step:first-child {
+  margin-top: 0;
+}
+.agent-setup-step code {
+  font-size: 12px;
+  color: var(--fg);
+}
+
+/* Setup checklist: a quiet list with hairlines, one step open at a time */
+.setup {
+  display: grid;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-muted);
+}
+.setup-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+.setup-title {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  line-height: 20px;
+}
+.setup-count {
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+  font-variant-numeric: tabular-nums;
+}
+.setup-progress {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 4px;
+  margin: 10px 0 6px;
+}
+.setup-progress span {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  transition: background-color 240ms var(--ease);
+}
+.setup-progress span[data-done] {
+  background: var(--fg);
+}
+.setup-steps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.setup-step + .setup-step {
+  border-top: 1px solid var(--border-muted);
+}
+.setup-step-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 0;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.setup-step-head > .icon {
+  flex: none;
+  color: var(--icon-muted);
+  transition: transform 160ms var(--ease);
+}
+.setup-step[data-open] .setup-step-head > .icon {
+  transform: rotate(180deg);
+}
+.setup-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  color: var(--fg-faint);
+  font-size: 11px;
+  font-weight: var(--weight-button);
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+  font-variant-numeric: tabular-nums;
+}
+.setup-step[data-done] .setup-mark {
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  box-shadow: none;
+}
+.setup-step-title {
+  flex: none;
+  font-weight: var(--weight-medium);
+}
+.setup-step[data-done] .setup-step-title {
+  color: var(--fg-muted);
+}
+.setup-step-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.setup-step-body {
+  max-width: 720px;
+  padding: 0 0 18px 34px;
+  animation: setup-in 160ms var(--ease);
+}
+@keyframes setup-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+.setup-body-stack {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+.setup-body-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.setup-hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 18px;
+}
+.setup-body-row .setup-hint {
+  flex: 1 1 260px;
+}
+.setup-icon {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.setup-icon-main {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+}
+.setup-invite {
+  display: flex;
+  gap: 8px;
+  max-width: 420px;
+}
+.setup-invite .input {
+  flex: 1;
+  min-width: 0;
+}
+.setup-invite .btn {
+  flex: none;
+  align-self: center;
+}
+
+/* Everything done: one calm line, then the checklist goes away */
+.setup-done {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  animation: setup-in 240ms var(--ease);
+}
+.setup-done-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  border-radius: 50%;
+  animation: setup-pop 420ms var(--ease);
+}
+.setup-done-mark svg {
+  width: 15px;
+  height: 15px;
+}
+@keyframes setup-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.08);
+    opacity: 1;
+  }
+}
+.setup-done-title {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+}
+.setup-done-sub {
+  margin: 2px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+
+/* Empty states for the issue list */
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 56px 20px;
+  text-align: center;
+}
+.empty-icon {
+  display: inline-flex;
+  margin-bottom: 6px;
+  color: var(--icon-muted);
+}
+.empty-icon .state-icon {
+  color: inherit;
+}
+.empty-title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+.empty-query {
+  color: var(--fg-muted);
+}
+.empty-query::before {
+  content: "“";
+}
+.empty-query::after {
+  content: "”";
+}
+.empty-text {
+  max-width: 360px;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  text-wrap: pretty;
+}
+.empty-action {
+  margin-top: 12px;
+}
+
+/* Touch screens keep inputs at 16 px (iOS zooms below that); the address around the slug follows. */
+@media (pointer: coarse) {
+  .input.create-url input.mono,
+  .create-url-affix {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .setup-step-body,
+  .setup-done,
+  .setup-done-mark {
+    animation: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .landing {
+    align-items: start;
+    padding: 32px 20px 40px;
+  }
+  .landing-inner {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 40px;
+  }
+  .landing-actions {
+    max-width: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .landing-title {
+    font-size: 27px;
+    line-height: 33px;
+  }
+  .create-page {
+    padding: 40px 16px 40px;
+  }
+  .setup-step-body {
+    padding-left: 0;
+  }
+  .setup-step-summary {
+    display: none;
+  }
+  .home-head .btn {
+    padding: 0 12px;
+  }
+}

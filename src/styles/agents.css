@@ -1,0 +1,402 @@
+/* Roles and agents: the role select, the access editor (consent and the Agents page), the account Agents page,
+   one-time secrets, and the roles bits of Settings. Flat rows and hairlines; only its own class names. */
+
+/* Role select: a small pill that keeps its width as the value changes */
+.btn.role-select {
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 112px;
+  padding: 0 8px 0 10px;
+}
+.role-select-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.btn.role-select .icon {
+  color: var(--icon-muted);
+}
+/* In lists the selects line up in one column */
+.access .btn.role-select,
+.app-agent-row .btn.role-select,
+.member-row .btn.role-select {
+  width: 144px;
+}
+
+/* Access editor */
+.access {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  border-top: 1px solid var(--border-muted);
+}
+.access-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border-muted);
+}
+.access-check {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  cursor: pointer;
+}
+.access input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--primary-bg);
+  cursor: pointer;
+}
+.access-check-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.access-check-title {
+  font-weight: var(--weight-medium);
+}
+.access-hint {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.access-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.access-list-head {
+  margin: 0;
+  padding: 10px 0 2px;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.access-empty {
+  margin: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border-muted);
+}
+.access-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-muted);
+}
+.access-name {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  cursor: pointer;
+}
+.access-name input[type="checkbox"] {
+  margin-top: 0;
+}
+.access-name-text {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.access-team {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.access-row[data-off] .access-name-text {
+  color: var(--fg-muted);
+}
+.access-row[data-off] .btn.role-select:disabled {
+  opacity: 0.35;
+}
+
+/* Consent pages hold the access editor; give them a little more room */
+.oauth-card:has(.access) {
+  max-width: 520px;
+}
+
+/* One-time secret */
+.secret {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  margin-bottom: 24px;
+  padding: 16px 0 18px;
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-muted);
+}
+.secret-head {
+  display: grid;
+  gap: 4px;
+}
+.secret-title {
+  margin: 0;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+}
+.secret-warning {
+  margin: 0;
+  color: var(--progress);
+  font-size: var(--text-ui);
+}
+.secret-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 6px;
+}
+.secret-label {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.secret-label code {
+  font-size: 11.5px;
+  color: var(--fg);
+}
+.secret-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Account Agents page */
+.agents-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+.agents-head .agents-title {
+  margin: 0;
+}
+.agents-intro {
+  margin: 0 0 20px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.agents-empty {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+}
+.agents-empty > p {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.agent-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-muted);
+}
+.agent-create .agents-intro {
+  margin: -10px 0 0;
+}
+.agent-create-title {
+  margin: 0;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.015em;
+}
+.agent-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.agent-item + .agent-item {
+  border-top: 1px solid var(--border-muted);
+}
+.agent-item > .agent-row {
+  align-items: flex-start;
+}
+.agent-item > .agent-row > .avatar {
+  margin-top: 2px;
+}
+.agent-main {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.agent-name-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+}
+.agent-name {
+  font-weight: var(--weight-medium);
+}
+.agent-kind {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
+.agent-preview {
+  font-size: 11.5px;
+}
+.agent-access {
+  color: var(--fg);
+  font-size: var(--text-ui);
+  overflow-wrap: anywhere;
+}
+.agent-meta {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.agent-rename {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 360px;
+}
+.agent-rename .input {
+  flex: 1;
+  min-width: 0;
+}
+.agent-row-actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+.agent-confirm-inline {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 420px;
+}
+.agent-confirm-text {
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.agent-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 16px 16px 56px;
+}
+.agent-warning {
+  margin: 0;
+  color: var(--progress);
+  font-size: var(--text-small);
+}
+
+/* Settings: agents with access, members */
+.settings-lede {
+  margin: -6px 0 16px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  max-width: 620px;
+}
+.settings-readonly {
+  margin: -6px 0 14px;
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+}
+.settings-value {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-body);
+  white-space: pre-wrap;
+}
+.settings-note {
+  margin: 0 0 12px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.member-invite {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.member-invite-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 560px;
+}
+.member-invite-row .input {
+  flex: 1;
+  min-width: 0;
+}
+.member-invite-hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.member-you {
+  color: var(--fg-faint);
+  font-weight: var(--weight-regular);
+}
+.member-actions,
+.app-agent-row .settings-row-actions {
+  align-items: center;
+}
+
+/* Home: the agents summary */
+.home-agents-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.home-agents-link {
+  font-size: var(--text-ui);
+}
+a.home-agent-row,
+a.home-agents-more {
+  color: inherit;
+}
+a.home-agent-row:hover,
+a.home-agents-more:hover {
+  text-decoration: none;
+  background: var(--hover);
+}
+.home-agents-more {
+  justify-content: center;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+
+@media (max-width: 640px) {
+  .agent-item > .agent-row,
+  .app-agent-row,
+  .member-row {
+    flex-wrap: wrap;
+  }
+  .agent-row-actions,
+  .agent-confirm-inline,
+  .app-agent-row .settings-row-actions,
+  .member-actions {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+    padding-left: 40px;
+  }
+  .agent-panel {
+    padding: 0 12px 14px;
+  }
+  .member-invite-row {
+    flex-wrap: wrap;
+  }
+  .member-invite-row .input {
+    flex-basis: 100%;
+  }
+  .access-team {
+    display: none;
+  }
+}
