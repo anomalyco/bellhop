@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import { Link, useLocation, useSearch } from "wouter"
 import type { App, Config } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
@@ -10,6 +10,14 @@ import { SiteLink } from "../ui/SiteLink"
 
 export function Home() {
   const { data: me, error } = useMe()
+  const back = new URLSearchParams(useSearch()).get("next")
+  // Already signed in and sent here to sign in (e.g. from an app subdomain): go straight back.
+  useEffect(() => {
+    if (!me?.user || !back) return
+    const url = new URL(back, window.location.href)
+    const host = window.location.hostname
+    if (url.hostname === host || url.hostname.endsWith(`.${host}`)) window.location.replace(url.href)
+  }, [me?.user, back])
   if (!me) {
     return (
       <>

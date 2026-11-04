@@ -183,6 +183,13 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
 function callbackUrl(c: Ctx) {
   return new URL("/auth/google/callback", c.env.PUBLIC_ORIGIN || c.req.url).href
 }
+/** Sessions from before app subdomains were host-only on APP_DOMAIN; re-issue them for the whole site. */
+function shareSession(c: Ctx) {
+  const token = getCookie(c, "bh_session")
+  const site = c.env.APP_DOMAIN
+  if (c.var.user && token && site?.includes(".") && new URL(c.req.url).hostname === site)
+    cookie(c, "bh_session", token, month, true)
+}
 export const auth = new Hono<Bindings>()
 auth.get("/api/config", (c) =>
   c.json({
@@ -195,7 +202,10 @@ async function me(c: Ctx): Promise<Me> {
   const [{ id, handle, name }, verified] = await Promise.all([guestActor(c, "me"), human(c)])
   return { user: c.var.user, guest: { id, handle, name }, human: verified }
 }
-auth.get("/api/me", async (c) => c.json(await me(c)))
+auth.get("/api/me", async (c) => {
+  shareSession(c)
+  return c.json(await me(c))
+})
 auth.put("/api/me/guest", async (c) => {
   if (c.var.user) bad("Signed-in users cannot set a guest profile here")
   await requireHuman(c)
