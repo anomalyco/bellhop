@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useSearch } from "wouter"
-import type { AppDetail, Attachment, ReportMetadata, SystemInfo, Template } from "../../shared/api"
+import type { AppDetail, Attachment, Me, ReportMetadata, SystemInfo, Template } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
-import { setData, useResource } from "../lib/cache"
+import { invalidate, peek, setData, useResource } from "../lib/cache"
 import { setGuestNameLocally, useWho } from "../lib/guest"
 import { ensureHuman } from "../lib/human"
 import { storeIssue } from "../lib/issues"
@@ -20,9 +20,15 @@ import { AppLink } from "../ui/SiteLink"
 import { MetadataBlocked, MetadataPanel, MetadataMatches } from "../ui/features/ReportMetadata"
 import { SimilarIssues } from "../ui/features/SimilarIssues"
 import { useT } from "../i18n/core"
+import { tr, useT as useDeskT } from "../i18n/helpdesk"
+import { deskOutsider } from "../lib/helpdesk"
+import { EmailCode } from "../ui/helpdesk/EmailCode"
+import { CheckIcon } from "../ui/icons"
 
 export function NewIssue({ slug }: { slug: string }) {
   const t = useT()
+  const td = useDeskT()
+  const desk = deskOutsider(peek<AppDetail>(keys.app(slug)))
   useEffect(() => {
     void loadMarkdown()
   }, [])
@@ -30,10 +36,10 @@ export function NewIssue({ slug }: { slug: string }) {
     <AppLayout
       slug={slug}
       tab="issues"
-      crumb={{ label: t("new.title"), href: appPath(slug, "/new") }}
+      crumb={{ label: desk ? td("new.title") : t("new.title"), href: appPath(slug, "/new") }}
       loading={
         <Page narrow>
-          <h1 className="page-title">{t("new.title")}</h1>
+          <h1 className="page-title">{desk ? td("new.title") : t("new.title")}</h1>
           <div className="skeleton" style={{ width: "100%", height: 180 }} />
         </Page>
       }
@@ -83,9 +89,10 @@ function Form({ app, metadata }: { app: AppDetail; metadata?: ReportMetadata }) 
 
 function TemplatePicker({ app, templates }: { app: AppDetail; templates: Template[] }) {
   const t = useT()
+  const td = useDeskT()
   return (
     <Page narrow>
-      <h1 className="page-title">{t("new.title")}</h1>
+      <h1 className="page-title">{deskOutsider(app) ? td("new.title") : t("new.title")}</h1>
       <section className="box">
         {templates.map((tpl) => (
           <div key={tpl.id} className="box-row template-row">
@@ -108,10 +115,17 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
 
 function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetail; template?: Template; metadata?: ReportMetadata }) {
   const t = useT()
+  const td = useDeskT()
   const [, navigate] = useLocation()
   const member = !!app.role
   const { data: me } = useMe()
-  const guest = me && !me.user ? me.guest : null
+  // A help desk's requester: every request is private, and (when the desk requires it) they confirm their email
+  // right here, under their draft, before it's sent. The server's contact_required brings the step back too.
+  const desk = deskOutsider(app)
+  const [contactRequired, setContactRequired] = useState(false)
+  const needsContact = desk && !me?.contact && (app.helpdesk?.require_verified_email || contactRequired)
+  const verifyPanel = useRef<HTMLDivElement>(null)
+  const guest = me && !me.user && !me.contact ? me.guest : null
   const who = useWho(me)
   const { ask, prompt } = useNamePrompt()
   const submitButton = useRef<HTMLButtonElement>(null)
@@ -140,11 +154,16 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
   const labels = template ? app.labels.filter((l) => template.label_ids.includes(l.id)) : []
 
   // A guest without a name is asked for one here, in a prompt growing from Submit; the name goes with the issue.
-  const submit = async (e?: FormEvent, askedName?: string) => {
+  const submit = async (e?: FormEvent, askedName?: string, asContact = false) => {
     e?.preventDefault()
     if (!title.trim() || busy || submitting) return
+    if (needsContact && !asContact) {
+      setError(td("new.confirmFirst"))
+      verifyPanel.current?.querySelector("input")?.focus()
+      return
+    }
     let guestName = askedName
-    if (guest && !guest.name && !guestName) {
+    if (guest && !guest.name && !guestName && !asContact) {
       const name = await ask({ anchor: submitButton.current, mode: "first", action: t("new.submitAction") })
       if (!name) return
       guestName = name
@@ -161,7 +180,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
         attachment_ids: used.length ? used.map((a) => a.id) : undefined,
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
         guest_name: guestName,
-        private: canChoose ? isPrivate : undefined,
+        private: canChoose && !desk ? isPrivate : undefined,
         metadata_id: metadata?.id,
       })
       if (guestName) setGuestNameLocally(guestName)
@@ -169,7 +188,10 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
       navigate(appPath(app.slug, `/issues/${issue.number}`))
     } catch (err) {
       setSubmitting(false)
-      if (err instanceof ApiFailure && err.code === "name_required" && !askedName) {
+      if (err instanceof ApiFailure && err.code === "contact_required") {
+        setContactRequired(true)
+        setError(td("new.confirmFirst"))
+      } else if (err instanceof ApiFailure && err.code === "name_required" && !askedName) {
         // The server has no name for this browser after all: ask now and submit again.
         setGuestNameLocally(null)
         const name = await ask({ anchor: submitButton.current, mode: "first", action: t("new.submitAction") })
@@ -181,14 +203,14 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
   return (
     <Page narrow>
       <h1 className="page-title">
-        {t("new.title")}
+        {desk ? td("new.title") : t("new.title")}
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
       {metadata && metadata.matches.length > 0 && <MetadataMatches app={app} metadata={metadata} />}
       <form className="issue-form" onSubmit={submit}>
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
-            {t("field.title")}
+            {desk ? td("new.subject") : t("field.title")}
           </label>
           <SimilarIssues slug={app.slug} title={title} exclude={metadata?.matches.map((m) => m.number)}>
             <div className="input" data-size="large">
@@ -196,7 +218,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
                 id="issue-title"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder={t("field.title")}
+                placeholder={desk ? td("new.subjectPlaceholder") : t("field.title")}
                 autoFocus={!template?.title && !metadata?.title}
                 required
                 maxLength={256}
@@ -206,7 +228,7 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           </SimilarIssues>
         </div>
         <div className="field">
-          <span className="field-label">{t("field.description")}</span>
+          <span className="field-label">{desk ? td("new.details") : t("field.description")}</span>
           <Editor
             slug={app.slug}
             value={body}
@@ -216,9 +238,9 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
             onAttachment={(a) => setAttachments((list) => [...list, a])}
             onSubmit={submit}
             onBusyChange={setBusy}
-            placeholder={t("new.descriptionPlaceholder")}
+            placeholder={desk ? td("new.detailsPlaceholder") : t("new.descriptionPlaceholder")}
             minHeight={220}
-            label={t("field.description")}
+            label={desk ? td("new.details") : t("field.description")}
           />
         </div>
 
@@ -283,7 +305,11 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           </div>
         )}
 
-        {canChoose ? (
+        {desk ? (
+          <p className="desk-private-note">
+            <LockIcon size={12} /> {td("new.private")}
+          </p>
+        ) : canChoose ? (
           <label className="visibility issue-private" htmlFor="issue-private">
             <input id="issue-private" type="checkbox" checked={isPrivate} onChange={(e) => setPrivate(e.target.checked)} />
             <span className="visibility-text">
@@ -301,9 +327,35 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
           )
         )}
 
+        {needsContact && (
+          <div className="desk-verify" ref={verifyPanel}>
+            <div className="desk-verify-head">
+              <p className="desk-verify-title">{td("new.verifyTitle")}</p>
+              <p className="desk-verify-text">{td("new.verifyText")}</p>
+            </div>
+            <EmailCode<Me>
+              id="new-request"
+              start={(email) => api.contactStart(app.slug, email)}
+              verify={(email, code) => api.contactVerify(app.slug, email, code)}
+              verifyLabel={td("new.submit")}
+              onVerified={async (next) => {
+                invalidate(keys.lists(app.slug))
+                setData<Me>(keys.me, next)
+                setError(null)
+                if (title.trim()) await submit(undefined, undefined, true)
+              }}
+            />
+          </div>
+        )}
+
         {error && <p className="flash" data-tone="danger">{error}</p>}
         <div className="form-actions">
-          {(who === undefined || !who.user) && (
+          {desk && me?.contact ? (
+            <span className="desk-verified">
+              <CheckIcon size={14} />
+              {tr("new.verifiedAs", { email: <strong>{me.contact.email || me.contact.name}</strong> })}
+            </span>
+          ) : (who === undefined || !who.user) && !needsContact && (
             <GuestLine
               name={who && !who.user ? who.name : null}
               placeholder={who === undefined}
@@ -315,7 +367,15 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
             {t("common.cancel")}
           </AppLink>
           <Button ref={submitButton} type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>
-            {submitting ? t("new.submitting") : busy ? t("composer.uploading") : t("new.submit")}
+            {submitting
+              ? desk
+                ? td("new.submitting")
+                : t("new.submitting")
+              : busy
+                ? t("composer.uploading")
+                : desk
+                  ? td("new.submit")
+                  : t("new.submit")}
           </Button>
         </div>
       </form>

@@ -22,6 +22,12 @@ import { DiagnosticsBlock, logIds } from "../../ui/features/Diagnostics"
 import { ImportedMarker } from "../../ui/features/Imported"
 import { tr, useT } from "../../i18n/core"
 import { formatNumber, sentenceGap } from "../../i18n"
+import { VerificationThread, VerificationsProvider } from "../../ui/helpdesk/Requester"
+import { useT as useDeskT } from "../../i18n/helpdesk"
+import { deskOutsider } from "../../lib/helpdesk"
+import { isDesk } from "../../lib/helpdesk"
+import { ContactNamesProvider } from "../../ui/Actor"
+import { contactLabel } from "../../lib/helpdesk"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -30,12 +36,18 @@ export function IssueView({ model }: { model: IssueModel }) {
   const { app, issue, actionError } = model
   const authorTier = issue.author.type !== "agent" ? (issue.author.tier ?? null) : null
   const ctx: CommentContext = { app, issue, member: model.member, viewerId: model.viewer?.id ?? null, signedIn: !!model.me?.user }
+  // Contacts without a name read as their email: the requester's for the team, your own for you
+  const contactNames: Record<string, string> = {}
+  if (issue.contact?.email) contactNames[issue.contact.id] = issue.contact.email
+  if (model.me?.contact) contactNames[model.me.contact.id] = contactLabel(model.me.contact)
   return (
+    <ContactNamesProvider names={contactNames}>
     <Page>
       <div className="issue">
         <div className="issue-main">
           <Report model={model} />
           <MobileDetails model={model} />
+          <VerificationsProvider issue={issue} member={model.member}>
           <div className="thread">
             {blocks(entries(model)).map((b) =>
               b.kind === "hidden" ? (
@@ -50,8 +62,10 @@ export function IssueView({ model }: { model: IssueModel }) {
                 <MessageGroup key={b.key} slug={app.slug} author={b.author} byAuthor={b.byAuthor} messages={b.messages} ctx={ctx} internal={b.internal} />
               ),
             )}
+            <VerificationThread app={app} issue={issue} member={model.member} />
             <TypingLine activity={issue.activity} />
           </div>
+          </VerificationsProvider>
           {actionError && (
             <p className="flash" data-tone="danger">
               {actionError}
@@ -62,12 +76,16 @@ export function IssueView({ model }: { model: IssueModel }) {
         <IssueSidebar model={model} />
       </div>
     </Page>
+    </ContactNamesProvider>
   )
 }
 
 function Report({ model }: { model: IssueModel }) {
   const t = useT()
+  const td = useDeskT()
   const { app, issue, canEdit, viewers } = model
+  // A requester in a help desk: no "Me too" (requests are private), and New request rather than New issue
+  const desk = deskOutsider(app)
   const [editingTitle, setEditingTitle] = useState(false)
   const [editingBody, setEditingBody] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
@@ -94,9 +112,9 @@ function Report({ model }: { model: IssueModel }) {
                 {t("issue.edit")}
               </Button>
             )}
-            <MeToo model={model} />
+            {!isDesk(app) && <MeToo model={model} />}
             <AppLink slug={app.slug} href={appPath(app.slug, "/new")} className="btn report-new" data-variant="default" data-size="small">
-              {t("issue.newIssue")}
+              {desk ? td("home.newRequest") : t("issue.newIssue")}
             </AppLink>
             <IssueMenu model={model} onDelete={() => setConfirmDelete(true)} onMove={() => setMoving(true)} onError={setMenuError} />
           </div>
@@ -156,7 +174,7 @@ function Report({ model }: { model: IssueModel }) {
         </span>
       </p>
       {issue.imported && <ImportedMarker imported={issue.imported} />}
-      <IssueFlags issue={issue} />
+      <IssueFlags issue={issue} desk={isDesk(app)} />
       <MobileProps model={model} />
 
       <div className="report-body">

@@ -18,6 +18,10 @@ import { NotificationsSection } from "./Notifications"
 import { logIds } from "../../ui/features/Diagnostics"
 import { t, useT } from "../../i18n/core"
 import { stateText as stateLabels } from "../../ui/primitives"
+import { RequesterSection } from "../../ui/helpdesk/Requester"
+import { isDesk } from "../../lib/helpdesk"
+import { isContactActor } from "../../ui/Actor"
+import { deskOutsider } from "../../lib/helpdesk"
 
 
 /** The desktop sidebar: the editable properties, then who reported it, when, who's involved, files, system info and a link. */
@@ -27,11 +31,18 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
   const sticky = useFits(ref)
   return (
     <aside ref={ref} className="issue-side" data-sticky={sticky || undefined}>
+      {model.member && isDesk(model.app) && <RequesterSection app={model.app} issue={model.issue} />}
       <StatusSection model={model} />
-      <AssigneeSection model={model} />
-      <LabelsSection model={model} />
-      <RelationsSection model={model} />
+      {/* A requester sees where their request stands, not the team's triage fields */}
+      {!deskOutsider(model.app) && (
+        <>
+          <AssigneeSection model={model} />
+          <LabelsSection model={model} />
+          <RelationsSection model={model} />
+        </>
+      )}
       <NotificationsSection model={model} />
+      {model.member && !isDesk(model.app) && <RequesterSection app={model.app} issue={model.issue} />}
       <InfoSections model={model} />
     </aside>
   )
@@ -123,6 +134,7 @@ export function MobileDetails({ model }: { model: IssueModel }) {
       </button>
       {open && (
         <div className="mobile-details-body">
+          {model.member && <RequesterSection app={model.app} issue={model.issue} />}
           <NotificationsSection model={model} />
           <RelationsSection model={model} />
           <InfoSections model={model} />
@@ -356,7 +368,7 @@ function InfoSections({ model }: { model: IssueModel }) {
 
 function ReporterKind({ actor }: { actor: Actor }) {
   if (actor.type === "agent") return <AiBadge />
-  if (actor.type === "guest") return <span className="guest-marker">{t("actor.guest")}</span>
+  if (actor.type === "guest") return isContactActor(actor) ? null : <span className="guest-marker">{t("actor.guest")}</span>
   if (actor.role) return <span className="role-badge">{actor.role === "owner" ? t("role.owner") : t("role.member")}</span>
   return <span className="guest-marker">{t("side.account")}</span>
 }

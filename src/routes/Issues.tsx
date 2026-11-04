@@ -13,7 +13,7 @@ import { ActorAvatar, TierBadge, actorName } from "../ui/Actor"
 import { ChevronDownIcon, CommentIcon, EyeOffIcon, LockIcon, PinIcon, PlusIcon, SearchIcon, SortIcon, TagIcon, ThumbIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppIcon, Button, Dots, Label, StateIcon } from "../ui/primitives"
-import { AppLayout, Page } from "../ui/Shell"
+import { AppLayout, Page, cachedOutsider } from "../ui/Shell"
 import { AppLink } from "../ui/SiteLink"
 import { NoClosed, NoIssues, NoResults } from "../ui/onboarding/EmptyStates"
 import { SetupChecklist, useSetupChecklistSettled } from "../ui/onboarding/SetupChecklist"
@@ -22,6 +22,8 @@ import { FilterMenu } from "../ui/features/FilterMenu"
 import { tKey, tr, useT, type PlainKey } from "../i18n/core"
 import { formatNumber } from "../i18n"
 import { sorts } from "../ui/features/FilterMenu"
+import { DeskHome } from "./helpdesk/Home"
+import { deskOutsider } from "../lib/helpdesk"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -40,6 +42,8 @@ function IssuesLoading({ slug }: { slug: string }) {
     const next = formatQuery({ ...filter, state })
     return appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`)
   }
+  // A requester never sees the list, not even its skeleton
+  if (cachedOutsider(slug)) return <Page>{null}</Page>
   return (
     <Page>
       <div className="list-toolbar">
@@ -128,7 +132,10 @@ export function SearchBox({
 function IssuesBody({ app }: { app: AppDetail }) {
   // For admins the setup checklist sits above the toolbar; keep the skeleton until it knows whether it shows, so
   // it never pushes a painted toolbar down.
-  if (!useSetupChecklistSettled(app)) return <IssuesLoading slug={app.slug} />
+  const settled = useSetupChecklistSettled(app)
+  // A help desk's requesters get its home, never a list
+  if (deskOutsider(app)) return <DeskHome app={app} />
+  if (!settled) return <IssuesLoading slug={app.slug} />
   return <IssuesList app={app} />
 }
 

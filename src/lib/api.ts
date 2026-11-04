@@ -12,6 +12,13 @@ import type {
   Comment,
   Config,
   ConnectedAgent,
+  ContactDetail,
+  ContactPage,
+  HelpdeskSettings,
+  AppMode,
+  IdentityKey,
+  NewIdentityKey,
+  Verification,
   FeedApp,
   FeedList,
   ImportJob,
@@ -60,6 +67,8 @@ export class ApiFailure extends Error {
     message: string,
     /** Where a transferred issue went (code "moved"). */
     readonly movedTo?: { slug: string; number: number; url: string },
+    /** Seconds until a rate-limited request may be tried again (429 Retry-After). */
+    readonly retryAfter?: number,
   ) {
     super(message)
   }
@@ -77,7 +86,14 @@ export function errorMessage(error: unknown): string {
 /** An error response as an ApiFailure (for callers that read the response themselves, like /api/page). */
 export async function failure(res: Response) {
   const body = (await res.json().catch(() => null)) as ApiError | null
-  return new ApiFailure(res.status, body?.error?.code ?? `http_${res.status}`, body?.error?.message ?? res.statusText, body?.error?.moved_to)
+  const wait = Number(res.headers.get("Retry-After"))
+  return new ApiFailure(
+    res.status,
+    body?.error?.code ?? `http_${res.status}`,
+    body?.error?.message ?? res.statusText,
+    body?.error?.moved_to,
+    Number.isFinite(wait) && wait > 0 ? wait : undefined,
+  )
 }
 
 const seenKey = "bh_seen"
@@ -165,7 +181,10 @@ export const api = {
   feedApps: () => get<FeedApp[]>("/api/feed/apps"),
   createApp: (input: NewApp) => request<AppDetail>("POST", "/api/apps", input),
   app: (slug: string) => get<AppDetail>(app(slug)),
-  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility; nudge_days?: number | null }) => request<AppDetail>("PATCH", app(slug), input),
+  patchApp: (
+    slug: string,
+    input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility; nudge_days?: number | null; mode?: AppMode; helpdesk?: Partial<HelpdeskSettings> },
+  ) => request<AppDetail>("PATCH", app(slug), input),
   settings: (slug: string) => get<AppSettings>(`${app(slug)}/settings`),
   putWebhook: (slug: string, url: string | null, events?: WebhookEventType[]) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url, events }),
   redeliver: (slug: string, id: string) => request<{ delivery_id: string }>("POST", `${app(slug)}/webhook/deliveries/${enc(id)}/redeliver`),
@@ -292,6 +311,27 @@ export const api = {
   createSavedReply: (slug: string, input: SavedReplyInput) => request<SavedReply>("POST", `${app(slug)}/saved-replies`, input),
   patchSavedReply: (slug: string, id: string, input: SavedReplyInput) => request<SavedReply>("PATCH", `${app(slug)}/saved-replies/${enc(id)}`, input),
   deleteSavedReply: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/saved-replies/${enc(id)}`),
+  // Help desk: contacts sign in on the workspace's host with an email code
+  contactStart: (slug: string, email: string) => request<{ ok: true }>("POST", `${app(slug)}/contact/start`, { email }),
+  contactVerify: (slug: string, email: string, code: string) => request<Me>("POST", `${app(slug)}/contact/verify`, { email, code }),
+  contactSignOut: (slug: string) => request<Me>("POST", `${app(slug)}/contact/sign-out`),
+  contacts: (slug: string, params: { q?: string; cursor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.q) qs.set("q", params.q)
+    if (params.cursor) qs.set("cursor", params.cursor)
+    return get<ContactPage>(`${app(slug)}/contacts${qs.size ? `?${qs}` : ""}`)
+  },
+  contact: (slug: string, id: string) => get<ContactDetail>(`${app(slug)}/contacts/${enc(id)}`),
+  identityKeys: (slug: string) => get<IdentityKey[]>(`${app(slug)}/identity-keys`),
+  createIdentityKey: (slug: string, name: string) => request<NewIdentityKey>("POST", `${app(slug)}/identity-keys`, { name }),
+  deleteIdentityKey: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/identity-keys/${enc(id)}`),
+  requestVerification: (slug: string, number: number, email: string) =>
+    request<Verification>("POST", `${app(slug)}/issues/${number}/verifications`, { email }),
+  confirmVerification: (slug: string, number: number, id: string, code: string) =>
+    request<Verification>("POST", `${app(slug)}/issues/${number}/verifications/${enc(id)}/confirm`, { code }),
+  // Account sign-in by email code (blhp.app)
+  emailStart: (email: string) => request<{ ok: true }>("POST", "/auth/email/start", { email }),
+  emailVerify: (email: string, code: string) => request<{ ok: true }>("POST", "/auth/email/verify", { email, code }),
 }
 
 // Cache keys, so every page agrees on where a resource lives.
@@ -329,6 +369,10 @@ export const keys = {
   audit: (slug: string, actor = "", action = "") => `audit:${slug}:${actor}|${action}`,
   savedReplies: (slug: string) => `saved-replies:${slug}`,
   importJob: (slug: string, id: string) => `import:${slug}:${id}`,
+  /** Every contacts page of an app shares this prefix; then the search. */
+  contacts: (slug: string, q = "") => `contacts:${slug}:${q}`,
+  contact: (slug: string, id: string) => `contact:${slug}:${id}`,
+  identityKeys: (slug: string) => `identity-keys:${slug}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

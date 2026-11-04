@@ -35,6 +35,7 @@ const en = {
   "menu.reports": "Your reports",
   "menu.notifications": "Notifications",
   "menu.signOut": "Sign out",
+  "menu.docs": "Developer docs",
   "menu.language": "Language",
   "language.automatic": "Automatic (browser)",
   "language.label": "Language: {language}",
@@ -46,7 +47,7 @@ const en = {
   "error.generic": "Something went wrong",
   "error.goHome": "Go home",
   "error.unavailable": "This isn't available yet.",
-  "error.offline": "Can't reach Bellhop. Check your connection.",
+  "error.offline": "Can't connect. Check your connection and try again.",
   "error.unknown": "Something went wrong.",
 
   // Issue states
@@ -106,8 +107,9 @@ const en = {
   "rail.newWorkspace": "New workspace",
   "rail.createPrompt": "Create your workspace: a support site for your product, answered by your agent.",
   "rail.create": "Create your workspace",
-  "rail.all": { one: "All {count} workspaces", other: "All {count} workspaces" },
+  "rail.all": { one: "{count} workspace", other: "All {count} workspaces" },
   "rail.public": "Public workspaces",
+  "rail.docs": "Developer docs",
   "rail.openCount": { one: "{count} open", other: "{count} open" },
   // Mine
   "mine.label": "Mine",
@@ -518,7 +520,7 @@ const en = {
   // Diagnostics
   "diag.logs": { one: "{count} log", other: "{count} logs" },
   "diag.specs": { one: "{count} spec", other: "{count} specs" },
-  "diag.context": { one: "{count} context", other: "{count} context" },
+  "diag.context": { one: "{count} context field", other: "{count} context fields" },
   "diag.message": "Message",
   "diag.system": "System",
   "diag.logsTitle": "Logs",
@@ -634,7 +636,7 @@ const en = {
   "visibility.public": "Public",
   "visibility.private": "Private",
   "visibility.publicText": "List it on {home} and let search engines find it.",
-  "visibility.privateText": "Off, it's private: only people with the link find it, and it's never listed or indexed.",
+  "visibility.privateText": "When this is off, the workspace is private: only people with the link find it, and it's never listed or indexed.",
   "visibility.listed": "Listed on {home} and indexed by search engines.",
   "visibility.unlisted": "Only people with the link find it; never listed or indexed.",
   "access.all": "All workspaces · {role}",
@@ -647,6 +649,7 @@ const en = {
   "list.separator": ", ",
   // Agents
   "agents.title": "Agents",
+  "agents.docs": "Docs",
   "agents.newToken": "New token agent",
   "agents.intro": "Agents act for your account, only in the workspaces you choose and never above your own role there.",
   "agents.none": "No agents yet. Connect one over MCP, or create a token agent for scripts and CI.",

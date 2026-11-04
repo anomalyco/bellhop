@@ -17,7 +17,8 @@ export function AgentSetup() {
   const t = useT()
   const [client, setClient] = useState<Client>("opencode")
   const url = mcpUrl()
-  const config = JSON.stringify({ mcp: { bellhop: { type: "remote", url } } }, null, 2)
+  // OpenCode V2: servers live under mcp.servers; remote servers sign in with OAuth by default
+  const config = JSON.stringify({ $schema: "https://opencode.ai/config.json", mcp: { servers: { bellhop: { type: "remote", url } } } }, null, 2)
 
   return (
     <div className="agent-setup">

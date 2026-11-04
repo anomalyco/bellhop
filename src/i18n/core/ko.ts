@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "내 보고",
   "menu.notifications": "알림",
   "menu.signOut": "로그아웃",
+  "menu.docs": "개발자 문서",
   "menu.language": "언어",
   "language.automatic": "자동(브라우저)",
   "language.label": "언어: {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "문제가 발생했어요",
   "error.goHome": "홈으로",
   "error.unavailable": "아직 사용할 수 없어요.",
-  "error.offline": "Bellhop에 연결할 수 없어요. 인터넷 연결을 확인하세요.",
+  "error.offline": "연결할 수 없어요. 인터넷 연결을 확인하고 다시 시도하세요.",
   "error.unknown": "문제가 발생했어요.",
 
   // Issue states
@@ -107,6 +108,7 @@ const messages: Translation<typeof en> = {
   "rail.create": "워크스페이스 만들기",
   "rail.all": { other: "워크스페이스 {count}개 모두" },
   "rail.public": "공개 워크스페이스",
+  "rail.docs": "개발자 문서",
   "rail.openCount": { other: "{count}개 열림" },
   // Mine
   "mine.label": "내 이슈",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": ", ",
   // Agents
   "agents.title": "에이전트",
+  "agents.docs": "문서",
   "agents.newToken": "새 토큰 에이전트",
   "agents.intro": "에이전트는 내 계정을 대신해 내가 선택한 워크스페이스에서만 작동하며, 그곳에서 내 역할보다 높은 권한을 갖지 않아요.",
   "agents.none": "아직 에이전트가 없어요. MCP로 연결하거나 스크립트와 CI용 토큰 에이전트를 만드세요.",

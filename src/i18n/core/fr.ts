@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "Vos signalements",
   "menu.notifications": "Notifications",
   "menu.signOut": "Se déconnecter",
+  "menu.docs": "Documentation développeurs",
   "menu.language": "Langue",
   "language.automatic": "Automatique (navigateur)",
   "language.label": "Langue : {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "Une erreur s'est produite",
   "error.goHome": "Retour à l'accueil",
   "error.unavailable": "Ce n'est pas encore disponible.",
-  "error.offline": "Impossible de joindre Bellhop. Vérifiez votre connexion.",
+  "error.offline": "Connexion impossible. Vérifiez votre connexion et réessayez.",
   "error.unknown": "Une erreur s'est produite.",
 
   // Issue states
@@ -107,6 +108,7 @@ const messages: Translation<typeof en> = {
   "rail.create": "Créer votre espace de travail",
   "rail.all": { one: "{count} espace de travail", other: "Les {count} espaces de travail" },
   "rail.public": "Espaces de travail publics",
+  "rail.docs": "Documentation développeurs",
   "rail.openCount": { one: "{count} ouvert", other: "{count} ouverts" },
   // Mine
   "mine.label": "Les miens",
@@ -633,7 +635,7 @@ const messages: Translation<typeof en> = {
   "visibility.public": "Public",
   "visibility.private": "Privé",
   "visibility.publicText": "Le lister sur {home} et laisser les moteurs de recherche le trouver.",
-  "visibility.privateText": "Désactivé, il est privé : seules les personnes disposant du lien le trouvent, et il n'est jamais listé ni indexé.",
+  "visibility.privateText": "Si c'est désactivé, il est privé : seules les personnes disposant du lien le trouvent, et il n'est jamais listé ni indexé.",
   "visibility.listed": "Listé sur {home} et indexé par les moteurs de recherche.",
   "visibility.unlisted": "Seules les personnes disposant du lien le trouvent ; jamais listé ni indexé.",
   "access.all": "Tous les espaces de travail · {role}",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": ", ",
   // Agents
   "agents.title": "Agents",
+  "agents.docs": "Documentation",
   "agents.newToken": "Nouvel agent à jeton",
   "agents.intro": "Les agents agissent pour votre compte, uniquement dans les espaces de travail que vous choisissez et jamais au-delà de votre propre rôle.",
   "agents.none": "Aucun agent pour l'instant. Connectez-en un via MCP, ou créez un agent à jeton pour vos scripts et la CI.",

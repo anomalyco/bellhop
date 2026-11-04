@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "Tus reportes",
   "menu.notifications": "Notificaciones",
   "menu.signOut": "Cerrar sesión",
+  "menu.docs": "Documentación para desarrolladores",
   "menu.language": "Idioma",
   "language.automatic": "Automático (navegador)",
   "language.label": "Idioma: {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "Algo salió mal",
   "error.goHome": "Ir al inicio",
   "error.unavailable": "Esto aún no está disponible.",
-  "error.offline": "No se puede conectar con Bellhop. Revisa tu conexión.",
+  "error.offline": "No se puede conectar. Revisa tu conexión e inténtalo de nuevo.",
   "error.unknown": "Algo salió mal.",
 
   // Issue states
@@ -107,6 +108,7 @@ const messages: Translation<typeof en> = {
   "rail.create": "Crear tu espacio de trabajo",
   "rail.all": { one: "Ver {count} espacio de trabajo", other: "Ver los {count} espacios de trabajo" },
   "rail.public": "Espacios de trabajo públicos",
+  "rail.docs": "Documentación para desarrolladores",
   "rail.openCount": { one: "{count} abierta", other: "{count} abiertas" },
   // Mine
   "mine.label": "Mías",
@@ -633,7 +635,7 @@ const messages: Translation<typeof en> = {
   "visibility.public": "Público",
   "visibility.private": "Privado",
   "visibility.publicText": "Mostrarlo en {home} y dejar que los buscadores lo encuentren.",
-  "visibility.privateText": "Desactivado, es privado: solo lo encuentra quien tenga el enlace y nunca se lista ni se indexa.",
+  "visibility.privateText": "Si está desactivado, es privado: solo lo encuentra quien tenga el enlace y nunca se lista ni se indexa.",
   "visibility.listed": "Listado en {home} e indexado por los buscadores.",
   "visibility.unlisted": "Solo lo encuentra quien tenga el enlace; nunca se lista ni se indexa.",
   "access.all": "Todos los espacios de trabajo · {role}",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": ", ",
   // Agents
   "agents.title": "Agentes",
+  "agents.docs": "Documentación",
   "agents.newToken": "Nuevo agente con token",
   "agents.intro": "Los agentes actúan en nombre de tu cuenta, solo en los espacios de trabajo que elijas y nunca por encima de tu propio rol en ellos.",
   "agents.none": "Aún no hay agentes. Conecta uno por MCP o crea un agente con token para scripts y CI.",

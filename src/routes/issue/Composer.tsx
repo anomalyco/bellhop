@@ -17,6 +17,8 @@ import { GuestLine, useNamePrompt } from "../../ui/NamePrompt"
 import { Button, StateIcon } from "../../ui/primitives"
 import type { IssueModel } from "./model"
 import { tKey, useT } from "../../i18n/core"
+import { useT as useDeskT } from "../../i18n/helpdesk"
+import { deskOutsider } from "../../lib/helpdesk"
 
 const closeOptions: { reason: CloseReason; readonly label: string; readonly description: string }[] = (["completed", "not_planned", "duplicate"] as const).map((reason) => ({
   reason,
@@ -88,8 +90,9 @@ function useDock() {
  */
 export function Composer({ model }: { model: IssueModel }) {
   const t = useT()
+  const td = useDeskT()
   const { app, issue, me, member, onStatus, onDuplicate } = model
-  const guest = me && !me.user ? me.guest : null
+  const guest = me && !me.user && !me.contact ? me.guest : null
   // Known on the first paint from the local cache; undefined on a first visit until /api/me answers, when the line
   // holds its space (invisibly) so the composer never grows under the reader.
   const who = useWho(me)
@@ -212,8 +215,18 @@ export function Composer({ model }: { model: IssueModel }) {
   }
 
   const option = closeOptions.find((o) => o.reason === reason)!
-  const closeLabel = reason === "completed" ? (hasText ? (note ? t("composer.closeWithNote") : t("composer.closeWithComment")) : t("composer.closeIssue")) : option.label
-  const reopenLabel = hasText ? (note ? t("composer.reopenWithNote") : t("composer.reopenWithComment")) : t("composer.reopenIssue")
+  const desk = deskOutsider(model.app)
+  const closeLabel =
+    reason === "completed"
+      ? hasText
+        ? note
+          ? t("composer.closeWithNote")
+          : t("composer.closeWithComment")
+        : desk
+          ? td("composer.closeRequest")
+          : t("composer.closeIssue")
+      : option.label
+  const reopenLabel = hasText ? (note ? t("composer.reopenWithNote") : t("composer.reopenWithComment")) : desk ? td("composer.reopenRequest") : t("composer.reopenIssue")
   const duplicating = member && reason === "duplicate" && issue.status !== "closed"
 
   // The team, and the reporter (completed or not planned; duplicates need the team).

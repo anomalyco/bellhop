@@ -83,7 +83,8 @@ export async function pagePayload(
             id && c.req.header("Authorization") ? await reportViewer(c, scope.app.id, scope.viewer) : scope.viewer
         return { kind: "new", metadata: id === null ? null : await getReport(c.env, scope.app.id, id, viewer, read) }
       }
-      if (location === "/_design" || /^\/settings(?:\/|$)/.test(location)) return { kind: "other" }
+      if (location === "/_design" || location === "/signin" || /^\/(?:settings|contacts)(?:\/|$)/.test(location))
+        return { kind: "other" }
       return { kind: "not_found" }
     }
     const [workspace, result] = await Promise.all([

@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "Seus chamados",
   "menu.notifications": "Notificações",
   "menu.signOut": "Sair",
+  "menu.docs": "Documentação para desenvolvedores",
   "menu.language": "Idioma",
   "language.automatic": "Automático (navegador)",
   "language.label": "Idioma: {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "Algo deu errado",
   "error.goHome": "Ir para o início",
   "error.unavailable": "Isso ainda não está disponível.",
-  "error.offline": "Não foi possível acessar o Bellhop. Verifique sua conexão.",
+  "error.offline": "Não foi possível conectar. Verifique sua conexão e tente de novo.",
   "error.unknown": "Algo deu errado.",
 
   // Issue states
@@ -105,8 +106,9 @@ const messages: Translation<typeof en> = {
   "rail.newWorkspace": "Novo espaço de trabalho",
   "rail.createPrompt": "Crie seu espaço de trabalho: um site de suporte para o seu produto, atendido pelo seu agente.",
   "rail.create": "Criar seu espaço de trabalho",
-  "rail.all": { one: "Todos os {count} espaços de trabalho", other: "Todos os {count} espaços de trabalho" },
+  "rail.all": { one: "{count} espaço de trabalho", other: "Todos os {count} espaços de trabalho" },
   "rail.public": "Espaços de trabalho públicos",
+  "rail.docs": "Documentação para desenvolvedores",
   "rail.openCount": { one: "{count} aberto", other: "{count} abertos" },
   // Mine
   "mine.label": "Meus",
@@ -633,7 +635,7 @@ const messages: Translation<typeof en> = {
   "visibility.public": "Público",
   "visibility.private": "Privado",
   "visibility.publicText": "Listar em {home} e permitir que mecanismos de busca o encontrem.",
-  "visibility.privateText": "Desativado, é privado: só quem tem o link o encontra, e ele nunca é listado nem indexado.",
+  "visibility.privateText": "Quando desativado, é privado: só quem tem o link o encontra, e ele nunca é listado nem indexado.",
   "visibility.listed": "Listado em {home} e indexado por mecanismos de busca.",
   "visibility.unlisted": "Só quem tem o link o encontra; nunca é listado nem indexado.",
   "access.all": "Todos os espaços de trabalho · {role}",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": ", ",
   // Agents
   "agents.title": "Agentes",
+  "agents.docs": "Documentação",
   "agents.newToken": "Novo agente com token",
   "agents.intro": "Os agentes agem em nome da sua conta, só nos espaços de trabalho que você escolher e nunca acima da sua própria função neles.",
   "agents.none": "Nenhum agente ainda. Conecte um via MCP ou crie um agente com token para scripts e CI.",

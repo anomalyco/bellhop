@@ -105,8 +105,10 @@ function History({ slug, number, commentId }: { slug: string; number: number; co
 }
 
 /** The lock and eye markers under an issue's title, each with who can see it. */
-export function IssueFlags({ issue }: { issue: Issue }) {
+export function IssueFlags({ issue, desk = false }: { issue: Issue; desk?: boolean }) {
   const t = useT()
+  // In a help desk every request is private: the flag would say nothing
+  if (desk) issue = { ...issue, private: false }
   if (!issue.private && !issue.hidden && !issue.locked && !issue.pinned) return null
   return (
     <div className="report-flags">

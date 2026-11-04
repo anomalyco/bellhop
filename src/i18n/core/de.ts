@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "Deine Meldungen",
   "menu.notifications": "Benachrichtigungen",
   "menu.signOut": "Abmelden",
+  "menu.docs": "Entwicklerdoku",
   "menu.language": "Sprache",
   "language.automatic": "Automatisch (Browser)",
   "language.label": "Sprache: {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "Etwas ist schiefgelaufen",
   "error.goHome": "Zur Startseite",
   "error.unavailable": "Das ist noch nicht verfügbar.",
-  "error.offline": "Bellhop ist nicht erreichbar. Prüfe deine Verbindung.",
+  "error.offline": "Keine Verbindung. Prüfe deine Verbindung und versuche es erneut.",
   "error.unknown": "Etwas ist schiefgelaufen.",
 
   // Issue states
@@ -105,8 +106,9 @@ const messages: Translation<typeof en> = {
   "rail.newWorkspace": "Neuer Workspace",
   "rail.createPrompt": "Erstelle deinen Workspace: eine Support-Seite für dein Produkt, beantwortet von deinem Agent.",
   "rail.create": "Workspace erstellen",
-  "rail.all": { one: "Alle {count} Workspaces", other: "Alle {count} Workspaces" },
+  "rail.all": { one: "{count} Workspace", other: "Alle {count} Workspaces" },
   "rail.public": "Öffentliche Workspaces",
+  "rail.docs": "Entwicklerdoku",
   "rail.openCount": { one: "{count} offen", other: "{count} offen" },
   // Mine
   "mine.label": "Meine",
@@ -633,7 +635,7 @@ const messages: Translation<typeof en> = {
   "visibility.public": "Öffentlich",
   "visibility.private": "Privat",
   "visibility.publicText": "Auf {home} auflisten und von Suchmaschinen finden lassen.",
-  "visibility.privateText": "Aus, also privat: Nur Leute mit dem Link finden ihn, und er wird nie aufgelistet oder indexiert.",
+  "visibility.privateText": "Wenn das aus ist, ist der Workspace privat: Nur Leute mit dem Link finden ihn, und er wird nie aufgelistet oder indexiert.",
   "visibility.listed": "Auf {home} aufgelistet und von Suchmaschinen indexiert.",
   "visibility.unlisted": "Nur Leute mit dem Link finden ihn; nie aufgelistet oder indexiert.",
   "access.all": "Alle Workspaces · {role}",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": ", ",
   // Agents
   "agents.title": "Agents",
+  "agents.docs": "Doku",
   "agents.newToken": "Neuer Token-Agent",
   "agents.intro": "Agents handeln für dein Konto, nur in den Workspaces, die du wählst, und nie über deiner eigenen Rolle dort.",
   "agents.none": "Noch keine Agents. Verbinde einen über MCP oder erstelle einen Token-Agent für Skripte und CI.",

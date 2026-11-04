@@ -6,10 +6,12 @@ import { peek, setData } from "../lib/cache"
 import { rememberMe, validGuestName } from "../lib/guest"
 import { cancelHostedCheck, runHumanCheck } from "../lib/human"
 import { reduced, SPRING_25 } from "../lib/motion"
-import { signInHref } from "../lib/site"
+import { signInHrefHere } from "../lib/signin"
 import { Button } from "./primitives"
 import { SiteLink } from "./SiteLink"
 import { tr, useT } from "../i18n/core"
+import { contactLabel } from "../lib/helpdesk"
+import { useResource } from "../lib/cache"
 
 /** Phones get a bottom sheet; wider screens a popover growing out of the control that asked. */
 const sheetQuery = "(max-width: 640px)"
@@ -248,7 +250,7 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
         <div className="name-prompt-check" ref={checkHost} />
         <div className="name-prompt-foot">
           {ask.mode === "first" && (
-            <SiteLink href={signInHref()} className="name-prompt-signin">
+            <SiteLink href={signInHrefHere()} className="name-prompt-signin">
               {t("common.signInInstead")}
             </SiteLink>
           )}
@@ -269,6 +271,14 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
 /** "Posting as Alex · Change name · Sign in" for guests (or "Posting as a guest" before they've chosen a name). */
 export function GuestLine({ name, onChange, placeholder }: { name: string | null; onChange: (anchor: HTMLElement) => void; placeholder?: boolean }): ReactNode {
   const t = useT()
+  // A help desk's signed-in requester posts as themselves: no name to pick, nothing to sign in to
+  const contact = useResource<Me>(keys.me, api.me, 30_000).data?.contact
+  if (contact)
+    return (
+      <div className="guest-bar">
+        <span className="guest-bar-text">{tr("guest.postingAs", { name: <strong>{contactLabel(contact)}</strong> })}</span>
+      </div>
+    )
   return (
     <div className="guest-bar" aria-hidden={placeholder || undefined} data-placeholder={placeholder || undefined}>
       <span className="guest-bar-text">{name ? tr("guest.postingAs", { name: <strong>{name}</strong> }) : t("guest.postingAsGuest")}</span>
@@ -281,7 +291,7 @@ export function GuestLine({ name, onChange, placeholder }: { name: string | null
         </>
       )}
       <span aria-hidden="true">·</span>
-      <SiteLink href={signInHref()} className="guest-bar-link" tabIndex={placeholder ? -1 : undefined}>
+      <SiteLink href={signInHrefHere()} className="guest-bar-link" tabIndex={placeholder ? -1 : undefined}>
         {t("common.signIn")}
       </SiteLink>
     </div>
