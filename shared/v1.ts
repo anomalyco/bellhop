@@ -55,6 +55,8 @@
 //   POST   /v1/conversations/:id/messages MessageInput    -> Message
 //   POST   /v1/conversations/:id/read { item_id }         -> { ok: true }
 //   POST   /v1/conversations/:id/typing                   -> { ok: true }      shown to the team for 5 s
+//   POST   /v1/conversations/:id/escalate { reason? }     -> Conversation      "Talk to a person": hands it to the team
+//          (once per conversation; rate limited); with a secret key it escalates as the workspace
 //   POST   /v1/conversations/:id/verifications/:vid/confirm { code } -> Verification (api.ts)
 //   POST   /v1/uploads         multipart/form-data, one part named file -> Upload; attach once within 24 h
 //   POST   /v1/realtime        -> { url, expires_at }     a single-use wss:// URL valid 60 s; the socket sends
@@ -171,9 +173,12 @@ export interface Conversation {
   last_item: ConversationItem | null
   /** Messages from others plus verification requests after the user's read mark; not status or assignment events. */
   unread: number
+  /** Workspace credential only. Always null in the end-user view, including assignment events. */
   assignee: Participant | null
   /** Pending and completed email verifications on this conversation. */
   verifications: Verification[]
+  /** True while a person (not an agent) has the conversation, e.g. after "Talk to a person". */
+  with_person: boolean
 }
 
 export interface ConversationInput {
@@ -227,6 +232,8 @@ export type ConversationEvent =
   | { type: "assigned"; assignee: Participant | null }
   | { type: "verification_requested"; verification_id: string }
   | { type: "verified"; verification_id: string }
+  /** A person will take it from here (no internal reason or group). */
+  | { type: "escalated" }
 
 export type ConversationItem = { internal?: boolean; hidden?: boolean; held?: boolean } & (
   | { kind: "message"; id: string; created_at: string; message: Message }

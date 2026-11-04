@@ -2,7 +2,10 @@ import type { IssueSort } from "../shared/api"
 import { str } from "./core"
 
 export const sorts = ["newest", "oldest", "updated", "votes", "comments"] as const
-type Term = { key: "is" | "type" | "status" | "reason" | "label" | "no" | "assignee" | "author" | "has"; value: string }
+type Term = {
+  key: "is" | "group" | "type" | "status" | "reason" | "label" | "no" | "assignee" | "author" | "has"
+  value: string
+}
 export function parseSearch(input: unknown, feed = false) {
   const q = input === undefined ? "" : str(input, "query", 512, true),
     terms: Term[] = [],
@@ -22,7 +25,19 @@ export function parseSearch(input: unknown, feed = false) {
     }
     if (
       key === "is" &&
-      ["open", "closed", "private", "locked", "pinned", "hidden", "held", "awaiting-approval"].includes(value)
+      [
+        "open",
+        "closed",
+        "private",
+        "locked",
+        "pinned",
+        "hidden",
+        "held",
+        "awaiting-approval",
+        "escalated",
+        "with-person",
+        "waiting-for-person"
+      ].includes(value)
     ) {
       if (value === "open" || value === "closed") tab = value
     } else if (key === "status" && ["open", "in_progress", "waiting", "closed"].includes(value))
@@ -32,6 +47,7 @@ export function parseSearch(input: unknown, feed = false) {
       !(
         key === "label" ||
         key === "type" ||
+        key === "group" ||
         (key === "no" && ["label", "assignee"].includes(value)) ||
         (key === "has" && value === "metadata") ||
         (!feed && (key === "assignee" || key === "author") && /^@?[a-z0-9][a-z0-9-]*$/.test(value))

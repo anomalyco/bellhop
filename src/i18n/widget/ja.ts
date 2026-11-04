@@ -132,6 +132,17 @@ const messages: Translation<typeof en> = {
   "field.number": "数値を入力してください。",
   "field.option": "選択肢から1つ選んでください。",
   "field.invalid": "この項目を確認してください。",
+
+  // Asking for a person instead of the assistant, in an open conversation
+  "handoff.action": "担当者と話す",
+  "handoff.reason": "どのようなことでお困りですか？",
+  "handoff.reasonHint": "任意",
+  "handoff.send": "担当者を呼ぶ",
+  "handoff.cancel": "キャンセル",
+  "handoff.sending": "送信中…",
+  "handoff.status": "チームが対応中",
+  "handoff.already": "この会話ではすでに担当者を呼んでいます。",
+  "event.escalated": "ここからは担当者が対応します",
 }
 
 export default messages

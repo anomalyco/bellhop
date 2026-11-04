@@ -11,6 +11,9 @@ import sessionsSource from "./v1/sessions.ts?raw"
 import replaySource from "./v1/replay.ts?raw"
 import signedMediaSource from "./v1/signed-media.ts?raw"
 import realtimeSource from "./v1/realtime.ts?raw"
+import approvalsSource from "./approvals.ts?raw"
+import mutationsSource from "./mutations.ts?raw"
+import coreSource from "./core.ts?raw"
 import index from "../docs/index.md?raw"
 import reports from "../docs/reports.md?raw"
 import mcp from "../docs/mcp.md?raw"
@@ -19,6 +22,7 @@ import feeds from "../docs/feeds.md?raw"
 import publicApi from "../docs/api.md?raw"
 import widget from "../docs/widget.md?raw"
 import identity from "../docs/identity.md?raw"
+import agents from "../docs/agents.md?raw"
 import production from "virtual:bellhop-production-config"
 
 // The public developer docs. Pages are Markdown in docs/; anything that can drift from the code
@@ -59,23 +63,6 @@ function fromMigrations(pattern: RegExp, what: string) {
   for (const name of Object.keys(migrations).sort()) found = pattern.exec(migrations[name]!) ?? found
   return found ?? fail(`no ${what} in migrations`)
 }
-const daily = fromMigrations(/report_daily_limit CHECK\(uploads<=(\d+) AND bytes<=(\d+)\)/, "report daily limit")
-const commentsTrigger = fromMigrations(
-  /CREATE TRIGGER comments_rate_limit[\s\S]*?'-1 hour'\)\)>=(\d+)\s+BEGIN/,
-  "comments rate limit"
-)
-const webhookRetries =
-  production.queues.consumers.find((q) => q.queue === "bellhop-webhooks")?.max_retries ?? fail("no webhook queue")
-// worker/webhooks.ts retries with delaySeconds 2 ** (attempts - 1).
-const backoff = Array.from({ length: webhookRetries }, (_, i) => String(2 ** i))
-// Public API v1 limits, read from the code that enforces them.
-const sourceMatch = (source: string, pattern: RegExp, what: string) => pattern.exec(source) ?? fail(`no ${what}`)
-const sessionLife = sourceMatch(sessionsSource, /min\(unixepoch\(\)\+(\d+),born\+(\d+)\)/, "session lifetime")
-const uploadDaily = fromMigrations(
-  /NEW\.scope!='workspace' THEN (\d+) WHEN \(SELECT trusted FROM apps WHERE id=NEW\.app_id\) THEN (\d+) ELSE (\d+) END/,
-  "upload byte quota"
-)
-const replayTtl = sourceMatch(replaySource, /response\.status < 500 \? (\d+) : (\d+)/, "replay lifetimes")
 const duration = (seconds: number) => {
   const unit = (n: number, word: string) => `${n}\u00a0${word}${n === 1 ? "" : "s"}`
   if (seconds % 86400 === 0 && seconds > 86400) return unit(seconds / 86400, "day")
@@ -86,36 +73,86 @@ const duration = (seconds: number) => {
 const list = (items: string[]) =>
   items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 
-const values: Record<string, string> = {
-  ...Object.fromEntries(
-    Object.entries(reportLimits).map(([k, v]) => [
-      `report.${k}`,
-      ["request", "log", "sections"].includes(k) ? bytes(v) : String(v)
-    ])
-  ),
-  "report.dailyUploads": daily[1]!,
-  "report.dailyBytes": bytes(Number(daily[2])),
-  "mcp.commentsPerHour": commentsTrigger[1]!,
-  "webhook.retries": String(webhookRetries),
-  "webhook.backoff": `${list(backoff)} seconds`,
-  locales: LOCALES.map((l) => `\`${l}\``).join(", "),
-  "v1.session": duration(Number(sessionLife[1])),
-  "v1.sessionCap": duration(Number(sessionLife[2])),
-  "v1.uploadImage": bytes(uploadSpec("a.png", "image/png").limit),
-  "v1.uploadVideo": bytes(uploadSpec("a.mp4", "video/mp4").limit),
-  "v1.uploadFile": bytes(uploadSpec("a.pdf", "application/pdf").limit),
-  "v1.uploadsPerHour": String(
-    Number(sourceMatch(uploadsSource, /-1 hour'\)[^`]*LIMIT 1 OFFSET (\d+)/, "hourly uploads")[1]) + 1
-  ),
-  "v1.uploadContactDaily": bytes(Number(uploadDaily[1])),
-  "v1.uploadWorkspaceDaily": bytes(Number(uploadDaily[3])),
-  "v1.replaySuccess": duration(Number(replayTtl[2])),
-  "v1.replayClientError": duration(Number(replayTtl[1])),
-  "v1.mediaTtl": duration(Number(sourceMatch(signedMediaSource, /ttl = (\d+)/, "signed media lifetime")[1])),
-  "identity.session": duration(contactTTL),
-  "v1.ticketTtl": duration(
-    Number(sourceMatch(realtimeSource, /Date\.now\(\) \/ 1000\) \+ (\d+)/, "ticket lifetime")[1])
+// Every {{placeholder}} value, read from the code and config that enforce it. Built on the first docs request, not
+// at import: a stale pattern then fails the docs pages alone, never the Worker that imports this module.
+let placeholders: Record<string, string> | null = null
+function values(): Record<string, string> {
+  if (placeholders) return placeholders
+  placeholders = build()
+  return placeholders
+}
+function build(): Record<string, string> {
+  const daily = fromMigrations(/report_daily_limit CHECK\(uploads<=(\d+) AND bytes<=(\d+)\)/, "report daily limit")
+  const commentsTrigger = fromMigrations(
+    /CREATE TRIGGER comments_rate_limit[\s\S]*?'-1 hour'\)\)>=(\d+)\s+BEGIN/,
+    "comments rate limit"
   )
+  const webhookRetries =
+    production.queues.consumers.find((q) => q.queue === "bellhop-webhooks")?.max_retries ?? fail("no webhook queue")
+  // worker/webhooks.ts retries with delaySeconds 2 ** (attempts - 1).
+  const backoff = Array.from({ length: webhookRetries }, (_, i) => String(2 ** i))
+  // Public API v1 limits, read from the code that enforces them.
+  const sourceMatch = (source: string, pattern: RegExp, what: string) => pattern.exec(source) ?? fail(`no ${what}`)
+  const sessionLife = sourceMatch(sessionsSource, /min\(unixepoch\(\)\+(\d+),born\+(\d+)\)/, "session lifetime")
+  const uploadDaily = fromMigrations(
+    /NEW\.scope!='workspace' THEN (\d+) WHEN \(SELECT trusted FROM apps WHERE id=NEW\.app_id\) THEN (\d+) ELSE (\d+) END/,
+    "upload byte quota"
+  )
+  // Approvals: lifetimes and consume errors from worker/approvals.ts, the JWKS path from the v1 route table.
+  const approvalPending = sourceMatch(approvalsSource, /unixepoch\(\)\+(\d+) FROM issues i JOIN apps w/, "approval pending lifetime")
+  const approvalToken = sourceMatch(approvalsSource, /expires=unixepoch\(\)\+(\d+) WHERE id=\?[^`]*?state='pending'/, "approval token lifetime")
+  const approvalConsume = sourceMatch(approvalsSource, /p\.state === "used" \? (\d+) : (\d+), "([a-z_]+)"/, "consume errors")
+  const jwksPath = Object.entries((document() as Api).paths).find(([p]) => p.endsWith("/jwks.json")) ?? fail("no JWKS route")
+  const jwksQuery = jwksPath[1].get?.parameters.find((x) => x.in === "query")?.name ?? fail("no JWKS workspace parameter")
+  const approvalJwks = `https://api.blhp.app/v1${jwksPath[0]}?${jwksQuery}=<slug>`
+  const approvalKeys = sourceMatch(approvalsSource, /Object\.keys\(details\)\.length > (\d+)/, "approval details key limit")
+  // The verifier on /docs/agents is quoted verbatim, so it hardcodes the lifetime and the JWKS URL: say so if they drift.
+  if (!agents.includes(`c.exp - c.iat > ${approvalToken[1]}`) || !agents.includes(`\`${approvalJwks.replace("<slug>", "${encodeURIComponent(aud)}")}\``))
+    console.error("bellhop.docs_verifier_drift", { token_seconds: Number(approvalToken[1]), jwks: approvalJwks })
+  const replayTtl = sourceMatch(replaySource, /response\.status < 500 \? (\d+) : (\d+)/, "replay lifetimes")
+  return {
+    ...Object.fromEntries(
+      Object.entries(reportLimits).map(([k, v]) => [
+        `report.${k}`,
+        ["request", "log", "sections"].includes(k) ? bytes(v) : String(v)
+      ])
+    ),
+    "report.dailyUploads": daily[1]!,
+    "report.dailyBytes": bytes(Number(daily[2])),
+    "mcp.commentsPerHour": commentsTrigger[1]!,
+    "webhook.retries": String(webhookRetries),
+    "webhook.backoff": `${list(backoff)} seconds`,
+    locales: LOCALES.map((l) => `\`${l}\``).join(", "),
+    "v1.session": duration(Number(sessionLife[1])),
+    "v1.sessionCap": duration(Number(sessionLife[2])),
+    "v1.uploadImage": bytes(uploadSpec("a.png", "image/png").limit),
+    "v1.uploadVideo": bytes(uploadSpec("a.mp4", "video/mp4").limit),
+    "v1.uploadFile": bytes(uploadSpec("a.pdf", "application/pdf").limit),
+    "v1.uploadsPerHour": String(
+      Number(sourceMatch(uploadsSource, /-1 hour'\)[^`]*LIMIT 1 OFFSET (\d+)/, "hourly uploads")[1]) + 1
+    ),
+    "v1.uploadContactDaily": bytes(Number(uploadDaily[1])),
+    "v1.uploadWorkspaceDaily": bytes(Number(uploadDaily[3])),
+    "v1.replaySuccess": duration(Number(replayTtl[2])),
+    "v1.replayClientError": duration(Number(replayTtl[1])),
+    "v1.mediaTtl": duration(Number(sourceMatch(signedMediaSource, /ttl = (\d+)/, "signed media lifetime")[1])),
+    "identity.session": duration(contactTTL),
+    "approvals.pending": duration(Number(approvalPending[1])),
+    "approvals.token": duration(Number(approvalToken[1])),
+    "approvals.usedStatus": approvalConsume[1]!,
+    "approvals.goneStatus": approvalConsume[2]!,
+    "approvals.code": approvalConsume[3]!,
+    "approvals.jwks": approvalJwks,
+    "handoff.code": sourceMatch(coreSource, /ApiFailure\(\s*409,\s*"([a-z_]+)",\s*"Handoff or permissions changed/, "handoff conflict code")[1]!,
+    "approvals.maxKeys": approvalKeys[1]!,
+    "approvals.maxString": sourceMatch(approvalsSource, /\[\.\.\.v\]\.length > (\d+)/, "approval string limit")[1]!,
+    "approvals.maxBytes": bytes(Number(sourceMatch(approvalsSource, /bytes\.byteLength > (\d+)/, "approval details size")[1])),
+    "approvals.changedCode": sourceMatch(approvalsSource, /fail\(409, "([a-z_]+)", "Approval details changed/, "details_changed code")[1]!,
+    "approvals.replyCode": sourceMatch(mutationsSource, /fail\(409, ['"]([a-z_]+)['"], ['"]Reply is no longer available/, "held reply race code")[1]!,
+    "v1.ticketTtl": duration(
+      Number(sourceMatch(realtimeSource, /Date\.now\(\) \/ 1000\) \+ (\d+)/, "ticket lifetime")[1])
+    )
+  }
 }
 
 // What each tool returns. Kept next to the generated table, and checked for completeness.
@@ -145,6 +182,8 @@ const returns: Record<keyof typeof toolRoles, string> = {
   get_analytics: "Response, resolution and agent metrics for the period.",
   get_contact: "The help desk contact (verified email, external id, how they verified) with their requests.",
   list_request_types: "The workspace’s request types, field definitions and team routing settings.",
+  list_groups:'The help desk groups and available members.',
+  escalate:'The updated request with its human handoff.',
   request_approval: "A pending, team-only action approval.",
   get_approval: "The approval; a live signed token is included only for the agent that requested it.",
   set_request_type: "The updated request with its validated answers and effective autonomy.",
@@ -222,6 +261,12 @@ const eventNotes: Record<string, string> = {
   "comment.edited": "A comment was edited, not by an agent.",
   "comment.deleted": "A comment was deleted.",
   "mention.created": "Someone @mentioned a team member or an agent.",
+  "issue.escalated":
+    "A request was handed to a person: by an agent, the requester, the team or routing. `escalation` says why, who and which group; it fires again if it passes to the next member.",
+  "issue.handed_back": "A team member handed the request back to agents.",
+  "reply.held": "An agent's public reply was held for review (autonomy `suggest`). The reply is in `comment`.",
+  "approval.requested": "An agent asked for an approval. It's in `approval`.",
+  "approval.decided": "A team member approved or rejected an approval. It's in `approval`, never with its token.",
   "verification.completed":
     "An email verification on a request finished. `verification` says whether it was verified, failed or expired."
 }
@@ -296,9 +341,13 @@ const operations: Record<string, [group: string, title: string, summary: string]
   eraseContact: ["Server API", "Erase a contact", "Removes their identity, sessions and verification records. Their requests stay, written by a deleted user."],
   updateConversation: ["Server API", "Update a conversation", "Status and close reason, assignee and labels."],
   requestVerification: ["Server API", "Ask to verify an email", "Emails a code to the address; the requester enters it in the conversation."],
+  escalateConversation: ["Conversations", "Talk to a person", "Hands the conversation to the team, with an optional `reason`. With a session, once per conversation; with a secret key, as the workspace."],
+  approvalKeys: ["Approvals", "Get the approval signing keys", "The keys action services verify one workspace's approval tokens with (Ed25519). Name the workspace with `workspace`."],
+  consumeApproval: ["Approvals", "Consume an approval", "Marks an approved, unexpired approval used, once, before your service acts. See [Running support agents](/docs/agents#6-verify-consume-act)."],
+  listApprovals: ["Approvals", "List a conversation's approvals", "Every approval agents asked for on it, with its state. Never tokens."],
   openapi: ["Discovery", "Get the OpenAPI document", "This reference as OpenAPI 3.1."]
 }
-const groups = ["Sessions", "Conversations", "Uploads and realtime", "Server API", "Discovery"]
+const groups = ["Sessions", "Conversations", "Uploads and realtime", "Server API", "Approvals", "Discovery"]
 const credentials: Record<string, string> = {
   secret: "secret key",
   publishable: "publishable key",
@@ -416,7 +465,7 @@ function expand(source: string) {
   const out = source
     .replace(/^\{\{table:([a-z-]+)\}\}$/gm, (_, name: string) => (tables[name] ?? fail(`unknown table ${name}`))())
     .replace(/\{\{rate:([A-Z0-9_]+)\}\}/g, (_, name: string) => rate(name))
-    .replace(/\{\{([a-zA-Z0-9.]+)\}\}/g, (_, key: string) => values[key] ?? fail(`unknown placeholder ${key}`))
+    .replace(/\{\{([a-zA-Z0-9.]+)\}\}/g, (_, key: string) => values()[key] ?? fail(`unknown placeholder ${key}`))
   if (out.includes("{{")) fail(`unexpanded placeholder near ${out.slice(out.indexOf("{{"), out.indexOf("{{") + 40)}`)
   return out
 }
@@ -473,6 +522,7 @@ const sources: [string, string][] = [
   ["index", index],
   ["reports", reports],
   ["mcp", mcp],
+  ["agents", agents],
   ["webhooks", webhooks],
   ["feeds", feeds],
   ["api", publicApi],

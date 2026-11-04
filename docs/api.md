@@ -51,6 +51,7 @@ curl -X POST https://api.blhp.app/v1/conversations \
   "created_at": "2026-11-04T21:01:51.012Z",
   "updated_at": "2026-11-04T21:01:51.012Z",
   "assignee": null,
+  "with_person": false,
   "last_item": {
     "id": "67e9902b-2fe4-4e60-bd94-17745a010358",
     "created_at": "2026-11-04T21:01:51.012Z",
@@ -193,6 +194,37 @@ Don't combine `after` with `last` or `before`.
 
 Send messages with `POST /v1/conversations/:id/messages` and `{ "body": "…", "attachments": ["<upload id>"] }`. Bodies are Markdown. `POST …/read` with `{ item_id }` marks everything up to that item as read; `unread` on a conversation counts messages from others and verification requests after that mark. `POST …/typing` shows the team that the person is typing for a few seconds.
 
+### Talking to a person
+
+Help desks can have an AI agent answer first. When someone would rather talk to a person, `POST /v1/conversations/:id/escalate` hands the conversation to the team, with an optional `reason`:
+
+```sh
+curl -X POST https://api.blhp.app/v1/conversations/$CONVERSATION/escalate \
+  -H "Authorization: Bearer $SESSION_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "I would like to talk to a person."}'
+```
+
+It returns the conversation with `with_person: true`, and an `escalated` event appears in its items. For an end-user session, `assignee` is always `null`; assignment events do not identify the member either. The workspace view still includes the assignee. Abridged:
+
+```json
+{
+  "id": "4b7e2c90-1d3f-4a68-9e05-7c2d8f1a6b34",
+  "number": 31,
+  "status": "open",
+  "with_person": true,
+  "last_item": {
+    "id": "7e3f5705-0c70-40b3-814a-37735644b189",
+    "created_at": "2026-11-04T23:19:01.300Z",
+    "kind": "event",
+    "actor": null,
+    "event": { "type": "escalated" }
+  }
+}
+```
+
+A person from the right group is assigned and emailed (see [Handing off to a person](/docs/agents#handing-off-to-a-person)). The requester never sees the team's reasons or groups, only that a person has it. A session can ask once per conversation; asking again, or while it's already with a person, is `409 {{handoff.code}}`. With a secret key, your server escalates as the workspace. The [chat widget](/docs/widget#behavior) has this as **Talk to a person**, and the SDK as `session.escalate(id, { reason })`.
+
 ### Request types
 
 A workspace can sort new requests by type, such as "Billing" or "Bug" (**Settings → Request types**). `GET /v1/workspace` lists the active ones in `request_types`, in order, each with an `id`, `name`, `description`, `require_verification` and its `fields`. A field has a `key`, a `label`, a `kind` (`text`, `textarea`, `email`, `url`, `number`, or `select` with `options`), `required`, and optionally `help`.
@@ -279,11 +311,11 @@ When you go over a limit you get `429` and a `Retry-After` header with the secon
 
 ## Errors
 
-Errors have a stable `code` and a readable `message`:
+Errors have a stable `code` and a readable `message`. Here, a session that has ended:
 
 ```sh
 curl https://api.blhp.app/v1/me \
-  -H "Authorization: Bearer $SESSION_TOKEN"
+  -H "Authorization: Bearer $ENDED_SESSION_TOKEN"
 ```
 
 ```json
@@ -388,6 +420,7 @@ curl -X PATCH https://api.blhp.app/v1/conversations/$CONVERSATION \
   "created_at": "2026-11-04T21:01:51.012Z",
   "updated_at": "2026-11-04T21:02:00.994Z",
   "contact_id": "ct_18ddac26-429d-4400-80e0-72c003ff0217",
+  "with_person": false,
   "unread": 0,
   "request_type": null,
   "fields": {},
@@ -407,6 +440,10 @@ curl -X PATCH https://api.blhp.app/v1/conversations/$CONVERSATION \
   "verifications": []
 }
 ```
+
+### Approvals
+
+When an agent asks the team before an action with consequences, your action service checks the signed token it gets: verify it against your workspace's keys at `/v1/approvals/jwks.json?workspace=<slug>`, then `POST /v1/approvals/:id/consume` with your secret key before acting. `GET /v1/conversations/:id/approvals` lists a request's approvals, never with tokens. [Running support agents](/docs/agents#approvals) has the verifier and the rules.
 
 ### Erasure
 

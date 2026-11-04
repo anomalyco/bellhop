@@ -1148,3 +1148,634 @@
 .request-field-hint > span {
   display: block;
 }
+
+/* Review: an agent's held reply, in place in the thread (team only) */
+.held {
+  display: grid;
+  gap: 8px;
+  margin: 8px -12px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--waiting) 45%, transparent);
+  background: color-mix(in oklab, var(--waiting) 4%, transparent);
+}
+.held-head,
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 22px;
+  font-size: var(--text-ui);
+}
+.held-title,
+.approval-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.held-title .actor-name,
+.approval-title .actor-name {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.held-title .ai-badge,
+.approval-title .ai-badge {
+  margin-left: 4px;
+}
+.held-time,
+.approval-time {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.held-body {
+  padding-left: 28px;
+  font-size: var(--text-body);
+  line-height: 22px;
+}
+.held-edit {
+  margin-left: 28px;
+}
+.held-actions,
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.held > .held-actions,
+.held > .field-error {
+  padding-left: 28px;
+}
+.held-confirm {
+  display: grid;
+  gap: 8px;
+  margin-left: 28px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.held-confirm p {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.sent-by {
+  margin: 2px 0 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+
+/* Review: an approval card. `details` is what's signed, so it's the card's centre, verbatim and monospaced. */
+.approval {
+  display: grid;
+  gap: 10px;
+  margin: 8px -12px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 1px var(--border-strong, color-mix(in oklab, var(--fg) 18%, transparent));
+}
+.approval[data-state="pending"] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--progress) 55%, transparent);
+}
+.approval-action {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  border-radius: var(--radius-small);
+  background: var(--layer-1);
+  overflow-wrap: anywhere;
+}
+.approval-summary,
+.approval-signed {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 28px;
+}
+.approval-label {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.approval-summary p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.approval-details {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+}
+.approval-details th,
+.approval-details td {
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  direction: ltr;
+  unicode-bidi: isolate;
+  box-shadow: inset 0 -1px 0 var(--border, color-mix(in oklab, var(--fg) 10%, transparent));
+}
+.approval-details th {
+  width: 36%;
+  color: var(--fg-muted);
+  font-weight: var(--weight-regular);
+}
+.approval-details td {
+  color: var(--fg);
+}
+.approval-details tr:last-child th,
+.approval-details tr:last-child td {
+  box-shadow: none;
+}
+.approval-details tbody {
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.approval-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.approval-state,
+.approval-meta,
+.approval > .approval-actions,
+.approval > .field-error {
+  padding-left: 28px;
+}
+.approval-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: var(--text-ui);
+}
+.approval-pill {
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.approval-pill[data-state="pending"] {
+  color: var(--progress);
+}
+.approval-pill[data-state="approved"] {
+  color: var(--closed);
+}
+.approval-pill[data-state="rejected"] {
+  color: var(--danger);
+}
+.approval-pill[data-state="expired"] {
+  color: var(--fg-muted);
+}
+.approval-when {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.approval-meta {
+  margin: -4px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.approval-note {
+  color: var(--fg);
+}
+.approval-confirm {
+  display: grid;
+  gap: 10px;
+  margin-left: 28px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.approval-confirm .approval-details tbody {
+  background: var(--bg);
+}
+.approval-confirm-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+
+/* List rows: review flags (team) */
+.review-flag {
+  padding: 0 6px;
+  border-radius: var(--radius-small);
+  font-size: var(--text-small);
+  line-height: 18px;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.review-flag[data-kind="held"] {
+  color: color-mix(in oklab, var(--waiting) 80%, var(--fg));
+}
+.review-flag[data-kind="approval"] {
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+}
+
+@media (max-width: 640px) {
+  .held,
+  .approval {
+    margin-inline: 0;
+  }
+  .held-body,
+  .held > .held-actions,
+  .held > .field-error,
+  .approval-summary,
+  .approval-signed,
+  .approval-state,
+  .approval-meta,
+  .approval > .approval-actions,
+  .approval > .field-error {
+    padding-left: 0;
+  }
+  .held-edit,
+  .held-confirm,
+  .approval-confirm {
+    margin-left: 0;
+  }
+  .approval-details th,
+  .approval-details td {
+    display: block;
+    width: auto;
+    box-shadow: none;
+  }
+  .approval-details th {
+    padding-bottom: 0;
+  }
+  .approval-details tr:not(:first-child) th {
+    box-shadow: inset 0 1px 0 var(--border, color-mix(in oklab, var(--fg) 10%, transparent));
+  }
+}
+.filter-chip-count {
+  margin-left: 6px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Human handoff: availability, the request's handoff panel, "Talk to a person", Settings → Groups */
+.availability {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.availability-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+.availability-text {
+  display: grid;
+  min-width: 0;
+}
+.availability-title {
+  font-weight: var(--weight-medium);
+}
+.availability[data-compact] .availability-title {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
+.availability-state {
+  color: var(--closed);
+  font-size: var(--text-ui);
+}
+.availability-state[data-away] {
+  color: var(--fg-muted);
+}
+.groups-availability {
+  margin-bottom: 16px;
+}
+.handoff-panel,
+.handoff-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.handoff-state {
+  margin: 0;
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+.handoff-state[data-agents] {
+  color: var(--fg-muted);
+  font-weight: var(--weight-regular);
+}
+.handoff-source,
+.handoff-waiting {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.handoff-source strong {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.handoff-waiting {
+  color: var(--waiting);
+}
+.handoff-reason {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.handoff-facts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.handoff-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.handoff-facts dt {
+  color: var(--fg-muted);
+}
+.handoff-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handoff-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.handoff-due {
+  font-size: var(--text-ui);
+  color: var(--fg-muted);
+}
+.handoff-due[data-overdue] {
+  color: var(--danger);
+}
+.handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.handoff-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.handoff-confirm p {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.talk {
+  margin: 4px 0 12px;
+}
+.talk-prompt,
+.talk-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.talk-form {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-large);
+  box-shadow: var(--hairline);
+}
+.talk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.review-flag[data-kind="escalated"] {
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+}
+.group-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+.group-row .settings-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.group-row-name {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.group-available {
+  color: var(--closed);
+}
+.group-available[data-none] {
+  color: var(--fg-muted);
+}
+.group-row-actions {
+  flex: none;
+  gap: 6px;
+}
+.group-row-editing {
+  display: block;
+}
+.groups-settings > .type-editor {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+}
+.group-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.group-confirm-title {
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+.group-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+}
+.group-member {
+  min-width: 0;
+}
+.group-member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-member-email {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-hours {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+.group-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.group-day {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.group-day[data-on] {
+  color: var(--fg);
+  background: var(--layer-1);
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.group-day input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.group-day:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.group-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 160px));
+  gap: 12px;
+}
+.group-window {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.group-chip {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--text-ui);
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  cursor: pointer;
+}
+.group-chip:hover {
+  color: var(--fg);
+}
+.group-chip[aria-checked="true"] {
+  color: var(--fg);
+  background: var(--layer-1);
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.group-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.group-window-custom {
+  max-width: 160px;
+}
+.desk-default-group {
+  display: grid;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .group-row {
+    flex-wrap: wrap;
+  }
+  .group-row .settings-row-main {
+    flex-basis: 100%;
+  }
+  .group-members {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (pointer: coarse) {
+  .group-day,
+  .group-chip {
+    height: 40px;
+  }
+  .group-member,
+  .availability-row {
+    min-height: 40px;
+  }
+}
+.groups-availability .availability,
+.side-section > .availability {
+  flex: 1;
+}
+.approval-summary p {
+  unicode-bidi: isolate;
+}
+.approval-lookalike {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  color: var(--fg);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--danger) 12%, transparent);
+  overflow-wrap: anywhere;
+}
+.approval-key-flag {
+  color: var(--danger);
+}
+.approval-key-spelling {
+  display: block;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 16px;
+}
+@media (pointer: coarse) {
+  .talk-button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+}

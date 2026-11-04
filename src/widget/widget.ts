@@ -1,6 +1,6 @@
 import type { Conversation, ConversationItem, Participant, RealtimeEvent, Upload, Workspace as ApiWorkspace } from "../../shared/v1"
 import type { Locale } from "../../shared/api"
-import { BellhopError, createClient, uploadErrorKind, type Client, type ConnectionState, type EmailChallenge, type SessionClient, type Subscription } from "../sdk"
+import { BellhopError, createClient, escalateErrorKind, uploadErrorKind, type Client, type ConnectionState, type EmailChallenge, type SessionClient, type Subscription } from "../sdk"
 import { h, icons } from "./dom"
 import { markdown } from "./markdown"
 import { css } from "./styles"
@@ -60,6 +60,11 @@ export class Widget {
   private fieldErrors: Record<string, string> = {}
   private formError: string | null = null
   private formBox: HTMLElement | null = null
+  /** The "Talk to a person" row above the composer, and its state for the conversation on screen. */
+  private handoffRow: HTMLElement | null = null
+  private handoff: { open: boolean; busy: boolean; error: string | null; reason: string } = { open: false, busy: false, error: null, reason: "" }
+  /** Conversations where asking again is refused (asked before and handed back). */
+  private handoffUsed = new Set<string>()
   private workspace: Workspace = {}
   private connection: ConnectionState = "polling"
   private wasLive = false
@@ -454,6 +459,7 @@ export class Widget {
       if (this.view.name === "home") this.render()
       else if (this.view.name === "conversation" && this.view.id === e.conversation.id) {
         this.renderCard()
+        this.renderHandoff()
         if (e.conversation.unread) this.markRead()
       }
     } else if (e.type === "item.created") {
@@ -472,7 +478,9 @@ export class Widget {
           updated_at: e.item.created_at,
           unread: c.unread + (fromOthers ? 1 : 0),
           ...(ev?.type === "status_changed" ? { status: ev.status, close_reason: ev.close_reason } : {}),
+          ...(ev?.type === "escalated" ? { with_person: true } : {}),
         })
+        if (ev?.type === "escalated") this.handoffUsed.add(c.id)
       }
       if (fromOthers) {
         this.typing.delete(e.conversation_id)
@@ -485,6 +493,7 @@ export class Widget {
       }
       if (this.view.name === "conversation" && this.view.id === e.conversation_id) {
         this.renderThread(false)
+        this.renderHandoff()
         this.markRead()
       } else if (this.view.name === "home") this.render()
       this.updateUnread()
@@ -759,6 +768,92 @@ export class Widget {
       ),
     )
   }
+  // Talk to a person: a quiet action above the composer, then a "With the team" status
+
+  private renderHandoff() {
+    const row = this.handoffRow,
+      v = this.view
+    if (!row || v.name !== "conversation" || !v.id || !this.session) return row?.replaceChildren()
+    const t = this.t,
+      id = v.id,
+      c = this.conversations.get(id),
+      st = this.handoff
+    row.hidden = false
+    if (c?.with_person) return row.replaceChildren(h("p", { class: "handoff-status", role: "status" }, h("span", { class: "dot", "aria-hidden": "true" }), t("handoff.status")))
+    if (!c || c.status === "closed") return (row.hidden = true), row.replaceChildren()
+    if (this.handoffUsed.has(id)) return row.replaceChildren(h("p", { class: "handoff-status muted" }, t("handoff.already")))
+    if (!st.open) {
+      return row.replaceChildren(
+        h(
+          "button",
+          { class: "btn quiet handoff-open", type: "button", "data-k": "handoff", onclick: () => ((this.handoff = { ...st, open: true, error: null }), this.renderHandoff(), row.querySelector<HTMLInputElement>("input")?.focus()) },
+          icons.person(),
+          t("handoff.action"),
+        ),
+        st.error ? h("p", { class: "err", role: "alert" }, st.error) : "",
+      )
+    }
+    const input = h("input", { class: "input", id: "bw-handoff", maxlength: 1000, placeholder: t("handoff.reasonHint"), autocomplete: "off", dir: "auto", "aria-describedby": st.error ? "bw-handoff-err" : null })
+    input.value = st.reason
+    input.addEventListener("input", () => (st.reason = input.value))
+    const cancel = () => ((this.handoff = { open: false, busy: false, error: null, reason: "" }), this.renderHandoff(), row.querySelector<HTMLElement>("[data-k=handoff]")?.focus())
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.stopPropagation()
+        cancel()
+      }
+    })
+    row.replaceChildren(
+      h(
+        "form",
+        { class: "handoff-form", onsubmit: (e: Event) => (e.preventDefault(), void this.escalate(id)) },
+        h("label", { for: "bw-handoff" }, t("handoff.reason")),
+        input,
+        st.error ? h("p", { class: "err", id: "bw-handoff-err", role: "alert" }, st.error) : null,
+        h(
+          "div",
+          { class: "handoff-actions" },
+          h("button", { class: "btn quiet", type: "button", onclick: cancel }, t("handoff.cancel")),
+          h("button", { class: "btn primary", type: "submit", disabled: st.busy }, st.busy ? t("handoff.sending") : t("handoff.send")),
+        ),
+      ),
+    )
+  }
+  private async escalate(id: string) {
+    const s = this.session,
+      st = this.handoff
+    if (!s || st.busy) return
+    this.handoff = { ...st, busy: true, error: null }
+    this.renderHandoff()
+    const t = this.t
+    try {
+      const c = await s.escalate(id, { reason: st.reason })
+      this.conversations.set(c.id, c)
+      this.handoffUsed.add(c.id)
+      const list = this.items.get(c.id)
+      if (list && c.last_item && !list.some((i) => i.id === c.last_item!.id)) list.push(c.last_item)
+      this.handoff = { open: false, busy: false, error: null, reason: "" }
+      this.renderThread(true)
+      this.announce(t("event.escalated"))
+    } catch (e) {
+      const kind = escalateErrorKind(e)
+      if (kind === "already") {
+        // Asked before (maybe in another tab), or a person already has it: show what's true now
+        this.handoffUsed.add(id)
+        this.handoff = { open: false, busy: false, error: null, reason: "" }
+        try {
+          this.conversations.set(id, await s.getConversation(id))
+        } catch {
+          /* keep what we have */
+        }
+      } else {
+        this.handoff = { ...this.handoff, busy: false, error: kind === "rate_limited" ? t("error.rateLimited") : this.errorText(e) }
+        if (!kind) console.warn("[chat]", e)
+      }
+    }
+    if (this.view.name === "conversation" && this.view.id === id) this.renderHandoff()
+  }
+
   // Request types: a picker, then the chosen type's fields above the composer
 
   private types(): RequestType[] {
@@ -1008,12 +1103,17 @@ export class Widget {
       this.live,
       this.card,
       h("div", { class: "human" }),
+      ...((this.handoffRow = id ? h("div", { class: "handoff" }) : null) ? [this.handoffRow!] : []),
       this.attachRow,
       h("div", { class: "composer" }, attachBtn, textarea, sendBtn, file),
       h("span", { id: "bw-hint", class: "sr" }, t("composer.hint")),
     ]
     this.renderAttachments()
     this.renderForm()
+    if (this.handoffRow) {
+      this.handoff = { open: false, busy: false, error: null, reason: "" }
+      this.renderHandoff()
+    }
     this.renderThread(true)
     this.renderLive()
     this.renderCard()
@@ -1036,7 +1136,8 @@ export class Widget {
     let prev: { author: string; at: number } | null = null
     for (const item of items ?? []) {
       if (item.kind === "event") {
-        nodes.push(h("p", { class: "event" }, this.eventText(item)))
+        const text = this.eventText(item)
+        if (text) nodes.push(h("p", { class: "event" }, text))
         prev = null
         continue
       }
@@ -1286,7 +1387,10 @@ export class Widget {
     if (e.type === "status_changed")
       return e.status === "closed" ? t("event.closed") : e.status === "in_progress" ? t("event.in_progress") : e.status === "waiting" ? t("event.waiting") : t("event.reopened")
     if (e.type === "assigned") return e.assignee ? t("event.assigned", { name: this.name(e.assignee) }) : t("event.unassigned")
-    return e.type === "verified" ? t("event.verified") : t("event.verificationRequested")
+    if (e.type === "escalated") return t("event.escalated")
+    if (e.type === "verified") return t("event.verified")
+    if (e.type === "verification_requested") return t("event.verificationRequested")
+    return ""
   }
   private clock(iso: string) {
     return new Intl.DateTimeFormat(this.locale, { hour: "numeric", minute: "2-digit" }).format(new Date(iso))

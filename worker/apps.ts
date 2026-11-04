@@ -184,6 +184,7 @@ export async function detail(
         require_verified_email: number
         allow_anonymous: number
         default_autonomy: AppDetail["helpdesk"]["default_autonomy"]
+        default_group_id: string | null
         trusted: number
       }
     ]
@@ -202,7 +203,7 @@ export async function detail(
       ),
       sql(
         c.env,
-        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,allow_anonymous,default_autonomy,trusted FROM apps WHERE id=?",
+        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,allow_anonymous,default_autonomy,default_group_id,trusted FROM apps WHERE id=?",
         scope
       )
     ],
@@ -218,6 +219,7 @@ export async function detail(
     mode: v.mode,
     ...(can(target.role, "setup") && { trusted: !!v.trusted }),
     helpdesk: {
+      default_group_id: viewer.team ? v.default_group_id : null,
       require_verified_email: !!v.require_verified_email,
       allow_anonymous: !!v.allow_anonymous,
       default_autonomy: v.default_autonomy
@@ -411,7 +413,7 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
       if (desk[k] !== undefined && typeof desk[k] !== "boolean") bad(`Invalid ${k}`)
   const v = b.visibility === undefined ? null : input(b.visibility)
   if (
-    desk?.default_autonomy !== undefined &&
+    (desk?.default_autonomy !== undefined || desk?.default_group_id !== undefined) &&
     (mode ?? (await sql(env, "SELECT mode FROM apps WHERE id=?", app.id).first<string>("mode"))) !== "helpdesk"
   )
     fail(403, "helpdesk_only", "Help desk workspace required")
@@ -427,8 +429,10 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const change = sql(
     env,
-    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),allow_anonymous=coalesce(?,allow_anonymous),default_autonomy=coalesce(?,default_autonomy),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
+    `UPDATE apps SET default_group_id=CASE WHEN ? THEN ? ELSE default_group_id END,mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),allow_anonymous=coalesce(?,allow_anonymous),default_autonomy=coalesce(?,default_autonomy),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
     WHERE id=? AND (?=0 OR (coalesce(?,mode)='helpdesk' AND EXISTS(SELECT 1 FROM members m WHERE m.app_id=apps.id AND m.user_id=? AND m.role IN ('owner','admin')))) RETURNING name,description,public`,
+    Number(desk?.default_group_id !== undefined),
+    desk?.default_group_id == null ? null : str(desk.default_group_id, "default_group_id", 100),
     mode,
     desk?.require_verified_email !== undefined ? Number(desk.require_verified_email) : null,
     desk?.allow_anonymous !== undefined ? Number(desk.allow_anonymous) : null,
@@ -442,7 +446,7 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
     mode,
     b.public === undefined ? null : Number(publicFlag(b.public)),
     app.id,
-    Number(desk?.default_autonomy !== undefined),
+    Number(desk?.default_autonomy !== undefined || desk?.default_group_id !== undefined),
     mode,
     actor.id
   )

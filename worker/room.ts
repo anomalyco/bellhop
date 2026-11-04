@@ -80,11 +80,14 @@ function validAttachment(a: Attachment | null | undefined) {
 type Delivery = {
   app?: string
   internalOnly?: boolean
+  requesterOnly?: boolean
   moved?: { gate: Gate; target: string; number: number }
   deleted?: Gate
   actorIssues?: string[]
 }
 type PolicyRow = {
+  desk: number
+  assignee: string | null
   id: string
   app_id: string
   private: number
@@ -256,7 +259,7 @@ export class Room extends DurableObject<Env> {
     const q = [
       sql(
         this.env,
-        `SELECT id,app_id,private,hidden IS NOT NULL hidden,json_extract(author,'$.id') reporter,locked,pinned,
+        `SELECT id,app_id,private,hidden IS NOT NULL hidden,json_extract(author,'$.id') reporter,locked,pinned,assignee,(SELECT mode='helpdesk' FROM apps WHERE id=i.app_id) desk,
          (SELECT count(*) FROM comments WHERE issue_id=i.id AND internal=0) public_count,(SELECT count(*) FROM comments WHERE issue_id=i.id) team_count,
          ${voteCount("1", "'[]'")} team_votes FROM issues i WHERE id IN(SELECT value FROM json_each(?))`,
         JSON.stringify([...ids])
@@ -362,6 +365,7 @@ export class Room extends DurableObject<Env> {
       const conversationPayload = events.some((e) =>
         ["timeline.added", "comment.updated", "comment.deleted", "issue.created", "issue.updated"].includes(e.type)
       )
+      if (v.team && options.requesterOnly) continue
       if (!v.team && (options.internalOnly === true || (conversationPayload && options.internalOnly !== false)))
         continue
       const voter = v.voter ?? v.actorId ?? ""
@@ -444,6 +448,7 @@ export class Room extends DurableObject<Env> {
               ...e,
               issue: {
                 ...summaryFrame(e.issue),
+                ...(g.desk && { assignee: v.team && g.assignee ? JSON.parse(g.assignee) : null }),
                 locked: !!g.locked,
                 pinned: !!g.pinned,
                 comment_count: v.team ? g.team_count : g.public_count,
@@ -458,15 +463,24 @@ export class Room extends DurableObject<Env> {
               if (!c) continue
               e = { ...e, item: { kind: "comment", comment: c } }
             } else {
+              if (!v.team && gates.get(e.issue_id)?.desk && ["assigned", "claimed"].includes(e.item.event.type)) continue
               if (
                 !v.team &&
                 (e.item.event.data.rule ||
-                  ["hidden", "unhidden", "routed", "approval.requested", "approval.decided"].includes(
-                    e.item.event.type
-                  ))
+                  [
+                    "hidden",
+                    "unhidden",
+                    "routed",
+                    "approval.requested",
+                    "approval.decided",
+                    "handed_back",
+                    "reassigned",
+                    "waiting"
+                  ].includes(e.item.event.type))
               )
                 continue
               const other = relationId(e.item)
+              if (!v.team && e.item.event.type === "escalated" && !options.requesterOnly) continue
               if (other && !allowed(other)) continue
               if (!v.team)
                 e = {

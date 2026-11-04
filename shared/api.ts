@@ -53,7 +53,7 @@
 //   all must match), no:label, no:assignee, assignee:@me|<handle>, author:@me|<handle>, has:metadata,
 //   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
 //   Help desk (team only): is:held (has a held agent reply), is:awaiting-approval (has a pending approval),
-//   type:<request type name>.
+//   type:<request type name>, is:escalated (alias is:with-person), is:waiting-for-person and group:<name>.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days?, mode?, helpdesk? }
@@ -245,6 +245,22 @@
 //   PATCH  /api/apps/:slug/request-types/:id Partial<RequestTypeInput> & { archived?, position? } -> RequestType  admin
 //   PUT    /api/apps/:slug/issues/:number/request-type { request_type_id: string | null, fields? } -> Issue   member;
 //          changes a request's type (validates fields, keeps answers whose keys still exist) and re-applies routing
+//   Human handoff (help desk). Groups are teams of members ("Billing team") that requests escalate to. A request
+//   escalates when an agent can't finish it (MCP escalate), when the requester asks for a person, or when a request
+//   type routes to a group. The group picks one available member (round-robin or least busy, within its working
+//   hours), assigns them and notifies them by email. While escalated, agents' public replies are held (whatever the
+//   autonomy) until a member hands the request back. If the assignee hasn't replied publicly within the group's
+//   response window, it passes once to the next available member and both are told. Then one reminder; admins
+//   are told once. With no alternative, that reminder ends the window. Closed hours alone do not email admins.
+//   GET    /api/apps/:slug/groups                        -> Group[]            team
+//   POST   /api/apps/:slug/groups GroupInput             -> Group              admin
+//   PATCH  /api/apps/:slug/groups/:id Partial<GroupInput> -> Group             admin
+//   DELETE /api/apps/:slug/groups/:id                    -> { ok: true }       admin (routes to it fall back to unassigned)
+//   PUT    /api/apps/:slug/me/availability { available: boolean } -> { available: boolean }   member; away members
+//          are skipped by group assignment (default available)
+//   POST   /api/apps/:slug/issues/:number/escalate { reason?, group_id? } -> Issue   the requester ("Talk to a person";
+//          once per request, rate limited), or the team; v1: POST /v1/conversations/:id/escalate (session or secret key)
+//   DELETE /api/apps/:slug/issues/:number/escalation     -> Issue              member; hands the request back to agents
 //   Autonomy (help desk; the request's effective Autonomy applies to agents):
 //   - "suggest": an agent's public reply is held (Comment.held): only the team and agents see it. Reviewers may
 //     receive review mail. End users never see or receive it until a member sends it.
@@ -460,6 +476,45 @@ export type Autonomy = "suggest" | "approve_actions" | "autonomous"
 /** Who new requests of a type go to: an agent, a member, or a group (which picks a member, see Group). */
 export type RouteTarget = { agent: string } | { member: string } | { group: string } | null
 
+export interface Group {
+  id: string
+  name: string
+  /** Members of the workspace (by member id) who take requests for this group. */
+  member_ids: string[]
+  /** How the next person is picked: in turn, or whoever has the fewest open assigned requests. */
+  strategy: "round_robin" | "least_busy"
+  /** When the group takes requests; outside these hours escalations wait unassigned and notify when hours start.
+   *  null = always. */
+  hours: { timezone: string; days: number[]; start: string; end: string } | null
+  /** Minutes for the assignee's first public reply before the request passes to the next member; null = never. */
+  response_minutes: number | null
+  /** Members currently available in the group (team view). */
+  available_ids: string[]
+}
+
+export interface GroupInput {
+  name: string
+  member_ids: string[]
+  strategy?: "round_robin" | "least_busy"
+  hours?: Group["hours"]
+  response_minutes?: number | null
+}
+
+/** Set while a request is with a person rather than agents. Team and agents see all of it; the requester sees only
+ *  that a person is on it ({ with_person: true }) via Issue.escalated_to_person. */
+export interface Escalation {
+  reason: string
+  /** "agent" (MCP escalate), "requester" (Talk to a person), "team", or "routing" (a request type routed to a group). */
+  source: "agent" | "requester" | "team" | "routing"
+  by: Actor | null
+  at: string
+  group: { id: string; name: string } | null
+  /** When it's waiting for working hours or nobody is available. */
+  waiting: "hours" | "nobody_available" | null
+  /** When the current assignee must reply by before it passes on (null when no window). */
+  respond_by: string | null
+}
+
 export interface RequestType {
   id: string
   name: string
@@ -491,6 +546,8 @@ export interface HelpdeskSettings {
   allow_anonymous: boolean
   /** Autonomy for requests without a type, or whose type doesn't set one. Default "suggest". */
   default_autonomy: Autonomy
+  /** Where escalations go when neither the agent nor the request type names a group; null = unassigned + admins. */
+  default_group_id: string | null
 }
 
 /** How a contact proved who they are: an email code, or the host app's signed identity token. */
@@ -841,6 +898,10 @@ export interface SavedReplyInput {
  * no reopen. Internal notes never count as responses.
  */
 export interface Analytics {
+  /** Share of opened requests in the cohort ever escalated; null for an empty cohort. */
+  escalation_rate: number | null
+  /** Seconds from a handoff to the first public human reply during it; null without a sample. */
+  time_to_human_reply_median: number | null
   days: number
   opened: number
   closed: number
@@ -952,6 +1013,7 @@ export interface IssueSummary extends IssueRef {
   effective_autonomy?: Autonomy
   labels: Label[]
   author: Actor
+  /** Help desk assignees are team-only; non-team issue and list views always return null. */
   assignee: Actor | null
   comment_count: number
   created_at: string
@@ -1004,6 +1066,10 @@ export interface Issue extends IssueSummary {
    *  agents only). */
   request_type: { id: string; name: string } | null
   fields: Record<string, string>
+  /** Help desk: the handoff to a person, for the team and agents (null otherwise and for the requester). */
+  escalation: Escalation | null
+  /** Help desk: true while a person (not an agent) has the request; what the requester sees. */
+  escalated_to_person: boolean
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
   /** @mentions in the body. */
@@ -1138,6 +1204,10 @@ export interface ApprovalToken {
 }
 
 export type IssueEventType =
+  | "escalated" // team-only data: { source, reason, group, assignee }; the requester sees "A person will take it from here"
+  | "handed_back" // team-only: a member handed the request back to agents
+  | "reassigned" // team-only: the response window passed; data: { from, to, group }
+  | "waiting" // team-only: working hours started but no member is available
   | "approval.requested" // team only; data.approval never contains a token
   | "approval.decided"
   | "routed" // team-only: request_type, target, outcome and the assignee resolved at write time
@@ -1224,6 +1294,8 @@ export type WebhookEventType =
   | "reply.held" // an agent reply was held for review (comment in `comment`)
   | "approval.requested" // approval in `approval`
   | "approval.decided" // approval in `approval` (approved or rejected; never the token)
+  | "issue.escalated" // escalation in `escalation`; also when it passes to the next member
+  | "issue.handed_back"
 
 /** What a webhook gets until its events are changed (the behaviour before events were selectable). */
 export const DEFAULT_WEBHOOK_EVENTS: WebhookEventType[] = ["issue.opened", "issue.updated", "comment.created", "mention.created"]
@@ -1262,6 +1334,8 @@ export interface WebhookPayload {
   verification?: Verification
   /** For approval.requested / approval.decided (never the token). */
   approval?: Approval
+  /** For issue.escalated. */
+  escalation?: Escalation
   mcp_url: string
 }
 
@@ -1290,6 +1364,10 @@ export interface WebhookPayload {
 //                                                  member; internal notes and triage are unaffected
 //   request_approval { number, action, summary, details? }  responder -> Approval (pending); the team is notified
 //   get_approval   { id }                        the Approval; once approved, also { token } (requesting agent only)
+//   escalate       { number, reason, group? }    responder; hands the request to a person (a group by name, else the
+//                                                  request type's group, else the workspace default group); afterwards
+//                                                  the agent's public replies are held until a member hands it back
+//   list_groups    {}                            groups with members and who's available
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)

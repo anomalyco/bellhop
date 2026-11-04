@@ -42,7 +42,8 @@ const metrics = `WITH cohort AS MATERIALIZED (
   SELECT 'response','',response_s FROM facts WHERE response_s IS NOT NULL UNION ALL
   SELECT 'resolution','',resolution_s FROM facts WHERE resolution_s IS NOT NULL UNION ALL
   SELECT 'day',day,response_s FROM facts WHERE response_s IS NOT NULL UNION ALL
-  SELECT 'tier',tier,response_s FROM facts WHERE response_s IS NOT NULL AND tier IS NOT NULL
+  SELECT 'tier',tier,response_s FROM facts WHERE response_s IS NOT NULL AND tier IS NOT NULL UNION ALL
+  SELECT 'handoff','',round((julianday(h.first_reply)-julianday(h.at))*86400,3) FROM cohort i JOIN handoffs h ON h.issue_id=i.id AND h.app_id=?1 WHERE h.first_reply IS NOT NULL
 ), ranked AS (
   SELECT metric,bucket,s,row_number() OVER w pos,count(*) OVER (w ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) n
   FROM samples WINDOW w AS (PARTITION BY metric,bucket ORDER BY s)
@@ -54,6 +55,8 @@ const metrics = `WITH cohort AS MATERIALIZED (
   dates AS (SELECT day FROM days UNION SELECT day FROM closures),
   tier_totals AS (SELECT tier,count(*) opened FROM facts WHERE tier IS NOT NULL GROUP BY tier)
 SELECT count(*) opened,count(*) FILTER(WHERE closed) closed,
+  1.0*(SELECT count(DISTINCT h.issue_id) FROM cohort i JOIN handoffs h ON h.issue_id=i.id AND h.app_id=?1)/nullif(count(*),0) escalation_rate,
+  (SELECT median FROM quantiles WHERE metric='handoff') time_to_human_reply_median,
   avg(first_agent) by_agent_share,avg(reopened) reopened_share,
   1.0*count(*) FILTER(WHERE closed AND close_reason='completed' AND agents>0 AND humans=0 AND reopened=0) /
     nullif(count(*) FILTER(WHERE closed AND close_reason IN ('completed','not_planned')),0) agent_resolved_share,
@@ -73,7 +76,10 @@ const waiting = `SELECT count(*) n FROM issues i WHERE i.app_id=?1 AND i.status 
 const labels = `SELECT l.name label,count(*) opened FROM issues i CROSS JOIN issue_labels il JOIN labels l ON l.id=il.label_id
   WHERE ${inWindow} AND il.issue_id=i.id AND l.app_id=i.app_id GROUP BY l.id ORDER BY opened DESC,l.name`
 
-type Summary = Pick<Analytics, "opened" | "closed" | "agent_resolved_share" | "reopened_share"> & {
+type Summary = Pick<
+  Analytics,
+  "opened" | "closed" | "agent_resolved_share" | "reopened_share" | "escalation_rate" | "time_to_human_reply_median"
+> & {
   by_agent_share: number | null
   response_median: number | null
   response_p90: number | null
@@ -95,7 +101,7 @@ export async function analytics(c: Ctx, app: string, days: number): Promise<Anal
     key = new Request(
       new URL(`/.bellhop-cache/analytics/${encodeURIComponent(app)}/${days}/${now.slice(0, 10)}`, origin)
     ),
-    cache = await caches.open("bellhop-analytics-v1"),
+    cache = await caches.open("bellhop-analytics-v2"),
     hit = await cache.match(key)
   if (hit) return hit.json<Analytics>()
   const args = [app, new Date(start).toISOString(), now],
@@ -107,6 +113,8 @@ export async function analytics(c: Ctx, app: string, days: number): Promise<Anal
   const row = aggregate!.results[0] as Summary,
     dates = new Map((JSON.parse(row.daily) as Analytics["daily"]).map((d) => [d.date, d])),
     result: Analytics = {
+      escalation_rate: row.escalation_rate,
+      time_to_human_reply_median: row.time_to_human_reply_median,
       days,
       opened: row.opened,
       closed: row.closed,

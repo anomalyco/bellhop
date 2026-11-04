@@ -26,6 +26,8 @@ export function webhookUrl(value: unknown, env: Env) {
 }
 
 export const webhookEvents = [
+  "issue.escalated",
+  "issue.handed_back",
   "ping",
   ...DEFAULT_WEBHOOK_EVENTS,
   "issue.closed",
@@ -120,7 +122,7 @@ interface Job {
 
 export type Hook = Pick<
   WebhookPayload,
-  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification" | "approval"
+  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification" | "approval" | "escalation"
 > & {
   transition?: Partial<Pick<IssueSummary, "assignee" | "status" | "close_reason">>
 }
@@ -139,12 +141,13 @@ export async function enqueueWebhooks(
   const readForm = issue && !form && events.some((h) => h.type === "issue.opened" || h.type === "issue.assigned")
   const settings = await sql(
     env,
-    `SELECT url,events,${readForm ? `(SELECT ${requestJson(true)} FROM issues i WHERE i.id=? AND i.app_id=s.app_id)` : "NULL"} request_info,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    `SELECT url,events,(SELECT i.assignee FROM issues i JOIN apps a ON a.id=i.app_id AND a.mode='helpdesk' WHERE i.id=? AND i.app_id=s.app_id) staff_assignee,${readForm ? `(SELECT ${requestJson(true)} FROM issues i WHERE i.id=? AND i.app_id=s.app_id)` : "NULL"} request_info,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    issue?.id ?? null,
     ...(readForm ? [issue!.id] : []),
     issue?.author.id ?? null,
     issue?.id ?? null,
     app.id
-  ).first<{ url: string; events: string; comment_count: number; contact: string | null; request_info: string | null }>()
+  ).first<{ url: string; events: string; comment_count: number; contact: string | null; request_info: string | null; staff_assignee:string|null }>()
   if (!settings) return []
   const enabled = new Set<string>(JSON.parse(settings.events)),
     selected = events.filter((e) => e.type === "ping" || enabled.has(e.type))
@@ -169,6 +172,8 @@ export async function enqueueWebhooks(
         ? {
             issue: {
               ...issue,
+              // A mutation by the requester may supply a redacted summary. Hooks are team reads.
+              ...(!sourceSnapshot && !issue.assignee && settings.staff_assignee && { assignee: JSON.parse(settings.staff_assignee) }),
               ...teamForm,
               url: appUrl(env, origin, app.slug, `/issues/${issue.number}`),
               comment_count: sourceSnapshot ? issue.comment_count : settings.comment_count,

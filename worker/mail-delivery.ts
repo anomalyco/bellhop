@@ -1,7 +1,7 @@
 import { appUrl, rows, sql } from "./core"
 import { deliverFormCode, formMailPrefix } from "./email-codes"
 import type { Locale, IssueStatus } from "../shared/api"
-import { mailCopy, formatMail } from "./mail-copy"
+import { mailCopy, formatMail, handoffCopy } from "./mail-copy"
 import {
   esc,
   mailOrigin,
@@ -15,6 +15,7 @@ import {
 
 export async function enqueueDue(env: Env) {
   const at = Math.floor(Date.now() / 1000)
+  await sql(env, "DELETE FROM handoff_mail_slots WHERE day<date('now')").run()
   await sql(
     env,
     `INSERT OR IGNORE INTO mail_batches(id,sub_id,issue_id,address,due,sealed)
@@ -38,6 +39,13 @@ export async function enqueueDue(env: Env) {
     )
   )
   if (reviews.length) await env.MAIL.sendBatch(reviews.map((r) => ({ body: { id: "review-" + r.id } })))
+  const handoffs = await rows<{ id: string }>(
+    sql(
+      env,
+      "UPDATE handoff_mail SET wake=unixepoch()+600 WHERE id IN(SELECT id FROM handoff_mail WHERE wake<=unixepoch() ORDER BY wake LIMIT 100) RETURNING id"
+    )
+  )
+  if (handoffs.length) await env.MAIL.sendBatch(handoffs.map((r) => ({ body: { id: "handoff-" + r.id } })))
   const codes = await rows<{ id: string }>(
     sql(
       env,
@@ -60,6 +68,51 @@ type Recipient = TokenRow & {
 }
 type Item = { kind: string; description: string | null; author: string | null; internal: number }
 export async function deliverBatch(env: Env, id: string) {
+  if (id.startsWith("handoff-")) {
+    const key = id.slice(8),
+      r = await sql(
+        env,
+        `SELECT j.kind,u.id user_id,u.email,coalesce(u.locale,'en') locale,a.name,a.trusted,a.slug,i.number FROM handoff_mail j JOIN members m ON m.id=j.member_id JOIN users u ON u.id=m.user_id JOIN handoff_events e ON e.id=j.event_id JOIN handoffs h ON h.id=e.handoff_id AND h.ended_at IS NULL JOIN issues i ON i.id=h.issue_id AND i.app_id=h.app_id JOIN apps a ON a.id=h.app_id AND a.mode='helpdesk' LEFT JOIN mail_settings s ON s.user_id=u.id WHERE j.id=? AND i.status!='closed' AND m.app_id=a.id AND m.role IN ('member','admin','owner') AND coalesce(s.assigned,1) AND NOT EXISTS(SELECT 1 FROM mail_suppressed x WHERE x.address=u.email) AND ((j.kind IN ('nobody','still_waiting') AND m.role IN ('owner','admin') AND (j.kind='nobody' OR h.respond_by IS NOT NULL)) OR j.kind='passed' OR (j.kind IN ('assigned','reminder') AND json_extract(h.assignee,'$.id')=u.id AND (j.kind!='reminder' OR h.respond_by IS NOT NULL)))`,
+        key
+      ).first<{
+        kind: keyof typeof handoffCopy.en
+        user_id: string
+        locale: Locale
+        email: string
+        name: string
+        trusted: number
+        slug: string
+        number: number
+      }>()
+    if (r) {
+      // Reserve before contacting the provider. A retry reuses the job's slot; deleting
+      // a delivered job must not restore the allowance. Excess jobs do not roll over.
+      const [, slot] = await env.DB.batch([
+        sql(
+          env,
+          `INSERT OR IGNORE INTO handoff_mail_slots SELECT date('now'),m.user_id,j.id FROM handoff_mail j JOIN members m ON m.id=j.member_id WHERE j.id=? AND m.user_id=? AND (SELECT count(*) FROM handoff_mail_slots WHERE day=date('now') AND user_id=m.user_id)<20`,
+          key,
+          r.user_id
+        ),
+        sql(env, "SELECT 1 FROM handoff_mail_slots WHERE day=date('now') AND user_id=? AND job=?", r.user_id, key)
+      ])
+      if (!slot!.results.length) {
+        await sql(env, "DELETE FROM handoff_mail WHERE id=?", key).run()
+        return
+      }
+      const line = formatMail(handoffCopy[r.locale][r.kind], { number: r.number }),
+        url = appUrl(env, mailOrigin(env), r.slug, `/issues/${r.number}`)
+      await sendMail(env, id, {
+        to: r.email,
+        fromName: workspaceSender(r.name, !!r.trusted),
+        subject: line,
+        text: line + "\n" + url,
+        html: `<p>${esc(line)}</p><p><a href="${esc(url)}">${esc(formatMail(mailCopy[r.locale].view, { number: r.number }))}</a></p>`
+      })
+    }
+    await sql(env, "DELETE FROM handoff_mail WHERE id=?", key).run()
+    return
+  }
   if (id.startsWith(formMailPrefix)) return deliverFormCode(env, id.slice(formMailPrefix.length))
   if (id.startsWith("review-")) {
     const key = id.slice(7),
@@ -132,7 +185,8 @@ export async function deliverBatch(env: Env, id: string) {
     const cap = Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
       lines = data.map((n) => {
         if (n.kind === "nudge") return copy.nudge
-        if (n.kind === "status") return formatMail(copy.status, { status: copy.statuses[n.description as IssueStatus] ?? n.description ?? "" })
+        if (n.kind === "status")
+          return formatMail(copy.status, { status: copy.statuses[n.description as IssueStatus] ?? n.description ?? "" })
         if (n.kind === "assigned") return copy.assigned
         if (n.kind === "mention" && n.description === null) return copy.mentioned
         const label = n.kind === "mention" ? copy.mention : copy.reply,
@@ -192,6 +246,11 @@ export async function mailQueue(batch: MessageBatch<{ id: string }>, env: Env) {
         continue
       }
       if (permanent) {
+        if (m.body.id.startsWith("handoff-")) {
+          await sql(env, "UPDATE handoff_mail SET wake=9223372036854775807 WHERE id=?", m.body.id.slice(8)).run()
+          m.ack()
+          continue
+        }
         // Invalid/screened content or an ambiguous idempotency conflict: never try a different key.
         if (m.body.id.startsWith("review-")) {
           await sql(env, "UPDATE review_mail SET wake=9223372036854775807 WHERE id=?", m.body.id.slice(7)).run()

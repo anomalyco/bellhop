@@ -13,6 +13,7 @@ import type { Access } from "./mutations"
 import { agentAccessSQL } from "./permissions"
 import { clientIP, enforce } from "./rate-limits"
 import { formMailPrefix, prepareCode } from "./email-codes"
+import { startPlan, publishHandoff } from "./handoff"
 
 export type FormCaller = { c: Ctx; operator: Actor; staff: boolean; serverKey?: string }
 type Previous = {
@@ -79,7 +80,12 @@ export async function prepareForm(
     )
       q.push(retireFormReplays(env, app, "issue_id", issue))
   }
-  q.push(...routingWrites(env, app, issue, t, answers, caller.operator, event))
+  const group = t.route && "group" in t.route ? t.route.group : null
+  const handoff =
+    group && !(prev && (await sql(env, "SELECT 1 FROM handoffs WHERE issue_id=? AND ended_at IS NULL", issue).first()))
+      ? await startPlan(env, app, issue, "routing", caller.operator, "", { id: group })
+      : null
+  q.push(...routingWrites(env, app, issue, t, answers, caller.operator, event, handoff?.statements))
   const deliveries: string[] = []
   if (!prev) {
     if (answers.verify.length > (caller.staff ? 5 : 3))
@@ -116,6 +122,7 @@ export async function prepareForm(
     typeId: t.id,
     statements: q,
     committed(rows: D1Result<Record<string, unknown>>[]) {
+      if (handoff) caller.c.executionCtx.waitUntil(publishHandoff(env, handoff.event, caller.c.req.url))
       if (deliveries.length)
         caller.c.executionCtx.waitUntil(
           env.MAIL.sendBatch(deliveries.map((id) => ({ body: { id: formMailPrefix + id } }))).catch(() =>

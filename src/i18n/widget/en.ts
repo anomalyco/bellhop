@@ -133,6 +133,17 @@ const en = {
   "field.number": "Enter a number.",
   "field.option": "Pick one of the options.",
   "field.invalid": "Check this field.",
+
+  // Asking for a person instead of the assistant, in an open conversation
+  "handoff.action": "Talk to a person",
+  "handoff.reason": "What do you need help with?",
+  "handoff.reasonHint": "Optional",
+  "handoff.send": "Ask for a person",
+  "handoff.cancel": "Cancel",
+  "handoff.sending": "Asking…",
+  "handoff.status": "With the team",
+  "handoff.already": "You've already asked for a person in this conversation.",
+  "event.escalated": "A person will take it from here",
 } as const
 
 export default en

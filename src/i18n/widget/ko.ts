@@ -132,6 +132,17 @@ const messages: Translation<typeof en> = {
   "field.number": "숫자를 입력해 주세요.",
   "field.option": "옵션 중 하나를 선택해 주세요.",
   "field.invalid": "이 항목을 확인해 주세요.",
+
+  // Asking for a person instead of the assistant, in an open conversation
+  "handoff.action": "상담원과 이야기하기",
+  "handoff.reason": "어떤 도움이 필요하세요?",
+  "handoff.reasonHint": "선택 사항",
+  "handoff.send": "상담원 요청하기",
+  "handoff.cancel": "취소",
+  "handoff.sending": "요청하는 중…",
+  "handoff.status": "팀이 확인 중",
+  "handoff.already": "이 대화에서 이미 상담원을 요청했어요.",
+  "event.escalated": "이제 상담원이 도와드릴게요",
 }
 
 export default messages

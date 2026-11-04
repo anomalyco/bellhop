@@ -147,12 +147,22 @@ const itemId = (item: TimelineItem) => (item.kind === "comment" ? item.comment.i
 
 export function appendTimeline(slug: string, number: number, item: TimelineItem) {
   setData<Issue>(keys.issue(slug, number), (issue) => {
-    if (!issue || issue.timeline.some((t) => itemId(t) === itemId(item))) return undefined
+    if (!issue) return undefined
     const isComment = item.kind === "comment"
+    // A held agent reply that was just sent arrives under its draft's id: it takes the draft's place
+    const draft = isComment ? issue.timeline.find((t) => t.kind === "comment" && t.comment.id === item.comment.id && t.comment.held) : undefined
+    if (draft && isComment && !item.comment.held)
+      return {
+        ...issue,
+        timeline: issue.timeline.map((t) => (t === draft ? item : t)),
+        comment_count: issue.comment_count + 1,
+      }
+    if (issue.timeline.some((t) => itemId(t) === itemId(item))) return undefined
     const next = {
       ...issue,
       timeline: [...issue.timeline, item],
-      comment_count: issue.comment_count + (isComment ? 1 : 0),
+      // Drafts held for review aren't replies yet
+      comment_count: issue.comment_count + (isComment && !item.comment.held ? 1 : 0),
       // A posted comment ends the author's activity on the server too.
       activity: isComment && issue.activity?.actor.id === item.comment.author.id ? null : issue.activity,
     }
@@ -175,11 +185,13 @@ export function replaceComment(slug: string, issueId: string, comment: Comment) 
 export function removeComment(slug: string, issueId: string, commentId: string) {
   let changed: Issue | null = null
   updateAll<Issue>(`issue:${slug}:`, (issue) => {
-    if (issue.id !== issueId || !issue.timeline.some((t) => t.kind === "comment" && t.comment.id === commentId)) return undefined
+    const gone = issue.id === issueId ? issue.timeline.find((t) => t.kind === "comment" && t.comment.id === commentId) : undefined
+    if (!gone) return undefined
     changed = {
       ...issue,
-      timeline: issue.timeline.filter((t) => !(t.kind === "comment" && t.comment.id === commentId)),
-      comment_count: Math.max(0, issue.comment_count - 1),
+      timeline: issue.timeline.filter((t) => t !== gone),
+      // A discarded draft was never counted as a reply
+      comment_count: gone.kind === "comment" && gone.comment.held ? issue.comment_count : Math.max(0, issue.comment_count - 1),
     }
     return changed
   })

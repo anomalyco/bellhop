@@ -20,7 +20,10 @@ import type {
   NewIdentityKey,
   Verification,
   RequestType,
+  Approval,
   RequestTypeInput,
+  Group,
+  GroupInput,
   FeedApp,
   FeedList,
   ImportJob,
@@ -231,6 +234,12 @@ export const api = {
   patchComment: (slug: string, number: number, id: string, body: string) =>
     request<Comment>("PATCH", `${app(slug)}/issues/${number}/comments/${enc(id)}`, { body }),
   deleteComment: (slug: string, number: number, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}`),
+  // Help desk review: an agent's held reply (sent as is or edited, or discarded) and approvals
+  sendHeld: (slug: string, number: number, id: string, body?: string) =>
+    request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/send`, body === undefined ? {} : { body }),
+  discardHeld: (slug: string, number: number, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}?held=1`),
+  decideApproval: (slug: string, number: number, id: string, input: { decision: "approve" | "reject"; details_hash: string; note?: string }) =>
+    request<Approval>("POST", `${app(slug)}/issues/${number}/approvals/${enc(id)}/decide`, input),
   hideComment: (slug: string, number: number, id: string, reason: ModerationReason) =>
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`, { reason }),
   unhideComment: (slug: string, number: number, id: string) => request<Comment>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`),
@@ -333,6 +342,14 @@ export const api = {
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications`, { email }),
   confirmVerification: (slug: string, number: number, id: string, code: string) =>
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications/${enc(id)}/confirm`, { code }),
+  // Help desk human handoff: groups, my availability, escalating and handing back
+  groups: (slug: string) => get<Group[]>(`${app(slug)}/groups`),
+  createGroup: (slug: string, input: GroupInput) => request<Group>("POST", `${app(slug)}/groups`, input),
+  patchGroup: (slug: string, id: string, input: Partial<GroupInput>) => request<Group>("PATCH", `${app(slug)}/groups/${enc(id)}`, input),
+  deleteGroup: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/groups/${enc(id)}`),
+  setAvailability: (slug: string, available: boolean) => request<{ available: boolean }>("PUT", `${app(slug)}/me/availability`, { available }),
+  escalate: (slug: string, number: number, input: { reason?: string; group_id?: string }) => request<Issue>("POST", `${app(slug)}/issues/${number}/escalate`, input),
+  handBack: (slug: string, number: number) => request<Issue>("DELETE", `${app(slug)}/issues/${number}/escalation`),
   // Help desk request types
   requestTypes: (slug: string) => get<RequestType[]>(`${app(slug)}/request-types`),
   createRequestType: (slug: string, input: RequestTypeInput) => request<RequestType>("POST", `${app(slug)}/request-types`, input),
@@ -393,6 +410,7 @@ export const keys = {
   identityKeys: (slug: string) => `identity-keys:${slug}`,
   apiKeys: (slug: string) => `api-keys:${slug}`,
   requestTypes: (slug: string) => `request-types:${slug}`,
+  groups: (slug: string) => `groups:${slug}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

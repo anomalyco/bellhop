@@ -56,7 +56,7 @@ Every delivery is one JSON object:
 | `actor` | always | Who did it: a member, a guest or an agent, with their tier if they have one. |
 | `mcp_url` | always | The MCP endpoint, for agents that act on the event. |
 | `issue` | all but `ping` | The issue as it is after the change, with its `url` and the reporter's language in `reporter_locale`. |
-| `comment` | comment events, `mention.created`, comment edits | The comment, including internal notes (`internal: true`). |
+| `comment` | comment events, `mention.created`, `reply.held` | The comment, including internal notes (`internal: true`). For `reply.held`, the held agent reply, with `held.at`. |
 | `changes` | `issue.updated` | Which fields changed. |
 | `label` | `issue.labeled`, `issue.unlabeled` | The label. |
 | `mentioned` | `mention.created` | Who was mentioned: a team member or an agent. |
@@ -64,6 +64,8 @@ Every delivery is one JSON object:
 | `metadata` | `issue.opened`, `comment.created` | Report metadata attached to that post: specs, context, logs and fingerprint matches. |
 | `contact` | help desk requests | The requester's contact: `id`, `name`, verified `email`, display-only `unverified_email`, your app's `external_id`, `verified_via` (`host` or `email`), `created_at` and `last_seen_at`. |
 | `verification` | `verification.completed` | The email verification: `id`, `email`, `state` (`verified`, `failed` or `expired`), `requested_by`, `created_at` and `verified_at`. The code is never included. |
+| `approval` | `approval.requested`, `approval.decided` | The approval: `action`, `summary`, `details`, `state` (`pending`, then `approved` or `rejected`), `requested_by`, `decided_by` and `note`. Never its token; see [Running support agents](/docs/agents#approvals). |
+| `escalation` | `issue.escalated` | Why and how the request went to a person: `reason`, `source` (`agent`, `requester`, `team` or `routing`), `by`, `at`, `group`, `waiting` (`hours`, `nobody_available` or `null`) and `respond_by`. The new assignee is in `issue.assignee`. |
 | `redelivery_of` | redeliveries | The id of the delivery this repeats. |
 
 Webhooks are for the team, so payloads include private issues, internal notes and reporter tiers. Keep them out of anything public.
