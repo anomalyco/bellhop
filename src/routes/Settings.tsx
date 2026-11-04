@@ -21,6 +21,8 @@ import { WebhookEvents, sameEvents } from "./settings/WebhookEvents"
 import { Insights } from "./settings/Insights"
 import { AuditLog } from "./settings/AuditLog"
 import { SavedReplies } from "./settings/SavedReplies"
+import { Data } from "./settings/Data"
+import { Reminders, reminderText } from "./settings/Reminders"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
@@ -38,6 +40,7 @@ type Section =
   | "members"
   | "tiers"
   | "blocked"
+  | "data"
   | "audit"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
@@ -53,6 +56,7 @@ const sections: { id: Section; label: string; min: Role }[] = [
   { id: "report-keys", label: "Report keys", min: "admin" },
   { id: "tiers", label: "Tiers", min: "member" },
   { id: "blocked", label: "Blocked", min: "member" },
+  { id: "data", label: "Data", min: "admin" },
   { id: "audit", label: "Audit log", min: "admin" },
 ]
 
@@ -122,6 +126,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "insights" && <Insights app={app} />}
           {active === "saved-replies" && <SavedReplies app={app} />}
           {active === "audit" && <AuditLog app={app} />}
+          {active === "data" && <Data app={app} />}
           {active === "labels" && <Labels app={app} />}
           {active === "templates" && <Templates app={app} />}
           {active === "agents" && <Agents app={app} />}
@@ -165,6 +170,7 @@ function General({ app }: { app: AppDetail }) {
   const [description, setDescription] = useState(app.description)
   const [isPublic, setPublic] = useState(!!app.public)
   const [issues, setIssues] = useState<AppVisibility>(app.visibility ?? { default: "public", reporter_can_choose: false })
+  const [nudge, setNudge] = useState<number | null>(app.nudge_days ?? null)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -175,7 +181,7 @@ function General({ app }: { app: AppDetail }) {
     setError(null)
     setSaved(false)
     try {
-      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim(), public: isPublic, visibility: issues })
+      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim(), public: isPublic, visibility: issues, nudge_days: nudge })
       setData(keys.app(app.slug), next)
       setData<App[]>(keys.apps, (apps) =>
         apps?.map((a) => (a.id === next.id ? { ...a, name: next.name, description: next.description, public: next.public } : a)),
@@ -221,6 +227,12 @@ function General({ app }: { app: AppDetail }) {
             </span>
             <IssueVisibilityControl value={issues} onChange={setIssues} />
           </div>
+          <div className="field">
+            <span className="field-label" id="set-reminders-label">
+              Reminders
+            </span>
+            <Reminders value={nudge} onChange={setNudge} />
+          </div>
         </>
       ) : (
         <>
@@ -241,6 +253,13 @@ function General({ app }: { app: AppDetail }) {
             <p className="settings-value visibility-value">
               {app.visibility?.default === "private" ? "Private" : "Public"}
               <span className="visibility-hint">{issueVisibilityText(app.visibility ?? { default: "public", reporter_can_choose: false })}</span>
+            </p>
+          </div>
+          <div className="field">
+            <span className="field-label">Reminders</span>
+            <p className="settings-value visibility-value">
+              {app.nudge_days ? `After ${app.nudge_days} ${app.nudge_days === 1 ? "day" : "days"}` : "Off"}
+              <span className="visibility-hint">{reminderText}</span>
             </p>
           </div>
         </>

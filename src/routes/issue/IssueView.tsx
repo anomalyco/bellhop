@@ -19,6 +19,7 @@ import { IssueSidebar, MobileDetails, MobileProps } from "./Sidebar"
 import { AttachmentList, EventBurst, EventLine, MessageGroup, TypingLine } from "./Timeline"
 import { EditedMarker, HiddenLine, IssueFlags, reasons, type CommentContext } from "./Moderation"
 import { DiagnosticsBlock, logIds } from "../../ui/features/Diagnostics"
+import { ImportedMarker } from "../../ui/features/Imported"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -148,6 +149,7 @@ function Report({ model }: { model: IssueModel }) {
           )}
         </span>
       </p>
+      {issue.imported && <ImportedMarker imported={issue.imported} />}
       <IssueFlags issue={issue} />
       <MobileProps model={model} />
 

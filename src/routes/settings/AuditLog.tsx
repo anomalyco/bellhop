@@ -61,6 +61,8 @@ const sentences: Record<string, (t: ReactNode, d: Record<string, unknown>, n: Na
   "comment.deleted": (t) => <>deleted {t}</>,
   "actor.blocked": (t, d) => <>blocked {t}{d.hide_content ? " and hid what they wrote" : ""}</>,
   "actor.unblocked": (t) => <>unblocked {t}</>,
+  "import.started": (_t, d) => <>started importing {d.repo ? <span className="mono audit-target">{String(d.repo)}</span> : "a repository"} from GitHub</>,
+  "app.exported": () => <>downloaded the workspace export</>,
   "report_key.created": (t) => <>created {t}</>,
   "report_key.revoked": (t) => <>revoked {t}</>,
 }
@@ -108,6 +110,8 @@ const actionGroups: { name: string; actions: [string, string][] }[] = [
     name: "Setup",
     actions: [
       ["app.updated", "Workspace updated"],
+      ["app.exported", "Workspace exported"],
+      ["import.started", "GitHub import started"],
       ["label.created", "Label created"],
       ["label.deleted", "Label deleted"],
       ["template.updated", "Template updated"],
