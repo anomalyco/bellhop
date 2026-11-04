@@ -148,6 +148,10 @@ html {
   background: var(--bg);
   /* No rubber-band bounce or pull-to-refresh past the top and bottom of the page */
   overscroll-behavior-y: none;
+  /* Always reserve the scrollbar's width, so the centred header doesn't jump between short and long pages.
+     scrollbar-gutter alone is ignored by Chrome with our custom scrollbar; an always-on (transparent) track works. */
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
 }
 html,
 body {

@@ -91,12 +91,13 @@ export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: s
         )}
         {app && (
           <nav className="app-nav" aria-label={app.name}>
-            {detail ? (
+            {/* The Issues tab renders before the app loads (its count held invisibly) so the header doesn't shift */}
+            <Link href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
+              <IssueOpenIcon size={14} />
+              Issues <Counter>{detail ? detail.counts.open : <span className="counter-pending">0</span>}</Counter>
+            </Link>
+            {detail && (
               <>
-                <Link href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
-                  <IssueOpenIcon size={14} />
-                  Issues <Counter>{detail.counts.open}</Counter>
-                </Link>
                 {detail.role && (
                   <Link
                     href={appPath(app.slug, "/settings")}
@@ -109,8 +110,6 @@ export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: s
                   </Link>
                 )}
               </>
-            ) : (
-              <span className="app-nav-placeholder" />
             )}
           </nav>
         )}

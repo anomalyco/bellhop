@@ -104,9 +104,8 @@
 .app-nav a[aria-current="page"] .icon {
   color: var(--icon);
 }
-.app-nav-placeholder {
-  width: 96px;
-  height: var(--control-medium);
+.counter-pending {
+  visibility: hidden;
 }
 .header-avatar {
   display: inline-flex;
