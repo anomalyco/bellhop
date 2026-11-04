@@ -22,6 +22,9 @@ export interface Change {
   items?: TimelineItem[]
   comments?: Comment[]
   deletedComment?: string
+  internalOnly?: boolean
+  liveOnly?: boolean
+  mentioned?: Actor[]
   changes?: string[]
 }
 export const appRoom = (env: Env, id: string) => env.ROOMS.getByName(`app:${id}`)
@@ -32,9 +35,9 @@ export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[],
   const event: LiveEvent = { type: "actor.updated", previous_id, actor }
   ctx.waitUntil(
     (async () => {
-      await appRoom(env, app).publish([event], { actorIssues: issues })
+      await appRoom(env, app).publishConversation([event], { app, actorIssues: issues })
       for (let i = 0; i < issues.length; i += 8) {
-        await Promise.all(issues.slice(i, i + 8).map((id) => issueRoom(env, id).publish([event])))
+        await Promise.all(issues.slice(i, i + 8).map((id) => issueRoom(env, id).publishConversation([event], { app })))
       }
     })()
   )
@@ -56,7 +59,9 @@ export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[],
             )
           )
           for (let i = 0; i < affected.length; i += 8)
-            await Promise.all(affected.slice(i, i + 8).map((r) => feedRoom(env).refreshFeed(r.id, "feed.issue")))
+            await Promise.all(
+              affected.slice(i, i + 8).map((r) => feedRoom(env).refreshConversationFeed(r.id, "feed.issue"))
+            )
         }
       })()
     )
@@ -71,11 +76,17 @@ export function emit(env: Env, ctx: Work, change: Change) {
   for (const comment of change.comments ?? []) timeline.push({ type: "comment.updated", issue_id: issue.id, comment })
   if (change.deletedComment)
     timeline.push({ type: "comment.deleted", issue_id: issue.id, comment_id: change.deletedComment })
+  const affected = [...(change.comments ?? []), ...items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))]
+  const internalOnly = change.internalOnly === true || (affected.length > 0 && affected.every((c) => c.internal))
   ctx.waitUntil(
-    Promise.all([appRoom(env, app.id).publish([list]), issueRoom(env, issue.id).publish([...timeline, updated])])
+    Promise.all([
+      appRoom(env, app.id).publishConversation([list], { app: app.id, internalOnly }),
+      issueRoom(env, issue.id).publishConversation([...timeline, updated], { app: app.id, internalOnly })
+    ])
   )
-  if (app.public && !issue.private && !issue.hidden) ctx.waitUntil(feedRoom(env).refreshFeed(issue.id, "feed.issue"))
-  if (type === "comment.created" && change.actor.type === "agent") return
+  if (!internalOnly && app.public && !issue.private && !issue.hidden)
+    ctx.waitUntil(feedRoom(env).refreshConversationFeed(issue.id, "feed.issue"))
+  if (change.liveOnly) return
   const origin = env.PUBLIC_ORIGIN || change.origin
   const payload = {
     app,
@@ -90,10 +101,24 @@ export function emit(env: Env, ctx: Work, change: Change) {
     : items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))
   ctx.waitUntil(
     (async () => {
+      for (const mentioned of change.mentioned ?? []) {
+        if (mentioned.id !== change.actor.id)
+          await enqueueWebhook(env, origin, {
+            ...payload,
+            type: "mention.created",
+            mentioned,
+            ...(comments[0] ? { comment: { ...comments[0], viewer_is_author: false, viewer_helpful: false } } : {})
+          })
+      }
+      if (change.actor.type === "agent" && (type === "comment.created" || change.changes?.includes("comment.edited")))
+        return
       if (!comments.length) await enqueueWebhook(env, origin, payload)
       else
         for (const comment of comments)
-          await enqueueWebhook(env, origin, { ...payload, comment: { ...comment, viewer_is_author: false } })
+          await enqueueWebhook(env, origin, {
+            ...payload,
+            comment: { ...comment, viewer_is_author: false, viewer_helpful: false }
+          })
     })()
   )
 }
@@ -122,7 +147,7 @@ export async function setActivity(
     if (clear) return
     missing()
   }
-  await issueRoom(env, issueId).refreshPresence(appId, issueId)
+  await issueRoom(env, issueId).refreshConversationPresence(appId, issueId)
 }
 // Refresh from D1 rather than broadcasting the caller's snapshot: overlapping requests can
 // reach a Room in a different order than their commits. The Room serializes refresh and expiry.
@@ -136,11 +161,12 @@ export async function refreshActivity(
 ) {
   const presence = await readPresence(env, issueId, appId),
     activity = presence?.activity ?? null
+  if (!presence) return // A delayed source-room refresh must not cancel a transferred issue's target alarm.
   const event: LiveEvent = { type: "activity", issue_id: issueId, activity }
   await schedule(activity ? Date.parse(activity.expires_at) : null)
   await publish(event)
-  if (presence?.public) ctx.waitUntil(feedRoom(env).refreshFeed(issueId, "activity"))
-  await appRoom(env, appId).publish([event])
+  if (presence?.public) ctx.waitUntil(feedRoom(env).refreshConversationFeed(issueId, "activity"))
+  await appRoom(env, appId).publishConversation([event], { app: appId })
 }
 // Called inside the issue Room's alarm; do not RPC back into the same Room.
 export async function expireActivity(
@@ -161,8 +187,8 @@ export async function expireActivity(
   if (cleared) {
     const event: LiveEvent = { type: "activity", issue_id: issueId, activity: null }
     await publish(event)
-    if (cleared.public) ctx.waitUntil(feedRoom(env).refreshFeed(issueId, "activity"))
-    await appRoom(env, appId).publish([event])
+    if (cleared.public) ctx.waitUntil(feedRoom(env).refreshConversationFeed(issueId, "activity"))
+    await appRoom(env, appId).publishConversation([event], { app: appId })
     return null // The guarded write cleared this presence; a later refresh schedules its own alarm.
   }
   const next = await sql(

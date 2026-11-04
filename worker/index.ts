@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { apps, detail, loadApp, viewerApp } from "./apps"
-import { auth, currentUser, firstContact } from "./auth"
+import { auth, browserGuest, currentUser, firstContact, sessionHash } from "./auth"
 import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, feedRoom, issueRoom } from "./events"
@@ -47,7 +47,7 @@ api.use("*", async (c, next) => {
   if (
     (c.req.path.startsWith("/api/") &&
       !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path) &&
-      !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues)?$/.test(c.req.path))) ||
+      !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues(?:\/\d+)?)?$/.test(c.req.path))) ||
     c.req.path === "/oauth/authorize"
   )
     await currentUser(c)
@@ -61,16 +61,32 @@ api.get("/api/apps/:slug", async (c) => {
   const { app, viewer } = await viewerApp(c, c.req.param("slug"))
   return c.json(await detail(c, app, viewer))
 })
-api.get("/api/feed", async (c) => c.json(await feed(c.env, c.req.query())))
+async function feedViewer(c: Ctx) {
+  await currentUser(c)
+  const cookie = browserGuest(c)
+  return {
+    actorId: c.var.user?.id ?? null,
+    voter: c.var.user?.id ?? (cookie ? "g:" + (await sha256(cookie)) : null),
+    session: c.var.user ? await sessionHash(c) : null,
+    team: false
+  }
+}
+api.get("/api/feed", async (c) => c.json(await feed(c.env, c.req.query(), (await feedViewer(c)).voter)))
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
 api.get("/api/apps/:slug/issues", async (c) => {
-  const { state, label, cursor, q } = c.req.query()
+  const { state, label, cursor, q, sort } = c.req.query()
   const { app, viewer } = await viewerApp(c, c.req.param("slug"))
-  return c.json(await listIssues(c.env, app.id, { state, label, cursor, query: q }, viewer))
+  return c.json(await listIssues(c.env, app.id, { state, label, cursor, query: q, sort }, viewer))
 })
-api.get("/api/apps/:slug/issues/:number", async (c) =>
-  c.json(await getIssue(c.env, bySlug(c), issueNumber(c.req.param("number"))))
-)
+api.get("/api/apps/:slug/issues/:number", async (c) => {
+  const { app, viewer } = await viewerApp(c, c.req.param("slug"))
+  return c.json(
+    await getIssue(c.env, app.id, issueNumber(c.req.param("number")), viewer, {
+      origin: c.env.PUBLIC_ORIGIN || c.req.url,
+      viewer: async (slug) => (await viewerApp(c, slug)).viewer
+    })
+  )
+})
 api.use("/api/apps/:slug/*", async (c, next) => {
   await loadApp(c)
   await next()
@@ -90,6 +106,8 @@ async function live(c: Ctx, number?: string) {
     if (!caller?.apps.some((a) => a.id === app.id)) missing()
     viewer.team = true
     viewer.actorId = caller.actor.id
+    viewer.voter = caller.actor.id
+    viewer.aliases = []
     bearer = await sha256(c.req.header("Authorization")!.slice(7))
   }
   let room = appRoom(c.env, app.id)
@@ -105,11 +123,15 @@ async function live(c: Ctx, number?: string) {
   }
   const headers = new Headers(c.req.raw.headers)
   headers.set("X-Bellhop-Viewer", JSON.stringify({ ...viewer, session: bearer ? null : session, bearer, app: app.id }))
-  return room.fetch(new Request(c.req.raw, { headers }))
+  return room.fetch(new Request(new URL('/__bellhop_conversation_socket',c.req.url), { headers }))
 }
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))
-api.get("/api/live/feed", (c) => feedRoom(c.env).fetch(c.req.raw))
+api.get("/api/live/feed", async (c) => {
+  const headers = new Headers(c.req.raw.headers)
+  headers.set("X-Bellhop-Viewer", JSON.stringify({ ...(await feedViewer(c)), app: "", bearer: null }))
+  return feedRoom(c.env).fetch(new Request(new URL('/__bellhop_conversation_socket',c.req.url), { headers }))
+})
 api.route("/", mcp)
 api.get("/robots.txt", robots)
 api.get("/sitemap.xml", sitemap)
@@ -133,7 +155,11 @@ api.get("*", (c) => {
 api.notFound((c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404))
 api.onError((e, c) => {
   const err = e instanceof ApiFailure ? e : dbError(e)
-  if (err) return c.json({ error: { code: err.code, message: err.message } }, err.status)
+  if (err)
+    return c.json(
+      { error: { code: err.code, message: err.message, ...(err.moved_to && { moved_to: err.moved_to }) } },
+      err.status
+    )
   console.error("bellhop.request_failed", { method: c.req.method, path: c.req.path, message: e.message })
   return c.json({ error: { code: "internal_error", message: "Internal server error" } }, 500)
 })

@@ -1,14 +1,96 @@
 import { DurableObject } from "cloudflare:workers"
-import type { Actor, Comment, LiveEvent, Role, TimelineItem } from "../shared/api"
+import type { Actor, Comment, IssueSummary, LiveEvent, Role, TimelineItem } from "../shared/api"
 import { expireActivity, refreshActivity } from "./events"
 import { publicFeedIssue, readPresence } from "./issues"
 import { sql, now } from "./core"
 import { agentAccessSQL } from "./permissions"
-import { commentView, gateOf, outsider, sees, type Gate, type Viewer } from "./visibility"
+import { actorIds, commentView, gateOf, includesComment, outsider, sees, type Gate, type Viewer } from "./visibility"
+import { voteCount } from "./conversation"
 
-type Attachment = Viewer & { app: string; session: string | null; bearer: string | null; at: number }
-type Delivery = { deleted?: Gate; actorIssues?: string[] }
-type PolicyRow = { id: string; private: number; hidden: number; reporter: string }
+type Attachment = Viewer & {
+  format: "conversation-v1"
+  app: string
+  session: string | null
+  bearer: string | null
+  at: number
+}
+// Use an allowlist on the wire. TypeScript's structural typing also accepts a full Issue where
+// IssueSummary is expected; never serialize accidental timeline/body/notes on a summary frame.
+function summaryFrame(i: IssueSummary): IssueSummary {
+  const {
+    id,
+    number,
+    title,
+    status,
+    close_reason,
+    labels,
+    author,
+    assignee,
+    comment_count,
+    created_at,
+    updated_at,
+    activity,
+    private: priv,
+    hidden,
+    votes,
+    viewer_voted,
+    locked,
+    pinned
+  } = i
+  return {
+    id,
+    number,
+    title,
+    status,
+    close_reason,
+    labels,
+    author,
+    assignee,
+    comment_count,
+    created_at,
+    updated_at,
+    activity,
+    private: priv,
+    hidden,
+    votes,
+    viewer_voted,
+    locked,
+    pinned
+  }
+}
+function validAttachment(a: Attachment | null | undefined) {
+  return (
+    a?.format === "conversation-v1" &&
+    typeof a.app === "string" &&
+    typeof a.team === "boolean" &&
+    Number.isFinite(a.at) &&
+    (a.voter === null || typeof a.voter === "string") &&
+    (a.aliases === undefined || (Array.isArray(a.aliases) && a.aliases.every((id) => typeof id === "string"))) &&
+    (a.actorId === null || typeof a.actorId === "string") &&
+    (a.session === null || (typeof a.session === "string" && /^[a-f0-9]{64}$/.test(a.session))) &&
+    (a.bearer === null || (typeof a.bearer === "string" && /^[a-f0-9]{64}$/.test(a.bearer))) &&
+    (!a.team || !!(a.bearer || a.session))
+  )
+}
+type Delivery = {
+  app?: string
+  internalOnly?: boolean
+  moved?: { gate: Gate; target: string; number: number }
+  deleted?: Gate
+  actorIssues?: string[]
+}
+type PolicyRow = {
+  id: string
+  app_id: string
+  private: number
+  hidden: number
+  reporter: string
+  public_count: number
+  team_count: number
+  team_votes: number
+  locked: number
+  pinned: number
+}
 type CommentRow = {
   id: string
   body: string
@@ -18,6 +100,9 @@ type CommentRow = {
   edited_at: string | null
   role: Role | null
   reporter: string
+  internal: number
+  mentions: string
+  helpful: number
 }
 const eventId = (e: LiveEvent) => ("issue_id" in e ? e.issue_id : "issue" in e ? e.issue.id : null)
 function relationId(item: TimelineItem) {
@@ -36,12 +121,20 @@ export class Room extends DurableObject<Env> {
     return name?.startsWith("issue:") ? name.slice(6) : null
   }
   private sockets(except?: WebSocket) {
-    return this.ctx.getWebSockets().filter((s) => s !== except && s.readyState === WebSocket.OPEN)
+    return this.ctx.getWebSockets().filter((s) => {
+      if (s === except || s.readyState !== WebSocket.OPEN) return false
+      try {
+        if (validAttachment(s.deserializeAttachment())) return true
+      } catch {}
+      s.close(1012, "Reconnect to refresh conversation permissions")
+      return false
+    })
   }
   /** Clients ping every 25 s; a socket silent for 70 s belongs to a tab that went away without closing. */
-  private viewers(except?: WebSocket) {
+  private viewers(except?: WebSocket, app?: string) {
     const cutoff = Date.now() - 70_000
     return this.sockets(except).filter((s) => {
+      if (app && s.deserializeAttachment()?.app !== app) return false
       const seen = this.ctx.getWebSocketAutoResponseTimestamp(s)?.getTime() ?? s.deserializeAttachment()?.at ?? 0
       if (seen >= cutoff) return true
       s.close(1001, "Idle")
@@ -55,31 +148,63 @@ export class Room extends DurableObject<Env> {
         { status: 426 }
       )
     const issueId = this.issueId
-    const attached: Attachment =
-      this.ctx.id.name === "feed"
-        ? { ...outsider, app: "", session: null, bearer: null, at: Date.now() }
-        : { ...JSON.parse(req.headers.get("X-Bellhop-Viewer") ?? "{}"), at: Date.now() }
-    const presence = issueId ? await readPresence(this.env, issueId) : null
+    if (new URL(req.url).pathname !== "/__bellhop_conversation_socket") return new Response(null, { status: 426 })
+    const attached: Attachment = {
+      ...JSON.parse(req.headers.get("X-Bellhop-Viewer") ?? "{}"),
+      format: "conversation-v1",
+      at: Date.now()
+    }
+    if (!validAttachment(attached)) return new Response(null, { status: 403 })
+    const presence = issueId ? await readPresence(this.env, issueId, attached.app) : null
     if (issueId && (!presence || !sees(attached, presence.gate))) return new Response(null, { status: 404 })
     const activity = presence?.activity ?? null
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket]
     this.ctx.acceptWebSocket(server, [issueId ? "issue" : "app"])
     server.serializeAttachment(attached)
-    const viewers = this.viewers()
+    const viewers = this.viewers(undefined, attached.app)
     server.send(JSON.stringify({ type: "hello", viewers, activity } satisfies LiveEvent))
-    if (issueId) await this.deliver([{ type: "viewers", count: viewers }], {}, server)
+    if (issueId) await this.deliver([{ type: "viewers", count: viewers }], { app: attached.app }, server)
     return new Response(null, { status: 101, webSocket: client })
   }
-  publish(events: LiveEvent[], options: Delivery = {}) {
+  publishConversation(events: LiveEvent[], options: Delivery) {
+    if (this.ctx.id.name === "feed") throw new Error("Feed accepts only a fresh public projection")
     return this.deliver(events, options)
   }
   private async deliver(events: LiveEvent[], options: Delivery, except?: WebSocket) {
     const sockets = this.sockets(except)
     if (!sockets.length) return
     if (this.ctx.id.name === "feed") {
-      for (const ws of sockets)
+      const listeners = sockets.map((ws) => ({ ws, a: ws.deserializeAttachment() as Attachment | null })),
+        ids = events.flatMap((e) => (e.type === "feed.issue" ? [e.issue.id] : []))
+      const votes = ids.length
+        ? (
+            await sql(
+              this.env,
+              `SELECT v.issue_id,p.key listener FROM json_each(?) p LEFT JOIN sessions s ON s.token_hash=json_extract(p.value,'$.session') AND s.expires_at>?
+        JOIN issue_votes v ON v.voter=CASE WHEN json_extract(p.value,'$.session') IS NULL THEN json_extract(p.value,'$.voter') ELSE s.user_id END WHERE v.issue_id IN (SELECT value FROM json_each(?))`,
+              JSON.stringify(listeners.map((l) => ({ session: l.a?.session, voter: l.a?.voter }))),
+              now(),
+              JSON.stringify(ids)
+            ).all<{ issue_id: string; listener: number }>()
+          ).results
+        : []
+      for (const [index, { ws }] of listeners.entries())
         try {
-          for (const e of events) ws.send(JSON.stringify(e))
+          for (const e of events)
+            ws.send(
+              JSON.stringify(
+                e.type === "feed.issue"
+                  ? {
+                      ...e,
+                      issue: {
+                        ...summaryFrame(e.issue),
+                        app: e.issue.app,
+                        viewer_voted: votes.some((r) => r.issue_id === e.issue.id && r.listener === index)
+                      }
+                    }
+                  : e
+              )
+            )
         } catch {
           ws.close(1011, "Send failed")
         }
@@ -101,13 +226,27 @@ export class Room extends DurableObject<Env> {
     const listeners = sockets.map((ws) => ({ ws, a: ws.deserializeAttachment() as Attachment | null })),
       sessions = listeners.flatMap((x) => (x.a?.session ? [x.a.session] : [])),
       bearers = listeners.flatMap((x) => (x.a?.bearer ? [x.a.bearer] : []))
-    const app = listeners.find((x) => x.a?.app)?.a?.app ?? ""
+    const app =
+      options.app ??
+      (this.ctx.id.name?.startsWith("app:")
+        ? this.ctx.id.name.slice(4)
+        : (listeners.find((x) => x.a?.app)?.a?.app ?? ""))
+    const people = JSON.stringify([
+      ...new Map(
+        [outsider, ...listeners.flatMap((x) => (x.a ? [x.a] : []))].map((v) => [
+          v.voter ?? v.actorId ?? "",
+          { voter: v.voter ?? v.actorId ?? "", ids: actorIds(v) }
+        ])
+      ).values()
+    ])
     // Evaluate every socket's credentials, issue gates, and latest comment bodies in one DB
     // snapshot. A queued event must not pair yesterday's public ACL with today's private body.
     const q = [
       sql(
         this.env,
-        "SELECT id,private,hidden IS NOT NULL hidden,json_extract(author,'$.id') reporter FROM issues WHERE id IN(SELECT value FROM json_each(?))",
+        `SELECT id,app_id,private,hidden IS NOT NULL hidden,json_extract(author,'$.id') reporter,locked,pinned,
+         (SELECT count(*) FROM comments WHERE issue_id=i.id AND internal=0) public_count,(SELECT count(*) FROM comments WHERE issue_id=i.id) team_count,
+         ${voteCount("1", "'[]'")} team_votes FROM issues i WHERE id IN(SELECT value FROM json_each(?))`,
         JSON.stringify([...ids])
       )
     ]
@@ -115,7 +254,7 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,m.role,json_extract(i.author,'$.id') reporter
+            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
       FROM comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
@@ -144,10 +283,42 @@ export class Room extends DurableObject<Env> {
           )
         ) - 1
       : -1
+    const vi = events.some((e) => e.type === "issue.created" || e.type === "issue.updated")
+      ? q.push(
+          sql(
+            this.env,
+            `SELECT i.id,json_extract(p.value,'$.voter') voter,
+      EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=json_extract(p.value,'$.voter')) voted,${voteCount("0", "json_extract(p.value,'$.ids')")} votes FROM issues i,json_each(?) p WHERE i.id IN(SELECT value FROM json_each(?))`,
+            people,
+            JSON.stringify([...ids])
+          )
+        ) - 1
+      : -1
+    const hi = commentIds.size
+      ? q.push(
+          sql(
+            this.env,
+            `SELECT comment_id,voter FROM comment_helpful WHERE comment_id IN(SELECT value FROM json_each(?)) AND voter IN(SELECT json_extract(value,'$.voter') FROM json_each(?))`,
+            JSON.stringify([...commentIds]),
+            people
+          )
+        ) - 1
+      : -1
+    const targetMembers = options.moved
+      ? q.push(
+          sql(
+            this.env,
+            `SELECT user_id id FROM members WHERE app_id=?1 AND user_id IN (SELECT json_extract(value,'$.voter') FROM json_each(?2))
+      UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL AND agent_id IN(SELECT json_extract(value,'$.voter') FROM json_each(?2))`,
+            options.moved.target,
+            people
+          )
+        ) - 1
+      : -1
     const result = await this.env.DB.batch<unknown>(q),
       resultRows = <T>(i: number) => (result[i]?.results ?? []) as T[]
     const gates = new Map(
-        resultRows<PolicyRow>(0).map((r) => [r.id, { private: !!r.private, hidden: !!r.hidden, reporter: r.reporter }])
+        resultRows<PolicyRow>(0).map((r) => [r.id, { ...r, private: !!r.private, hidden: !!r.hidden }])
       ),
       comments = resultRows<CommentRow>(ci),
       accounts = resultRows<{ hash: string; id: string; team: number }>(si),
@@ -155,16 +326,33 @@ export class Room extends DurableObject<Env> {
     const current = new Map(comments.map((c) => [c.id, c])),
       auth = new Map(accounts.map((s) => [s.hash, { team: !!s.team, actorId: s.id }]))
     for (const a of agents) auth.set(a.hash, { team: true, actorId: a.id })
+    const votes = new Map(
+        resultRows<{ id: string; voter: string; votes: number; voted: number }>(vi).map((r) => [
+          r.id + ":" + r.voter,
+          r
+        ])
+      ),
+      helpful = new Set(resultRows<{ comment_id: string; voter: string }>(hi).map((r) => r.comment_id + ":" + r.voter)),
+      targets = new Set(resultRows<{ id: string }>(targetMembers).map((r) => r.id))
     for (const { ws, a } of listeners) {
+      if (a?.app && a.app !== app) continue
       const key = a?.session || a?.bearer,
-        v = key ? (auth.get(key) ?? outsider) : { team: false, actorId: a?.actorId ?? null }
+        v: Viewer = key
+          ? (auth.get(key) ?? outsider)
+          : { team: false, actorId: a?.actorId ?? null, aliases: a?.aliases, voter: a?.voter }
+      const conversationPayload = events.some((e) =>
+        ["timeline.added", "comment.updated", "comment.deleted", "issue.created", "issue.updated"].includes(e.type)
+      )
+      if (!v.team && (options.internalOnly === true || (conversationPayload && options.internalOnly !== false)))
+        continue
+      const voter = v.voter ?? v.actorId ?? ""
       const allowed = (id: string) => {
         const g = gates.get(id)
-        return !!g && sees(v, g)
+        return !!g && (!app || g.app_id === app) && sees(v, g)
       }
       const shape = (c: Comment) => {
         const row = current.get(c.id)
-        if (!row) return null
+        if (!row || !includesComment(v, !!row.internal)) return null
         const author: Actor = JSON.parse(row.author)
         if (author.type === "member") author.role = row.role
         if (author.type === "guest") author.name ??= null
@@ -175,6 +363,10 @@ export class Room extends DurableObject<Env> {
             hidden: row.hidden ? JSON.parse(row.hidden) : null,
             author,
             by_issue_author: row.reporter === author.id,
+            internal: !!row.internal,
+            mentions: JSON.parse(row.mentions),
+            helpful: row.helpful,
+            viewer_helpful: helpful.has(c.id + ":" + voter),
             edited_at: row.edited_at,
             updated_at: row.updated_at
           },
@@ -184,16 +376,51 @@ export class Room extends DurableObject<Env> {
       try {
         for (let e of events) {
           const id = eventId(e) ?? this.issueId
-          if (e.type === "issue.deleted") {
+          if (e.type === "issue.moved") {
+            const g = gates.get(e.issue_id)
+            if (
+              options.moved &&
+              g &&
+              g.app_id === options.moved.target &&
+              sees(v, options.moved.gate) &&
+              sees({ ...v, team: targets.has(v.actorId ?? "") }, g)
+            )
+              ws.send(JSON.stringify(e))
+            else if (options.moved && sees(v, options.moved.gate))
+              ws.send(
+                JSON.stringify({
+                  type: "issue.deleted",
+                  issue_id: e.issue_id,
+                  number: options.moved.number
+                } satisfies LiveEvent)
+              )
+            if (this.issueId) ws.close(1000, "Issue moved")
+            continue
+          } else if (e.type === "issue.deleted") {
             if (!options.deleted || !sees(v, options.deleted)) continue
           } else if (id && !allowed(id)) {
             // If the row vanished, a queued update may have raced its deletion notification.
             // Drop the stale payload without closing the socket ahead of issue.deleted.
-            if (this.issueId && gates.has(id)) ws.close(1008, "Issue unavailable")
+            if (this.issueId && gates.get(id)?.app_id === app) ws.close(1008, "Issue unavailable")
             continue
           }
           if (e.type === "actor.updated" && !this.issueId && !v.team && !options.actorIssues?.some(allowed)) continue
           if ((e.type === "issue.updated" || e.type === "issue.created") && !sees(v, gateOf(e.issue))) continue
+          if (e.type === "issue.updated" || e.type === "issue.created") {
+            const g = gates.get(e.issue.id)!,
+              stat = votes.get(e.issue.id + ":" + voter)
+            e = {
+              ...e,
+              issue: {
+                ...summaryFrame(e.issue),
+                locked: !!g.locked,
+                pinned: !!g.pinned,
+                comment_count: v.team ? g.team_count : g.public_count,
+                votes: v.team ? g.team_votes : (stat?.votes ?? 0),
+                viewer_voted: !!stat?.voted
+              }
+            }
+          }
           if (e.type === "timeline.added") {
             if (e.item.kind === "comment") {
               const c = shape(e.item.comment)
@@ -224,26 +451,26 @@ export class Room extends DurableObject<Env> {
   }
   // A queued write can arrive after an admin unlists its workspace. Never trust that write's
   // payload in the global room: re-read the public projection immediately before broadcasting.
-  refreshFeed(issueId: string, type: "feed.issue" | "activity") {
+  refreshConversationFeed(issueId: string, type: "feed.issue" | "activity") {
     return this.serialize(async () => {
       if (this.ctx.id.name !== "feed" || !this.ctx.getWebSockets().length) return
       if (type === "feed.issue") {
         const issue = await publicFeedIssue(this.env, issueId)
-        if (issue) await this.publish([{ type, issue }])
+        if (issue) await this.deliver([{ type, issue }], {})
       } else {
         const presence = await readPresence(this.env, issueId, undefined, true)
-        if (presence) await this.publish([{ type, issue_id: issueId, activity: presence.activity }])
+        if (presence) await this.deliver([{ type, issue_id: issueId, activity: presence.activity }], {})
       }
     })
   }
-  refreshPresence(appId: string, issueId: string) {
+  refreshConversationPresence(appId: string, issueId: string) {
     return this.serialize(() =>
       refreshActivity(
         this.env,
         this.ctx,
         appId,
         issueId,
-        (e) => this.publish([e]),
+        (e) => this.publishConversation([e], { app: appId }),
         async (at) => {
           if (at !== null) {
             await this.ctx.storage.put("scope", { appId, issueId })
@@ -257,7 +484,9 @@ export class Room extends DurableObject<Env> {
     return this.serialize(async () => {
       const scope = await this.ctx.storage.get<{ appId: string; issueId: string }>("scope")
       if (scope) {
-        const next = await expireActivity(this.env, this.ctx, scope.appId, scope.issueId, (e) => this.publish([e]))
+        const next = await expireActivity(this.env, this.ctx, scope.appId, scope.issueId, (e) =>
+          this.publishConversation([e], { app: scope.appId })
+        )
         if (next) await this.ctx.storage.setAlarm(next)
       }
     })
@@ -267,8 +496,10 @@ export class Room extends DurableObject<Env> {
     else ws.close(1008, "Only ping supported")
   }
   webSocketClose(ws: WebSocket) {
-    if (this.ctx.getTags(ws).includes("issue"))
-      this.ctx.waitUntil(this.publish([{ type: "viewers", count: this.viewers(ws) }]))
+    if (this.ctx.getTags(ws).includes("issue")) {
+      const app = ws.deserializeAttachment()?.app
+      this.ctx.waitUntil(this.publishConversation([{ type: "viewers", count: this.viewers(ws, app) }], { app }))
+    }
   }
   webSocketError(ws: WebSocket) {
     ws.close(1011, "Connection error")

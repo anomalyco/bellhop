@@ -20,7 +20,8 @@ import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
-import { addComment, editComment, moderate, relate, removeLabel, updateIssue } from "./mutations"
+import { addComment, editComment, moderate, relate, removeLabel, transferIssue, updateIssue } from "./mutations"
+import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
@@ -34,6 +35,8 @@ const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
 const toolRoles = {
   list_apps: "discover",
+  list_mentionables: "read",
+  transfer_issue: "triage",
   create_app: "create",
   get_app: "read",
   list_issues: "read",
@@ -152,6 +155,7 @@ const tools = [
     ["name", "slug"]
   ),
   tool("list_issues", "List issues by state, label, or search terms.", {
+    sort: { type: "string", enum: ["newest", "oldest", "votes", "updated", "comments"] },
     state: { ...text, enum: states },
     label: text,
     query: text,
@@ -167,10 +171,17 @@ const tools = [
     "id"
   ]),
   tool("list_labels", "List the labels available in this app.", {}),
-  tool("comment", "Post an agent comment and clear your activity on the issue.", { number, body: text }, [
+  tool("list_mentionables", "List current workspace member and agent handles.", {}),
+  tool("transfer_issue", "Move to another workspace in which this agent may triage.", { number, to_app: text }, [
     "number",
-    "body"
+    "to_app"
   ]),
+  tool(
+    "comment",
+    "Post a comment or a team-only internal note.",
+    { number, body: text, internal: { type: "boolean" } },
+    ["number", "body"]
+  ),
   tool("edit_comment", "Edit this agent's own comment.", { comment_id: text, body: text }, ["comment_id", "body"]),
   tool(
     "moderate",
@@ -192,6 +203,8 @@ const tools = [
       close_reason: { ...text, enum: ["completed", "not_planned", "duplicate"] },
       labels: { type: "array", items: text },
       private: { type: "boolean" },
+      locked: { type: "boolean" },
+      pinned: { type: "boolean" },
       title: text
     },
     ["number"]
@@ -286,6 +299,13 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id }
   switch (name) {
+    case "list_mentionables":
+      return textResult(await mentionables(env, app.id))
+    case "transfer_issue": {
+      const dest = caller.apps.find((x) => x.slug === b.to_app)
+      if (!dest || !can(dest.role, "triage")) denied()
+      return textResult(await transferIssue(a, n(), dest.slug))
+    }
     case "get_app":
       return textResult({ ...(await detail(c, { ...chosen, role: null }, teamViewer)), role: chosen.role })
     case "update_app":
@@ -362,16 +382,29 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           app.id,
           {
             allStates: name === "search_issues",
+            sort: b.sort,
             state: b.state === undefined ? undefined : choice(b.state, states, "state"),
             label: b.label === undefined ? undefined : str(b.label, "label", 60),
             query: b.query === undefined ? undefined : str(b.query, "query", 512),
             limit: b.limit === undefined ? undefined : integer(b.limit, "limit", 100)
           },
-          teamViewer
+          { ...teamViewer, actorId: actor.id }
         )
       )
     case "get_issue":
-      return textResult(await getIssue(env, app.id, n(), actor, can(a.role, "read")))
+      return textResult(
+        await getIssue(
+          env,
+          app.id,
+          n(),
+          { team: true, actorId: actor.id },
+          {
+            origin: a.origin,
+            viewer: async (slug) =>
+              caller.apps.some((x) => x.slug === slug) ? { team: true, actorId: actor.id } : null
+          }
+        )
+      )
     case "list_labels":
       return textResult(await labels(env, app.id))
     case "get_attachment": {
@@ -395,7 +428,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       return { content: [{ type: "image", mimeType: row.mime, data: chunks.join("") }] }
     }
     case "comment":
-      return textResult(await addComment(a, n(), { body: b.body }))
+      return textResult(await addComment(a, n(), b))
     case "edit_comment": {
       const id = str(b.comment_id, "comment_id", 64),
         num = await sql(
@@ -547,7 +580,14 @@ mcp.post("/mcp", async (c) => {
         const failure = e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null
         if (failure?.status === 403) return error(-32003, failure.message, 403)
         if (!failure) console.error("bellhop.tool_failed", { tool: p.name })
-        return result({ ...textResult(failure?.message ?? "Internal tool error"), isError: true })
+        return result({
+          ...textResult(
+            failure?.moved_to
+              ? { error: { code: failure.code, message: failure.message, moved_to: failure.moved_to } }
+              : (failure?.message ?? "Internal tool error")
+          ),
+          isError: true
+        })
       }
     }
     default:

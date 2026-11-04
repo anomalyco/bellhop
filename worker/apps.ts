@@ -13,6 +13,7 @@ import {
   reservedSlugs,
   rows,
   scopedGuestId,
+  sha256,
   secret,
   sql,
   str,
@@ -27,29 +28,51 @@ import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 import { appCols, appIdSQL, appKey, appStatement, bySlug, fromAppRow, readBatch } from "./read-scope"
 import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
+import { mentionables } from "./conversation"
+const originScopes = `(SELECT json_group_array(DISTINCT mv.from_app) FROM issue_moves mv WHERE mv.current_app=a.id)`
+const aliasesFor = (cookie: string | null, origins: string) =>
+  Promise.all((cookie ? (JSON.parse(origins) as string[]) : []).map((id) => scopedGuestId(cookie!, id)))
 
 // One authenticated scope lookup for reporter-aware counts/lists, restricted media and sockets.
 export async function viewerApp(c: Ctx, slug: string) {
   const hash = await sessionHash(c),
     row = await sql(
       c.env,
-      `SELECT ${appCols},m.role,s.user_id FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
+      `SELECT ${appCols},m.role,s.user_id,CASE WHEN s.user_id IS NULL THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
       hash,
       now(),
       slug
-    ).first<AppRow & { user_id: string | null }>()
+    ).first<AppRow & { user_id: string | null; origins: string }>()
   if (!row) missing()
-  const { user_id, ...rest } = row,
+  const { user_id, origins, ...rest } = row,
     app = fromAppRow(rest),
     cookie = browserGuest(c)
   const actorId = user_id ?? (cookie ? await scopedGuestId(cookie, app.id) : null)
-  return { app, viewer: { team: can(app.role, "read"), actorId }, user: user_id, session: user_id ? hash : null }
+  return {
+    app,
+    viewer: {
+      team: can(app.role, "read"),
+      actorId,
+      aliases: await aliasesFor(user_id ? null : cookie, origins),
+      voter: user_id ?? (cookie ? "g:" + (await sha256(cookie)) : null)
+    },
+    user: user_id,
+    session: user_id ? hash : null
+  }
 }
 
 export async function loadApp(c: Ctx) {
-  const app = fromAppRow((await appStatement(c.env, bySlug(c)).first<AppRow>()) ?? missing())
+  const { origins, ...row } =
+    (await sql(
+      c.env,
+      `SELECT ${appCols},m.role,${c.var.user ? "'[]'" : originScopes} origins FROM apps a LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
+      c.var.user?.id ?? null,
+      c.req.param("slug")
+    ).first<AppRow & { origins: string }>()) ?? missing()
+  const app = fromAppRow(row)
   c.set("app", app)
+  if (!c.var.user) c.set("aliases", await aliasesFor(c.var.guestId, origins))
   c.set(
     "actor",
     c.var.user
@@ -178,6 +201,10 @@ const seedTemplates = [
   ["Feature request", "Suggest an improvement", "## What would you like to see?\n\n"]
 ] as const
 export const apps = new Hono<Bindings>()
+apps.get("/api/apps/:slug/mentionables", async (c) => {
+  requireTeam(c, "read")
+  return c.json(await mentionables(c.env, c.var.app.id))
+})
 apps.get("/api/apps", async (c) => {
   if (!c.var.user) fail(401, "sign_in", "Sign in to list your apps")
   return c.json(

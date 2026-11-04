@@ -12,21 +12,48 @@ import type {
   IssueRef,
   IssueSummary,
   Member,
+  Mention,
+  IssueSort,
   Moderation,
   Relation,
   TimelineItem
 } from "../shared/api"
-import { bad, choice, fail, missing, now, rows, scopedGuestId, sql, str } from "./core"
-import { actorBindings, commentView, gateOf, outsider, sees, visibleSQL, type Viewer } from "./visibility"
+import { ApiFailure, appUrl, bad, choice, fail, missing, now, rows, sql, str } from "./core"
+import {
+  actorIds,
+  owns,
+  includesComment,
+  actorBindings,
+  commentView,
+  gateOf,
+  outsider,
+  sees,
+  visibleSQL,
+  type Viewer
+} from "./visibility"
+import { voteCount } from "./conversation"
 import { appIdSQL, appKey, readBatch } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 
-const fields = `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,
-  (SELECT count(*) FROM comments WHERE issue_id=i.id) AS comment_count,
+const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
+const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
+const fields = (
+  team: boolean,
+  personal = true
+) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,
+  ${voteCount(team ? "1" : "0", personal ? "(SELECT ids FROM viewer)" : "'[]'")} votes,
+  ${personal ? "EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=(SELECT voter FROM viewer))" : "0"} viewer_voted,
+  (SELECT count(*) FROM comments WHERE issue_id=i.id ${team ? "" : "AND internal=0"}) AS comment_count,
   (SELECT json_group_array(json_object('id',l.id,'name',l.name,'color',l.color,'description',l.description))
     FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id ORDER BY l.name) AS labels`
-type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "labels" | "private" | "hidden"> & {
+type StoredSummary = Omit<
+  IssueSummary,
+  "author" | "assignee" | "activity" | "labels" | "private" | "hidden" | "locked" | "pinned" | "viewer_voted"
+> & {
+  locked: number
+  pinned: number
+  viewer_voted: number
   private: number
   hidden: string | null
   author: string
@@ -48,6 +75,8 @@ function normalizeActor(actor: Actor, roles: Roles): Actor {
   return actor
 }
 export const parseActor = (json: string, roles: Roles) => normalizeActor(JSON.parse(json), roles)
+const parseMentions = (json: string, roles: Roles) =>
+  (JSON.parse(json) as Mention[]).map((m) => ({ ...m, actor: normalizeActor(m.actor, roles) }))
 function moderation(json: string | null, roles: Roles): Moderation | null {
   if (!json) return null
   const m: Moderation = JSON.parse(json)
@@ -92,6 +121,10 @@ function summary(r: StoredSummary, roles: Roles): IssueSummary {
     created_at,
     updated_at,
     comment_count,
+    votes: r.votes,
+    viewer_voted: !!r.viewer_voted,
+    pinned: !!r.pinned,
+    locked: !!r.locked,
     private: !!r.private,
     hidden: moderation(r.hidden, roles),
     author: parseActor(r.author, roles),
@@ -104,9 +137,21 @@ export function ref(i: IssueRef): IssueRef {
   const { id, number, title, status, close_reason } = i
   return { id, number, title, status, close_reason }
 }
-export async function issueSummary(env: Env, appId: string, number: number, team = appRoles(env, appId)) {
+export async function issueSummary(
+  env: Env,
+  appId: string,
+  number: number,
+  team = appRoles(env, appId),
+  v: Viewer = { team: true, actorId: null }
+) {
   const [r, roles] = await Promise.all([
-    sql(env, `SELECT ${fields} FROM issues i WHERE i.app_id=? AND i.number=?`, appId, number).first<StoredSummary>(),
+    sql(
+      env,
+      `WITH ${viewerCTE} SELECT ${fields(v.team)} FROM issues i WHERE i.app_id=? AND i.number=?`,
+      ...viewerArgs(v),
+      appId,
+      number
+    ).first<StoredSummary>(),
     team
   ])
   return r ? summary(r, roles) : missing()
@@ -144,7 +189,7 @@ function issueFilter(workspace: string, options: { label?: unknown; query?: unkn
     if (words?.length) {
       const phrase = words.map((w) => `"${w}"*`).join(" AND ")
       where.push(`(i.rowid IN (SELECT rowid FROM issue_fts WHERE issue_fts MATCH ?) OR i.id IN
-        (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ? ${v.team ? "" : "AND c.hidden IS NULL"}))`)
+        (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ? ${v.team ? "" : "AND c.hidden IS NULL AND c.internal=0"}))`)
       values.push(phrase, phrase)
     } else if (!hidden || query) where.push("0")
   }
@@ -153,7 +198,15 @@ function issueFilter(workspace: string, options: { label?: unknown; query?: unkn
 export async function listIssues(
   env: Env,
   scope: ReadScope,
-  options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number; allStates?: boolean },
+  options: {
+    state?: unknown
+    label?: unknown
+    query?: unknown
+    cursor?: unknown
+    limit?: number
+    allStates?: boolean
+    sort?: unknown
+  },
   viewer: Viewer = outsider
 ): Promise<IssueList> {
   const filter = issueFilter(appIdSQL(scope), options, viewer),
@@ -165,29 +218,69 @@ export async function listIssues(
     ...values
   )
   const state = choice(options.state ?? "open", ["open", "closed"] as const, "state")
-  const cursor = options.cursor ? issueNumber(options.cursor) : null,
+  const sort = choice(options.sort ?? "newest", ["newest", "oldest", "updated", "votes", "comments"] as const, "sort"),
     limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? pageSize)))
+  const metric =
+      sort === "votes" ? "votes" : sort === "comments" ? "comment_count" : sort === "updated" ? "updated_at" : "number",
+    asc = sort === "oldest"
+  let boundary = "",
+    cursorArgs: unknown[] = []
+  if (options.cursor !== undefined) {
+    if (metric === "number") {
+      boundary = `AND number${asc ? ">" : "<"}?`
+      cursorArgs = [issueNumber(options.cursor)]
+    } else {
+      const parts = str(options.cursor, "cursor", 100).split("~")
+      if (
+        parts.length !== 3 ||
+        parts[0] !== sort ||
+        !(sort === "updated" ? /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/ : /^\d+$/).test(parts[1]!)
+      )
+        bad("Invalid issue cursor")
+      boundary = `AND (${metric},number)<(?,?)`
+      cursorArgs = [sort === "updated" ? parts[1] : Number(parts[1]), issueNumber(parts[2])]
+    }
+  }
   const list = sql(
     env,
-    `SELECT ${fields}${base} ${options.allStates ? "" : `AND i.status${state === "open" ? "!=" : "="}'closed'`} ${cursor ? "AND i.number<?" : ""} ORDER BY i.number DESC LIMIT ?`,
+    `WITH ${viewerCTE} SELECT * FROM (SELECT ${fields(viewer.team)}${base} ${options.allStates ? "" : `AND i.status${state === "open" ? "!=" : "="}'closed'`}) WHERE 1 ${boundary} ORDER BY ${metric} ${asc ? "ASC" : "DESC"}${metric === "number" ? "" : ",number DESC"} LIMIT ?`,
+    ...viewerArgs(viewer),
     ...values,
-    ...(cursor ? [cursor] : []),
+    ...cursorArgs,
     limit + 1
   )
   const {
-    data: [items, counts, team]
-  } = await readBatch<[StoredSummary, IssueList["counts"], TeamRow]>(env, scope, [list, totals, teamQuery(env, scope)])
+    data: [items, counts, team, pins]
+  } = await readBatch<[StoredSummary, IssueList["counts"], TeamRow, StoredSummary]>(env, scope, [
+    list,
+    totals,
+    teamQuery(env, scope),
+    sql(
+      env,
+      `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
+      ...viewerArgs(viewer),
+      appKey(scope),
+      ...actorBindings(viewer),
+      options.cursor === undefined ? 3 : 0
+    )
+  ])
   const roles = roleMap(team)
   return {
     issues: items.slice(0, limit).map((r) => summary(r, roles)),
+    pinned: pins.map((r) => summary(r, roles)),
     counts: counts[0]!,
-    next_cursor: items.length > limit ? String(items[limit - 1]!.number) : null
+    next_cursor:
+      items.length > limit
+        ? (metric === "number" ? "" : `${sort}~${items[limit - 1]![metric]}~`) + items[limit - 1]!.number
+        : null
   }
 }
 const feedAppFields = `a.slug,a.name app_name,'/icon/'||a.slug||'/'||a.icon_version icon_url`
 // Resolve the three displayed actors' roles in *their issue's* workspace, not in a global
 // roster. Only enrich the bounded final page, after its global ordering and limit.
-const feedFields = `${fields},${feedAppFields},(SELECT json_group_object(m.user_id,m.role) FROM members m
+const feedFields = (
+  personal = false
+) => `${fields(false, personal)},${feedAppFields},(SELECT json_group_object(m.user_id,m.role) FROM members m
   WHERE m.app_id=i.app_id AND m.user_id IN (json_extract(i.author,'$.id'),json_extract(i.assignee,'$.id'),json_extract(i.activity,'$.actor.id'))) roles`
 type FeedRow = StoredSummary & { slug: string; app_name: string; icon_url: string | null; roles: string }
 function feedIssue(r: FeedRow): FeedIssue {
@@ -199,12 +292,16 @@ function feedIssue(r: FeedRow): FeedIssue {
 export async function publicFeedIssue(env: Env, id: string) {
   const r = await sql(
     env,
-    `SELECT ${feedFields} FROM issues i JOIN apps a ON ${visibleIssues("a.id")} WHERE i.id=? AND a.public=1`,
+    `SELECT ${feedFields()} FROM issues i JOIN apps a ON ${visibleIssues("a.id")} WHERE i.id=? AND a.public=1`,
     id
   ).first<FeedRow>()
   return r ? feedIssue(r) : null
 }
-export async function feed(env: Env, options: { state?: string; q?: string; cursor?: string }): Promise<FeedList> {
+export async function feed(
+  env: Env,
+  options: { state?: string; q?: string; cursor?: string },
+  voter: string | null = null
+): Promise<FeedList> {
   const closed = Number(choice(options.state ?? "open", ["open", "closed"] as const, "state") === "closed"),
     filter = issueFilter("a.id", { query: options.q })
   let boundary = "",
@@ -220,11 +317,13 @@ export async function feed(env: Env, options: { state?: string; q?: string; curs
   const [page, totals] = await env.DB.batch<unknown>([
     sql(
       env,
-      `WITH page AS MATERIALIZED (SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
+      `WITH ${viewerCTE}, page AS MATERIALIZED (SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
       WHERE a.public=1 AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
         ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?)
-      SELECT ${feedFields} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
+      SELECT ${feedFields(true)} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
       ORDER BY p.updated_at DESC,p.id DESC`,
+      voter,
+      "[]",
       ...filter.values,
       closed,
       ...keys,
@@ -266,16 +365,15 @@ export function attachment(a: AttachmentRow): Attachment {
 }
 export async function getIssue(
   env: Env,
-  scope: ReadScope,
+  scope: string,
   number: number,
-  viewer?: Pick<Actor, "id" | "type">,
-  privileged = false
+  v: Viewer = outsider,
+  moved?: { origin: string; viewer: (slug: string) => Promise<Viewer | null> }
 ): Promise<Issue> {
   const where = `app_id=${appIdSQL(scope)} AND number=?`,
     target = `SELECT id FROM issues WHERE ${where}`,
     key = appKey(scope)
   const {
-    app,
     data: [items, team, files, comments, events, relations]
   } = await readBatch<
     [
@@ -284,12 +382,17 @@ export async function getIssue(
         template_id: string | null
         system_info: string | null
         edited_at: string | null
+        mentions: string
       },
       TeamRow,
       AttachmentRow & { comment_id: string | null },
       Pick<Comment, "id" | "body" | "created_at" | "updated_at" | "edited_at"> & {
         author: string
         hidden: string | null
+        internal: number
+        helpful: number
+        viewer_helpful: number
+        mentions: string
       },
       Omit<IssueEvent, "actor" | "data"> & {
         actor: string
@@ -310,7 +413,8 @@ export async function getIssue(
   >(env, scope, [
     sql(
       env,
-      `SELECT ${fields},i.body,i.template_id,i.system_info,i.edited_at FROM issues i WHERE ${where}`,
+      `WITH ${viewerCTE} SELECT ${fields(v.team)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+      ...viewerArgs(v),
       key,
       number
     ),
@@ -324,14 +428,17 @@ export async function getIssue(
     ),
     sql(
       env,
-      `SELECT id,body,created_at,updated_at,author,hidden,edited_at FROM comments WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
+      `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,
+       (SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,EXISTS(SELECT 1 FROM comment_helpful WHERE comment_id=c.id AND voter=?) viewer_helpful
+       FROM comments c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.rowid`,
+      v.voter ?? v.actorId,
       key,
       number
     ),
     sql(
       env,
       `SELECT e.id,e.type,e.actor,e.data,e.created_at,json_extract(other.author,'$.id') ref_author,other.private ref_private,other.hidden ref_hidden
-       FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') WHERE e.issue_id=(${target}) ORDER BY e.created_at,e.rowid`,
+       FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') AND other.app_id=(SELECT app_id FROM issues WHERE id=e.issue_id) WHERE e.issue_id=(${target}) ORDER BY e.created_at,e.rowid`,
       key,
       number
     ),
@@ -347,15 +454,26 @@ export async function getIssue(
   const r = items[0],
     roles = roleMap(team)
   if (!r) {
+    if (moved) {
+      const dest = await sql(
+        env,
+        `SELECT a.slug,i.number,i.private,i.hidden,json_extract(i.author,'$.id') reporter FROM issue_moves mv JOIN issues i ON i.id=mv.issue_id JOIN apps a ON a.id=i.app_id WHERE mv.from_app=? AND mv.from_number=?`,
+        key,
+        number
+      ).first<{ slug: string; number: number; private: number; hidden: string | null; reporter: string }>()
+      if (dest) {
+        const who = await moved.viewer(dest.slug)
+        if (who && sees(who, { reporter: dest.reporter, private: !!dest.private, hidden: !!dest.hidden }))
+          throw new ApiFailure(404, "moved", "Issue transferred", {
+            slug: dest.slug,
+            number: dest.number,
+            url: appUrl(env, moved.origin, dest.slug, `/issues/${dest.number}`)
+          })
+      }
+    }
     if (await sql(env, `SELECT 1 FROM issue_tombstones WHERE ${where}`, key, number).first())
       fail(410, "deleted", "Issue permanently deleted")
     missing()
-  }
-  if (typeof scope !== "string") {
-    privileged = can(app!.role, "read")
-    viewer = scope.user
-      ? { type: "member", id: scope.user }
-      : { type: "guest", id: await scopedGuestId(scope.guest, app!.id) }
   }
   const byParent = new Map<string | null, Attachment[]>()
   for (const a of files) {
@@ -365,7 +483,7 @@ export async function getIssue(
   }
   const s = summary(r, roles),
     timeline: TimelineItem[] = []
-  const v = { team: privileged, actorId: viewer?.id ?? null }
+  const privileged = v.team
   if (!sees(v, gateOf(s))) missing()
   for (const c of comments) {
     const author = parseActor(c.author, roles)
@@ -374,6 +492,10 @@ export async function getIssue(
       comment: commentView(
         {
           ...c,
+          internal: !!c.internal,
+          helpful: c.helpful,
+          viewer_helpful: !!c.viewer_helpful,
+          mentions: parseMentions(c.mentions, roles),
           author,
           by_issue_author: author.id === s.author.id,
           attachments: byParent.get(c.id) ?? [],
@@ -400,10 +522,11 @@ export async function getIssue(
   return {
     ...s,
     edited_at: r.edited_at,
+    mentions: parseMentions(r.mentions, roles),
     body: r.body,
     template_id: r.template_id,
     system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
-    viewer_is_author: viewer?.type === s.author.type && viewer.id === s.author.id,
+    viewer_is_author: owns(v, s.author.id),
     attachments: byParent.get(null) ?? [],
     timeline,
     relations: relations.flatMap(
@@ -415,6 +538,17 @@ export async function getIssue(
   }
 }
 export function summaryOf(issue: Issue): IssueSummary {
-  const { body, template_id, system_info, viewer_is_author, attachments, timeline, relations, edited_at, ...s } = issue
+  const {
+    body,
+    template_id,
+    system_info,
+    viewer_is_author,
+    attachments,
+    timeline,
+    relations,
+    edited_at,
+    mentions,
+    ...s
+  } = issue
   return s
 }

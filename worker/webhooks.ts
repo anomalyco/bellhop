@@ -41,12 +41,19 @@ export async function enqueueWebhook(
   origin: string,
   { app, ...event }: Omit<WebhookPayload, "id" | "created_at" | "mcp_url">
 ) {
-  const url = await sql(env, "SELECT url FROM webhook_settings WHERE app_id=?", app.id).first<string>("url")
-  if (!url) return null
+  const settings = await sql(
+    env,
+    `SELECT url,(SELECT count(*) FROM comments WHERE issue_id=?) comment_count FROM webhook_settings WHERE app_id=?`,
+    event.issue?.id ?? null,
+    app.id
+  ).first<{ url: string | null; comment_count: number }>()
+  if (!settings?.url) return null
+  const url = settings.url
   const id = uid(),
     created_at = now()
   const payload: WebhookPayload = {
     ...event,
+    ...(event.issue ? { issue: { ...event.issue, comment_count: settings.comment_count, viewer_voted: false } } : {}),
     id,
     created_at,
     app: { id: app.id, slug: app.slug, name: app.name },

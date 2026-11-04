@@ -58,7 +58,8 @@
 //   POST   /api/apps/:slug/templates TemplateInput       -> Template           admin
 //   PATCH  /api/apps/:slug/templates/:id TemplateInput   -> Template           admin
 //   DELETE /api/apps/:slug/templates/:id                 -> { ok: true }       admin
-//   GET    /api/apps/:slug/issues?state=open|closed&label=<name>&q=<text>&cursor=  -> IssueList   public; private
+//   GET    /api/apps/:slug/issues?state=open|closed&label=<name>&q=<text>&sort=<IssueSort>&cursor=  -> IssueList
+//          public; private
 //          issues only for the team and their reporter; hidden issues only for the team (q "is:hidden" lists them)
 //   POST   /api/apps/:slug/issues  NewIssue              -> Issue              guest + human, or member
 //   GET    /api/apps/:slug/issues/:number                -> Issue              public (system_info only for the team)
@@ -70,11 +71,20 @@
 //   POST   /api/apps/:slug/issues/:number/hide { reason: ModerationReason } -> Issue   member
 //   DELETE /api/apps/:slug/issues/:number/hide           -> Issue              member; unhide
 //   GET    /api/apps/:slug/issues/:number/history        -> Revision[]         whoever can see the issue; title/body
+//   POST   /api/apps/:slug/issues/:number/vote           -> { votes, viewer_voted }   guest + human, or account ("Me too")
+//   DELETE /api/apps/:slug/issues/:number/vote           -> { votes, viewer_voted }
+//   POST   /api/apps/:slug/issues/:number/transfer { app } -> Issue           member in both apps; moves it to `app`
+//          (slug) with a new number. Labels carry over by name, the assignee only if on that team; relations drop.
+//          The old URL then answers 404 with code "moved" and `moved_to`.
+//   GET    /api/apps/:slug/mentionables                  -> Mentionable[]      team (viewer and up): @ autocomplete
 //   PATCH  /api/apps/:slug/issues/:number/comments/:id { body } -> Comment     the author (guest + human, or account)
 //   DELETE /api/apps/:slug/issues/:number/comments/:id   -> { ok: true }       the author, or member
 //   POST   /api/apps/:slug/issues/:number/comments/:id/hide { reason } -> Comment   member
 //   DELETE /api/apps/:slug/issues/:number/comments/:id/hide -> Comment         member
 //   GET    /api/apps/:slug/issues/:number/comments/:id/history -> Revision[]   whoever can see the comment
+//   POST   /api/apps/:slug/issues/:number/comments/:id/helpful -> { helpful, viewer_helpful }   guest + human, or
+//          account; not the comment's author ("This helped")
+//   DELETE /api/apps/:slug/issues/:number/comments/:id/helpful -> { helpful, viewer_helpful }
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -149,7 +159,8 @@ export type Actor =
   | { type: "agent"; id: string; name: string }
 
 export interface ApiError {
-  error: { code: string; message: string }
+  /** `moved_to` comes with code "moved" (the issue was transferred). */
+  error: { code: string; message: string; moved_to?: { slug: string; number: number; url: string } }
 }
 
 export interface Config {
@@ -242,6 +253,24 @@ export interface Block {
   by: Actor
   created_at: string
 }
+
+/** Someone who can be @mentioned in an app: team members and agents with access. */
+export interface Mentionable {
+  type: "member" | "agent"
+  id: string
+  name: string
+  /** What follows the @: [a-z0-9-], unique in the app, stable while the name doesn't change (e.g. "ryan", "opencode"). */
+  handle: string
+  avatar_url: string | null
+}
+
+/** A resolved @handle in a body. Only posts by the team and agents create mentions; guests' @text stays text. */
+export interface Mention {
+  handle: string
+  actor: Actor
+}
+
+export type IssueSort = "newest" | "oldest" | "votes" | "updated" | "comments"
 
 /** An earlier version of an issue's title/body or a comment's body (newest first; the current one isn't included). */
 export interface Revision {
@@ -380,6 +409,13 @@ export interface IssueSummary extends IssueRef {
   private: boolean
   /** Set when a moderator hid it; only the team and agents see hidden issues. */
   hidden: Moderation | null
+  /** "Me too" votes: distinct voters on this issue and on issues marked duplicate_of it. */
+  votes: number
+  viewer_voted: boolean
+  /** Only the team and agents can comment on a locked issue (votes still work). */
+  locked: boolean
+  /** Pinned issues lead the list (at most 3 per app). */
+  pinned: boolean
 }
 
 export interface Relation {
@@ -401,11 +437,15 @@ export interface Issue extends IssueSummary {
   viewer_is_author: boolean
   /** When the title or body last changed after posting; GET .../history has the earlier versions. */
   edited_at: string | null
+  /** @mentions in the body. */
+  mentions: Mention[]
   timeline: TimelineItem[]
 }
 
 export interface IssueList {
   issues: IssueSummary[]
+  /** The app's pinned issues the viewer may see; on the first page only (no cursor), whatever the filters. */
+  pinned: IssueSummary[]
   counts: { open: number; closed: number }
   next_cursor: string | null
 }
@@ -433,10 +473,16 @@ export interface IssuePatch {
   /** Member id, or null to clear. */
   assignee_id?: string | null
   private?: boolean
+  /** Member. */
+  locked?: boolean
+  /** Member; 409 code "pin_limit" past 3. */
+  pinned?: boolean
 }
 
 export interface NewComment {
   body: string
+  /** Team only: an internal note, seen by the team and agents, never by guests or the reporter. */
+  internal?: boolean
   attachment_ids?: string[]
   /** Guests only: sets the display name (1–40 characters) before posting, same as PUT /api/me/guest. */
   guest_name?: string
@@ -457,6 +503,12 @@ export interface Comment {
   hidden: Moderation | null
   /** True when the viewer wrote it (may edit and delete it). */
   viewer_is_author: boolean
+  /** An internal note: only the team and agents ever receive it (API, live, search, counts, feeds). */
+  internal: boolean
+  /** "This helped" marks. */
+  helpful: number
+  viewer_helpful: boolean
+  mentions: Mention[]
 }
 
 export type IssueEventType =
@@ -472,6 +524,11 @@ export type IssueEventType =
   | "unhidden" // data: {}                           (team-only timeline item)
   | "made_private" // data: {}
   | "made_public" // data: {}
+  | "locked" // data: {}
+  | "unlocked" // data: {}
+  | "pinned" // data: {}
+  | "unpinned" // data: {}
+  | "transferred" // data: { from: { slug: string, number: number } }
 
 export interface IssueEvent {
   id: string
@@ -500,8 +557,10 @@ export type LiveEvent =
   | { type: "comment.updated"; issue_id: string; comment: Comment }
   | { type: "comment.deleted"; issue_id: string; comment_id: string } // issue room
   | { type: "issue.deleted"; issue_id: string; number: number } // list and issue rooms
+  | { type: "issue.moved"; issue_id: string; to: { slug: string; number: number; url: string } } // source app's rooms
 // Rooms filter per socket: private issues and hidden issues/comments only reach sockets whose viewer may see them
-// (the team; for private issues also the reporter). `viewer_*` fields in live payloads describe that socket's viewer.
+// (the team; for private issues also the reporter); internal notes only reach team sockets, and counts
+// (comment_count) are per viewer. `viewer_*` fields in live payloads describe that socket's viewer.
   | { type: "feed.issue"; issue: FeedIssue } // feed room: an issue in a public workspace was opened or changed
 
 // Webhooks. POST to the application's URL with JSON WebhookPayload and headers:
@@ -509,7 +568,10 @@ export type LiveEvent =
 //   Bellhop-Signature: t=<unix seconds>,v1=<hex HMAC-SHA256 of "<t>.<raw body>" with the webhook secret>
 // Retried with backoff on non-2xx or timeout (10 s). Comments written by an agent token are not sent, so an agent
 // never wakes itself.
-export type WebhookEventType = "ping" | "issue.opened" | "issue.updated" | "comment.created"
+// mention.created: once per newly @mentioned team member or agent per write (posting or editing), never for
+// self-mentions; an agent mentioned by another agent does get it (that's how one hands work to another).
+// Internal notes are delivered too, with comment.internal true.
+export type WebhookEventType = "ping" | "issue.opened" | "issue.updated" | "comment.created" | "mention.created"
 
 export interface WebhookPayload {
   id: string
@@ -522,6 +584,8 @@ export interface WebhookPayload {
   actor?: Actor
   /** For issue.updated: which fields changed. */
   changes?: string[]
+  /** For mention.created: who was mentioned (the comment, or the issue body when there is no comment). */
+  mentioned?: Actor
   mcp_url: string
 }
 
@@ -532,16 +596,19 @@ export interface WebhookPayload {
 //   create_app     { name, slug, description? }  grants allowed to create workspaces; the approving user owns it, the
 //                                                  agent joins it as admin
 //   Tool roles: read tools viewer; comment and set_activity responder; triage tools member; workspace setup admin.
-//   list_issues    { state?: "open"|"closed", label?: string, query?: string, limit?: number }
+//   list_issues    { state?: "open"|"closed", label?: string, query?: string, sort?: IssueSort, limit?: number }
 //   get_issue      { number }                    full issue: body, timeline, attachments, relations, system info
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
 //   list_labels    {}
-//   comment        { number, body }              posts with the AI badge; clears the token's activity
+//   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
+//                                                  makes it a team-only note; @handle mentions (list_mentionables)
+//   list_mentionables {}                         team members and agents with their @handles
+//   transfer_issue { number, to_app }            member in both apps
 //   edit_comment   { comment_id, body }          the agent's own comments
 //   moderate       { number, comment_id?, action: "hide"|"unhide", reason? }   member; hides or unhides the issue,
 //                                                  or one comment; reason required for hide
-//   update_issue   { number, status?, close_reason?, labels?: string[] (names), title?, private? }
+//   update_issue   { number, status?, close_reason?, labels?: string[] (names), title?, private?, locked?, pinned? }
 //   relate_issues  { number, other_number, type: RelationType }
 //   claim_issue    { number }                    assigns the agent, adds a "claimed" event
 //   set_activity   { number, text?: string|null, clear?: boolean }   typing dots + short status; expires after 60 s

@@ -102,15 +102,22 @@ async function requireHuman(c: Ctx) {
 export async function allowWrite(c: Ctx) {
   if (
     !c.var.app.role &&
-    (await sql(c.env, "SELECT 1 FROM blocks WHERE app_id=? AND actor_id=?", c.var.app.id, c.var.actor.id).first())
+    (await sql(
+      c.env,
+      "SELECT 1 FROM blocks WHERE app_id=? AND actor_id IN(SELECT value FROM json_each(?))",
+      c.var.app.id,
+      JSON.stringify([c.var.actor.id, ...(c.var.aliases ?? [])])
+    ).first())
   )
     fail(403, "blocked", "You are blocked from writing in this workspace")
   if (!c.var.user) await requireHuman(c)
 }
 export async function postBody(c: Ctx) {
   await allowWrite(c)
-  const b = await body(c),
-    actor = c.var.actor
+  return namedPost(c,await body(c))
+}
+export async function namedPost(c:Ctx,b:Record<string,unknown>){
+  const actor=c.var.actor
   if (actor.type === "guest") {
     const name = b.guest_name === undefined ? actor.name : await saveGuestName(c, b.guest_name, actor.name)
     if (!name) fail(400, "name_required", "Choose a display name before posting")

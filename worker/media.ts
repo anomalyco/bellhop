@@ -126,7 +126,7 @@ media.get("/media/:id/:name", async (c) => {
   c.header("Cache-Control", "private, no-store")
   const a = await sql(
     c.env,
-    `SELECT a.id,a.name,a.mime,a.size,a.kind,a.object_key,a.owner_id,a.app_id,app.slug,l.issue_id,i.private,i.hidden,
+    `SELECT a.id,a.name,a.mime,a.size,a.kind,a.object_key,a.owner_id,a.app_id,app.slug,l.issue_id,i.private,i.hidden,c.internal,
      json_extract(i.author,'$.id') reporter,c.hidden comment_hidden FROM attachments a JOIN apps app ON app.id=a.app_id
      LEFT JOIN attachment_links l ON l.attachment_id=a.id LEFT JOIN issues i ON i.id=l.issue_id LEFT JOIN comments c ON c.id=l.comment_id WHERE a.id=?`,
     c.req.param("id")
@@ -140,11 +140,12 @@ media.get("/media/:id/:name", async (c) => {
       private: number
       hidden: string | null
       comment_hidden: string | null
+      internal: number | null
       reporter: string
     }
   >()
   if (!a || a.name !== c.req.param("name")) missing()
-  const restricted = !a.issue_id || !!a.private || !!a.hidden || !!a.comment_hidden
+  const restricted = !a.issue_id || !!a.private || !!a.hidden || !!a.comment_hidden || !!a.internal
   if (restricted) {
     const { viewer } = await viewerApp(c, a.slug)
     if (c.req.header("Authorization")) {
@@ -157,7 +158,8 @@ media.get("/media/:id/:name", async (c) => {
       !a.issue_id
         ? !viewer.team && viewer.actorId !== a.owner_id
         : !sees(viewer, { private: !!a.private, hidden: !!a.hidden, reporter: a.reporter }) ||
-          !seesComment(viewer, a.comment_hidden)
+          !seesComment(viewer, a.comment_hidden) ||
+          (!!a.internal && !viewer.team)
     )
       missing()
   }

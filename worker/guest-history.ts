@@ -34,28 +34,31 @@ const locations = [
   id: `json_extract(${s.col},'${s.path}.id')`,
   guest: `${s.col === "activity" ? "activity IS NOT NULL AND " : ""}json_extract(${s.col},'${s.path}.type')='guest'`
 }))
-type RoomHit = { previous_id: string; issue_id: string }
-function affectedRooms(env: Env, ids: string) {
+type RoomHit = { previous_id: string; issue_id: string; app_id: string }
+function affectedRooms(env: Env, ids: string, app?: string) {
   return sql(
     env,
-    locations
-      .map(
-        (s) => `SELECT ${s.id} previous_id,${s.issue} issue_id FROM ${s.table}
+    `SELECT hits.*,i.app_id FROM (` +
+      locations
+        .map(
+          (s) => `SELECT ${s.id} previous_id,${s.issue} issue_id FROM ${s.table}
     WHERE ${s.id} IN (SELECT value FROM json_each(?1)) AND ${s.guest}`
-      )
-      .join(" UNION "),
-    ids
+        )
+        .join(" UNION ") +
+      `) hits JOIN issues i ON i.id=hits.issue_id ${app ? "WHERE i.app_id=?2" : ""}`,
+    ids,
+    ...(app ? [app] : [])
   )
 }
 
 export async function renameGuest(c: Ctx, name: string) {
   const statements: D1PreparedStatement[] = [],
-    pages: { result: number; apps: Map<string, string> }[] = []
+    pages: number[] = []
   let populated = 0
   for await (const group of scopes(c)) {
     populated += group.length
     const ids = JSON.stringify(group.map((g) => g.previous))
-    pages.push({ result: statements.length, apps: new Map(group.map((g) => [g.previous, g.id])) })
+    pages.push(statements.length)
     statements.push(affectedRooms(c.env, ids))
     for (const s of locations)
       statements.push(
@@ -84,13 +87,15 @@ export async function renameGuest(c: Ctx, name: string) {
   )
   const result = await c.env.DB.batch<RoomHit>(statements)
   for (const page of pages) {
-    const rooms = new Map<string, string[]>()
-    for (const { previous_id, issue_id } of result[page.result]!.results) {
-      if (!rooms.has(previous_id)) rooms.set(previous_id, [])
-      rooms.get(previous_id)!.push(issue_id)
+    const rooms = new Map<string, { app: string; id: string; issues: string[] }>()
+    for (const { previous_id, issue_id, app_id } of result[page]!.results) {
+      const key = app_id + ":" + previous_id,
+        group = rooms.get(key) ?? { app: app_id, id: previous_id, issues: [] }
+      group.issues.push(issue_id)
+      rooms.set(key, group)
     }
-    for (const [id, issues] of rooms)
-      actorUpdated(c.env, c.executionCtx, page.apps.get(id)!, issues, id, {
+    for (const { id, issues, app } of rooms.values())
+      actorUpdated(c.env, c.executionCtx, app, issues, id, {
         type: "guest",
         id,
         handle: "guest-" + id.slice(0, 4),
@@ -107,7 +112,7 @@ export const guestWrite = (env: Env, hash: string) =>
 async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
   const json = JSON.stringify(actor)
   const [hits, ...updates] = await c.env.DB.batch<RoomHit>([
-    affectedRooms(c.env, JSON.stringify([previous])),
+    affectedRooms(c.env, JSON.stringify([previous]), app),
     ...locations.map((s) =>
       sql(
         c.env,
@@ -174,15 +179,52 @@ export async function claimGuest(c: Ctx, user: User) {
         )
       )
       const ids = new Set(present.map((p) => p.id))
-      for (const g of group) if (ids.has(g.previous)) await claimApp(c, g.id, g.previous, memberActor(user, g.role))
+      for (const g of group)
+        if (ids.has(g.previous)) {
+          await claimApp(c, g.id, g.previous, memberActor(user, g.role))
+          const moved = await rows<{ id: string; role: App["role"] }>(
+            sql(
+              c.env,
+              `SELECT DISTINCT i.app_id id,m.role FROM issue_moves mv JOIN issues i ON i.id=mv.issue_id
+          LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=? WHERE mv.from_app=? AND i.app_id!=?`,
+              user.id,
+              g.id,
+              g.id
+            )
+          )
+          for (const t of moved) await claimApp(c, t.id, g.previous, memberActor(user, t.role))
+        }
     }
-    const done = await sql(
-      c.env,
-      "UPDATE guest_links SET claimed_generation=generation WHERE guest_hash=? AND generation=?",
-      hash,
-      generation
-    ).run()
-    if (done.meta.changes) return
+    const merged = await c.env.DB.batch([
+      sql(
+        c.env,
+        "INSERT OR IGNORE INTO issue_votes SELECT issue_id,? FROM issue_votes WHERE voter=?",
+        user.id,
+        "g:" + hash
+      ),
+      sql(c.env, "DELETE FROM issue_votes WHERE voter=?", "g:" + hash),
+      sql(
+        c.env,
+        `INSERT OR IGNORE INTO comment_helpful SELECT h.comment_id,? FROM comment_helpful h JOIN comments c ON c.id=h.comment_id WHERE h.voter=? AND json_extract(c.author,'$.id')!=?`,
+        user.id,
+        "g:" + hash,
+        user.id
+      ),
+      sql(c.env, "DELETE FROM comment_helpful WHERE voter=?", "g:" + hash),
+      sql(
+        c.env,
+        `DELETE FROM comment_helpful WHERE voter=? AND comment_id IN (SELECT id FROM comments WHERE json_extract(author,'$.id')=?)`,
+        user.id,
+        user.id
+      ),
+      sql(
+        c.env,
+        "UPDATE guest_links SET claimed_generation=generation WHERE guest_hash=? AND generation=?",
+        hash,
+        generation
+      )
+    ])
+    if (merged.at(-1)!.meta.changes) return
   }
   fail(409, "conflict", "Guest posts changed during sign-in; try again")
 }

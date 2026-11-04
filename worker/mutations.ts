@@ -7,6 +7,7 @@ import type {
   Comment,
   IssueEvent,
   IssueRef,
+  IssueSummary,
   Label,
   LiveEvent,
   Block,
@@ -17,12 +18,13 @@ import type {
   TimelineItem
 } from "../shared/api"
 import { assignee, labelCols, selectedLabels } from "./apps"
-import { allowWrite, postBody } from "./auth"
-import { bad, body, choice, denied, ids, input, missing, now, rows, sql, str, uid } from "./core"
-import { can, requireTeam } from "./permissions"
+import { allowWrite, namedPost, postBody } from "./auth"
+import { appUrl, bad, body, choice, denied, fail, ids, input, missing, now, rows, sql, str, uid } from "./core"
+import { agentAccessSQL, can, requireTeam } from "./permissions"
+import { addedMentions, mentionsIn } from "./conversation"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, issueRoom, emit, setActivity } from "./events"
-import { actorBindings, gateOf, sees, seesComment, visibleSQL } from "./visibility"
+import { actorBindings, actorIds, owns, gateOf, sees, seesComment, visibleSQL } from "./visibility"
 import type { Change, Work } from "./events"
 import { guestWrite } from "./guest-history"
 import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, ref, summaryOf } from "./issues"
@@ -35,6 +37,7 @@ export interface Access {
   actor: Actor
   roles?: ReturnType<typeof appRoles>
   guestHash?: string
+  aliases?: string[]
   role: App["role"] | AgentRole
   origin: string
 }
@@ -45,19 +48,35 @@ function access(c: Ctx): Access {
     app: c.var.app,
     actor: c.var.actor,
     guestHash: c.var.guestHash,
+    aliases: c.var.aliases,
     role: c.var.app.role,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
 const roles = (a: Access) => (a.roles ??= appRoles(a.env, a.app.id))
-const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, can(a.role, "read"))
-const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a))
+const who = (a: Access) => ({
+  actorId: a.actor.id,
+  aliases: a.aliases,
+  team: can(a.role, "read"),
+  voter: a.actor.type === "guest" ? "g:" + a.guestHash : a.actor.id
+})
+const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, who(a))
+const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a), who(a))
+const stillHere = (a: Access, id: string) =>
+  sql(a.env, "UPDATE issues SET revision=NULL WHERE id=? AND app_id!=?", id, a.app.id)
 // A rename can commit between loading the request actor and writing its JSON snapshot. Usually this
 // matches no rows; a stale guest would violate NOT NULL and roll back the entire post or event.
 function guestNameGuard(a: Access) {
   const guard = can(a.role, "read")
     ? []
-    : [sql(a.env, "UPDATE blocks SET actor_id=NULL WHERE app_id=? AND actor_id=?", a.app.id, a.actor.id)]
+    : [
+        sql(
+          a.env,
+          "UPDATE blocks SET actor_id=NULL WHERE app_id=? AND actor_id IN(SELECT value FROM json_each(?))",
+          a.app.id,
+          JSON.stringify(actorIds(who(a)))
+        )
+      ]
   return a.actor.type === "guest"
     ? [
         ...guard,
@@ -68,7 +87,10 @@ function guestNameGuard(a: Access) {
 }
 function notify(
   a: Access,
-  payload: Pick<Change, "type" | "issue" | "items" | "changes" | "comments" | "deletedComment">
+  payload: Pick<
+    Change,
+    "type" | "issue" | "items" | "changes" | "comments" | "deletedComment" | "internalOnly" | "mentioned"
+  >
 ) {
   emit(a.env, a.ctx, { app: a.app, origin: a.origin, actor: a.actor, ...payload })
 }
@@ -131,12 +153,13 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       )
     )
   }
+  const mentions = await mentionsIn(env, app.id, text, can(a.role, "read"))
   const q = [
     sql(env, "UPDATE apps SET issue_seq=issue_seq+1 WHERE id=?", app.id),
     sql(
       env,
-      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,private)
-    SELECT ?,id,issue_seq,?,?,?,?,?,?,?,CASE WHEN (reporter_can_choose OR ?) THEN coalesce(?,default_private) ELSE default_private END FROM apps WHERE id=? RETURNING number`,
+      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,private,mentions)
+    SELECT ?,id,issue_seq,?,?,?,?,?,?,?,CASE WHEN (reporter_can_choose OR ?) THEN coalesce(?,default_private) ELSE default_private END,? FROM apps WHERE id=? RETURNING number`,
       id,
       title,
       text,
@@ -147,6 +170,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       at,
       Number(can(a.role, "read")),
       b.private === undefined ? null : Number(b.private),
+      JSON.stringify(mentions),
       app.id
     ),
     ...attach(env, id, null, b.attachment_ids),
@@ -160,34 +184,52 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
   const results = await env.DB.batch<{ number: number }>(q),
     number = results[1]!.results[0]!.number
   const issue = await full(a, number)
-  notify(a, { type: "issue.opened", issue: summaryOf(issue), items })
+  notify(a, { type: "issue.opened", issue: summaryOf(issue), items, mentioned: addedMentions(mentions, [], actor) })
   return issue
 }
-export async function addComment(a: Access, n: number, b: Record<string, unknown>): Promise<Comment> {
+async function commentTarget(a: Access, n: number, b: Record<string, unknown>) {
+  const s = await summary(a, n),
+    v = who(a)
+  if (!sees(v, gateOf(s))) missing()
+  if (b.internal !== undefined && typeof b.internal !== "boolean") bad("Invalid internal flag")
+  if (b.internal === true && !v.team) denied()
+  if (s.locked && !v.team) fail(403, "locked", "Only the team can comment on this locked issue")
+  return s
+}
+export async function addComment(
+  a: Access,
+  n: number,
+  b: Record<string, unknown>,
+  target?: IssueSummary
+): Promise<Comment> {
   const { env, actor, app } = a,
-    s = await summary(a, n),
+    s = target ?? (await commentTarget(a, n, b)),
     at = now(),
     id = uid(),
     text = str(b.body, "body", 65536, true)
   const links = attach(env, s.id, id, b.attachment_ids)
-  const v = { team: can(a.role, "read"), actorId: actor.id }
-  if (!sees(v, gateOf(s))) missing()
+  const v = who(a)
+  const internal = b.internal === true
+  const mentions = await mentionsIn(env, app.id, text, v.team)
   if (!text.trim() && !links.length) bad("A comment needs text or an attachment")
   await env.DB.batch([
     sql(
       env,
-      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?)`,
+      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,1)`,
       id,
       s.id,
       ...actorBindings(v),
       JSON.stringify(actor),
       text,
       at,
-      at
+      at,
+      Number(internal),
+      JSON.stringify(mentions)
     ),
     ...links,
     ...guestNameGuard(a),
-    sql(env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, s.id)
+    stillHere(a, s.id),
+    ...(!internal ? [sql(env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, s.id)] : [])
   ])
   const files = links.length
     ? await rows<AttachmentRow>(
@@ -208,13 +250,19 @@ export async function addComment(a: Access, n: number, b: Record<string, unknown
     updated_at: at,
     hidden: null,
     edited_at: null,
-    viewer_is_author: true
+    viewer_is_author: true,
+    internal,
+    mentions,
+    helpful: 0,
+    viewer_helpful: false
   }
-  if (actor.type === "agent") await setActivity(env, app.id, s.id, actor, null, true)
+  if (actor.type === "agent" && !internal) await setActivity(env, app.id, s.id, actor, null, true)
   notify(a, {
     type: "comment.created",
     issue: await summary(a, n),
-    items: [{ kind: "comment", comment }]
+    items: [{ kind: "comment", comment }],
+    internalOnly: internal,
+    mentioned: addedMentions(mentions, [], actor)
   })
   return comment
 }
@@ -230,7 +278,7 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
   const version = state.revision
   const issue = await full(a, n),
     keys = Object.keys(b),
-    supported = ["title", "body", "status", "close_reason", "label_ids", "assignee_id", "private"]
+    supported = ["title", "body", "status", "close_reason", "label_ids", "assignee_id", "private", "locked", "pinned"]
   if (!can(a.role, "triage")) {
     if (
       !issue.viewer_is_author ||
@@ -261,9 +309,16 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       record(a, issue.id, "renamed", { from: issue.title, to: title }, at, q, items)
     }
   }
+  let mentioned: Actor[] = []
   if (b.body !== undefined) {
     const text = str(b.body, "body", 65536, true)
-    if (text !== issue.body) field("body", text)
+    if (text !== issue.body) {
+      field("body", text)
+      const ms = await mentionsIn(env, app.id, text, can(a.role, "read"))
+      set.push("mentions=?")
+      values.push(JSON.stringify(ms))
+      mentioned = addedMentions(ms, issue.mentions, actor)
+    }
   }
   if (changes.includes("title") || changes.includes("body")) {
     q.push(
@@ -288,6 +343,22 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       record(a, issue.id, b.private ? "made_private" : "made_public", {}, at, q, items)
     }
   }
+  for (const k of ["locked", "pinned"] as const)
+    if (b[k] !== undefined) {
+      if (typeof b[k] !== "boolean") bad(`Invalid ${k} flag`)
+      if (b[k] !== issue[k]) {
+        field(k, Number(b[k]))
+        record(
+          a,
+          issue.id,
+          k === "locked" ? (b[k] ? "locked" : "unlocked") : b[k] ? "pinned" : "unpinned",
+          {},
+          at,
+          q,
+          items
+        )
+      }
+    }
   if (b.status !== undefined || b.close_reason !== undefined) {
     const status = choice(b.status ?? issue.status, ["open", "in_progress", "waiting", "closed"] as const, "status")
     if (b.close_reason !== undefined && status !== "closed") bad("A close reason requires closed status")
@@ -339,9 +410,9 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       issue.id
     )
   )
-  await env.DB.batch([...q, ...guestNameGuard(a)])
+  await env.DB.batch([...q, stillHere(a, issue.id), ...guestNameGuard(a)])
   const next = await full(a, n)
-  notify(a, { type: "issue.updated", issue: summaryOf(next), changes, items })
+  notify(a, { type: "issue.updated", issue: summaryOf(next), changes, items, mentioned })
   return next
 }
 export async function relate(a: Access, n: number, other: number, type: Relation["type"], remove?: string) {
@@ -370,12 +441,185 @@ export async function relate(a: Access, n: number, other: number, type: Relation
   q.push(
     sql(env, "UPDATE issues SET updated_at=max(updated_at,?),revision=revision+1 WHERE id IN (?,?)", at, s.id, t.id)
   )
-  await env.DB.batch(q)
+  await env.DB.batch([...q, stillHere(a, s.id), stillHere(a, t.id)])
   const next = await full(a, n),
     otherSummary = await summary(a, other)
   notify(a, { type: "issue.updated", issue: summaryOf(next), items: items[0], changes: ["relations"] })
   notify(a, { type: "issue.updated", issue: otherSummary, items: items[1], changes: ["relations"] })
   return next
+}
+
+async function react(a: Access, n: number, commentId: string | null, on: boolean) {
+  const thread = commentId ? await full(a, n) : null,
+    issue = thread ?? (await summary(a, n)),
+    v = who(a),
+    value = v.voter,
+    c = thread && commentId ? findComment(thread, commentId) : null
+  if (!sees(v, gateOf(issue))) missing()
+  if (c && !seesComment(v, c.hidden)) missing()
+  if (c?.viewer_is_author) denied()
+  const q = commentId
+    ? sql(
+        a.env,
+        on
+          ? `INSERT INTO comment_helpful SELECT c.id,? FROM comments c JOIN issues i ON i.id=c.issue_id
+    WHERE c.id=? AND i.id=? AND i.app_id=? AND ${visibleSQL(v)} ${v.team ? "" : "AND c.internal=0 AND c.hidden IS NULL"} AND json_extract(c.author,'$.id') NOT IN(SELECT value FROM json_each(?)) ON CONFLICT DO NOTHING`
+          : `DELETE FROM comment_helpful WHERE voter=? AND comment_id IN(SELECT c.id FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.id=? AND i.id=? AND i.app_id=? AND ${visibleSQL(v)} ${v.team ? "" : "AND c.internal=0 AND c.hidden IS NULL"} AND json_extract(c.author,'$.id') NOT IN(SELECT value FROM json_each(?)))`,
+        value,
+        commentId,
+        issue.id,
+        a.app.id,
+        ...actorBindings(v),
+        JSON.stringify(actorIds(v))
+      )
+    : sql(
+        a.env,
+        on
+          ? `INSERT INTO issue_votes SELECT i.id,? FROM issues i WHERE i.id=? AND i.app_id=? AND ${visibleSQL(v)} ON CONFLICT DO NOTHING`
+          : `DELETE FROM issue_votes WHERE voter=? AND issue_id IN(SELECT i.id FROM issues i WHERE i.id=? AND i.app_id=? AND ${visibleSQL(v)})`,
+        value,
+        issue.id,
+        a.app.id,
+        ...actorBindings(v)
+      )
+  const [changed, parents] = await a.env.DB.batch<{ number: number }>([
+    q,
+    sql(
+      a.env,
+      `SELECT i.number FROM relations r JOIN issues i ON i.id=r.target_id WHERE r.source_id=? AND r.type='duplicate_of' AND i.app_id=?`,
+      issue.id,
+      a.app.id
+    ),
+    stillHere(a, issue.id),
+    ...guestNameGuard(a)
+  ])
+  const latest = commentId ? await full(a, n) : null,
+    next = latest ? summaryOf(latest) : await summary(a, n),
+    comment = latest && commentId ? findComment(latest, commentId) : null
+  if (!sees(v, gateOf(next))) missing()
+  if (changed?.meta.changes) {
+    emit(a.env, a.ctx, {
+      app: a.app,
+      origin: a.origin,
+      actor: a.actor,
+      type: "issue.updated",
+      issue: next,
+      comments: comment ? [comment] : [],
+      internalOnly: !!comment?.internal,
+      liveOnly: true
+    })
+    if (!commentId)
+      for (const p of parents!.results)
+        emit(a.env, a.ctx, {
+          app: a.app,
+          origin: a.origin,
+          actor: a.actor,
+          type: "issue.updated",
+          issue: await summary(a, p.number),
+          liveOnly: true
+        })
+  }
+  return comment
+    ? { helpful: comment.helpful, viewer_helpful: comment.viewer_helpful }
+    : { votes: next.votes, viewer_voted: next.viewer_voted }
+}
+
+export async function transferIssue(a: Access, n: number, slug: unknown) {
+  if (!can(a.role, "triage")) denied()
+  const dest = await sql(
+    a.env,
+    "SELECT id,slug,name,public FROM apps WHERE slug=?",
+    str(slug, "target app", 40)
+  ).first<{ id: string; slug: string; name: string; public: number }>()
+  if (!dest) missing()
+  if (dest.id === a.app.id) bad("Choose another workspace")
+  const allowed =
+    a.actor.type === "agent"
+      ? `SELECT count(*) FROM (${agentAccessSQL}) acl WHERE acl.agent_id=? AND acl.app_id IN (?,?) AND acl.role IN ('member','admin')`
+      : `SELECT count(*) FROM members WHERE user_id=? AND app_id IN (?,?) AND role IN ('member','admin','owner')`
+  const version = await sql(
+    a.env,
+    "SELECT revision FROM issues WHERE app_id=? AND number=?",
+    a.app.id,
+    n
+  ).first<number>("revision")
+  if (version === null) missing()
+  const old = await full(a, n),
+    id = old.id,
+    at = now(),
+    q: D1PreparedStatement[] = [
+      sql(
+        a.env,
+        `UPDATE apps SET issue_seq=CASE WHEN (${allowed})=2 THEN issue_seq+1 ELSE NULL END WHERE id=?`,
+        a.actor.id,
+        a.app.id,
+        dest.id,
+        dest.id
+      ),
+      sql(
+        a.env,
+        `SELECT i.number FROM relations r JOIN issues i ON i.id=CASE WHEN r.source_id=?1 THEN r.target_id ELSE r.source_id END WHERE r.source_id=?1 OR r.target_id=?1`,
+        id
+      ),
+      sql(a.env, "INSERT INTO issue_moves(from_app,from_number,issue_id) VALUES(?,?,?)", a.app.id, n, id),
+      sql(
+        a.env,
+        `INSERT OR IGNORE INTO issue_labels SELECT il.issue_id,t.id FROM issue_labels il JOIN labels s ON s.id=il.label_id JOIN labels t ON t.app_id=? AND t.name=s.name WHERE il.issue_id=?`,
+        dest.id,
+        id
+      ),
+      sql(
+        a.env,
+        "DELETE FROM issue_labels WHERE issue_id=? AND label_id NOT IN (SELECT id FROM labels WHERE app_id=?)",
+        id,
+        dest.id
+      ),
+      sql(a.env, "DELETE FROM relations WHERE source_id=? OR target_id=?", id, id),
+      sql(
+        a.env,
+        "UPDATE attachments SET app_id=? WHERE id IN (SELECT attachment_id FROM attachment_links WHERE issue_id=?)",
+        dest.id,
+        id
+      ),
+      sql(
+        a.env,
+        `UPDATE issues SET app_id=?1,number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,activity=NULL,
+      assignee=CASE WHEN json_extract(assignee,'$.id') IN(SELECT user_id FROM members WHERE app_id=?1 UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL) THEN assignee END,
+      updated_at=max(updated_at,?2),revision=CASE WHEN revision=?3 AND app_id=?4 AND number=?5 THEN revision+1 END WHERE id=?6 RETURNING number`,
+        dest.id,
+        at,
+        version,
+        a.app.id,
+        n,
+        id
+      )
+    ],
+    items: TimelineItem[] = []
+  record(a, id, "transferred", { from: { slug: a.app.slug, number: n } }, at, q, items)
+  const results = await a.env.DB.batch<{ number: number }>(q),
+    num = results[7]!.results[0]?.number ?? missing(),
+    to = { slug: dest.slug, number: num, url: appUrl(a.env, a.origin, dest.slug, `/issues/${num}`) }
+  const migrated: Access = { ...a, app: { ...dest, public: !!dest.public }, roles: undefined },
+    issue = await full(migrated, num)
+  const event: LiveEvent = { type: "issue.moved", issue_id: id, to },
+    opts = { app: a.app.id, moved: { gate: gateOf(old), target: dest.id, number: n } }
+  a.ctx.waitUntil(
+    Promise.all([
+      appRoom(a.env, a.app.id).publishConversation([event], opts),
+      issueRoom(a.env, id).publishConversation([event], opts)
+    ])
+  )
+  for (const p of results[1]!.results)
+    emit(a.env, a.ctx, {
+      type: "issue.updated",
+      app: a.app,
+      origin: a.origin,
+      actor: a.actor,
+      issue: await summary(a, p.number),
+      liveOnly: true
+    })
+  notify(migrated, { type: "issue.opened", issue: summaryOf(issue), items })
+  return issue
 }
 export async function removeLabel(a: Access, id: string) {
   const { env, app, actor } = a,
@@ -423,7 +667,8 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
   if (!seesComment({ team: can(a.role, "read"), actorId: a.actor.id }, old.hidden)) missing()
   if (!text.trim() && !old.attachments.length) bad("A comment needs text or an attachment")
   if (text === old.body) return old
-  const v = { team: can(a.role, "read"), actorId: a.actor.id }
+  const v = who(a),
+    ms = await mentionsIn(a.env, a.app.id, text, v.team)
   await a.env.DB.batch([
     sql(
       a.env,
@@ -436,23 +681,32 @@ export async function editComment(a: Access, n: number, id: string, b: Record<st
     ),
     sql(
       a.env,
-      `UPDATE comments SET body=?,edited_at=?,updated_at=?,revision=CASE WHEN body=? AND json_extract(author,'$.id')=? AND
+      `UPDATE comments SET body=?,edited_at=?,updated_at=?,mentions=?,revision=CASE WHEN body=? AND json_extract(author,'$.id') IN(SELECT value FROM json_each(?)) AND
       (${v.team ? "1" : "hidden IS NULL"}) AND EXISTS(SELECT 1 FROM issues i WHERE i.id=comments.issue_id AND ${visibleSQL(v)}) THEN revision+1 END WHERE id=? AND issue_id=?`,
       text,
       at,
       at,
+      JSON.stringify(ms),
       old.body,
-      a.actor.id,
+      JSON.stringify(actorIds(v)),
       ...actorBindings(v),
       id,
       issue.id
     ),
     ...guestNameGuard(a),
-    sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)
+    stillHere(a, issue.id),
+    ...(!old.internal ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, issue.id)] : [])
   ])
   const latest = await full(a, n),
     comment = findComment(latest, id)
-  notify(a, { type: "issue.updated", issue: summaryOf(latest), comments: [comment], changes: ["comment.edited"] })
+  notify(a, {
+    type: "issue.updated",
+    issue: summaryOf(latest),
+    comments: [comment],
+    changes: ["comment.edited"],
+    internalOnly: comment.internal,
+    mentioned: addedMentions(ms, old.mentions, a.actor)
+  })
   return comment
 }
 function purgeFiles(a: Access, files: { object_key: string }[]) {
@@ -468,7 +722,7 @@ async function deleteComment(a: Access, n: number, id: string) {
   const issue = await full(a, n),
     c = findComment(issue, id)
   if (!c.viewer_is_author && !can(a.role, "triage")) denied()
-  const v = { team: can(a.role, "read"), actorId: a.actor.id }
+  const v = who(a)
   const [files, deleted] = await a.env.DB.batch<{ object_key: string }>([
     sql(
       a.env,
@@ -479,14 +733,17 @@ async function deleteComment(a: Access, n: number, id: string) {
     sql(
       a.env,
       `DELETE FROM comments WHERE id=? AND issue_id=? AND EXISTS(SELECT 1 FROM issues i WHERE i.id=comments.issue_id AND ${visibleSQL(v)})
-      AND (? OR json_extract(author,'$.id')=?)`,
+      AND (? OR json_extract(author,'$.id') IN(SELECT value FROM json_each(?)))`,
       id,
       issue.id,
       ...actorBindings(v),
       Number(can(a.role, "triage")),
-      a.actor.id
+      JSON.stringify(actorIds(v))
     ),
-    sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=? AND changes()>0", now(), issue.id),
+    ...(!c.internal
+      ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=? AND changes()>0", now(), issue.id)]
+      : []),
+    stillHere(a, issue.id),
     sql(
       a.env,
       `DELETE FROM webhook_deliveries WHERE app_id=? AND json_extract(payload,'$.comment.id')=? AND NOT EXISTS(SELECT 1 FROM comments WHERE id=?)`,
@@ -498,7 +755,13 @@ async function deleteComment(a: Access, n: number, id: string) {
   ])
   if (!deleted?.meta.changes) missing()
   purgeFiles(a, files!.results)
-  notify(a, { type: "issue.updated", issue: await summary(a, n), deletedComment: id, changes: ["comment.deleted"] })
+  notify(a, {
+    type: "issue.updated",
+    issue: await summary(a, n),
+    deletedComment: id,
+    changes: ["comment.deleted"],
+    internalOnly: c.internal
+  })
 }
 export async function moderate(a: Access, n: number, id: string | null, hide: boolean, reason: unknown) {
   if (!can(a.role, "triage")) denied()
@@ -524,9 +787,9 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
   q.push(
     sql(
       a.env,
-      `UPDATE issues SET ${!c ? "hidden=?," : ""}revision=revision+1,updated_at=max(updated_at,?) WHERE id=?`,
+      `UPDATE issues SET ${!c ? "hidden=?," : ""}revision=revision+1${c?.internal ? "" : ",updated_at=max(updated_at,?)"} WHERE id=?`,
       ...(!c ? [hidden ? JSON.stringify(hidden) : null] : []),
-      at,
+      ...(c?.internal ? [] : [at]),
       issue.id
     )
   )
@@ -539,7 +802,7 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
     q,
     items
   )
-  await a.env.DB.batch(q)
+  await a.env.DB.batch([...q, stillHere(a, issue.id)])
   const next = await full(a, n),
     comment = id ? findComment(next, id) : null
   notify(a, {
@@ -547,13 +810,14 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
     issue: summaryOf(next),
     items,
     comments: comment ? [comment] : [],
-    changes: [c ? "comment.hidden" : "hidden"]
+    changes: [c ? "comment.hidden" : "hidden"],
+    internalOnly: !!c?.internal
   })
   return comment ?? next
 }
 async function deleteIssue(a: Access, n: number) {
   if (!can(a.role, "setup")) denied()
-  const [tomb, files] = await a.env.DB.batch<unknown>([
+  const [tomb, files, parents] = await a.env.DB.batch<unknown>([
     sql(
       a.env,
       `INSERT INTO issue_tombstones SELECT app_id,number FROM issues WHERE app_id=? AND number=? RETURNING number,
@@ -566,6 +830,12 @@ async function deleteIssue(a: Access, n: number) {
     sql(
       a.env,
       "SELECT object_key FROM attachments WHERE id IN(SELECT attachment_id FROM attachment_links WHERE issue_id=(SELECT id FROM issues WHERE app_id=? AND number=?))",
+      a.app.id,
+      n
+    ),
+    sql(
+      a.env,
+      `SELECT i.number FROM issues i JOIN relations r ON r.target_id=i.id WHERE i.app_id=?1 AND r.type='duplicate_of' AND r.source_id=(SELECT id FROM issues WHERE app_id=?1 AND number=?2)`,
       a.app.id,
       n
     ),
@@ -596,21 +866,31 @@ async function deleteIssue(a: Access, n: number) {
   const event: LiveEvent = { type: "issue.deleted", issue_id: g.id, number: n }
   a.ctx.waitUntil(
     Promise.all([
-      appRoom(a.env, a.app.id).publish([event], { deleted: gate }),
-      issueRoom(a.env, g.id).publish([event], { deleted: gate })
+      appRoom(a.env, a.app.id).publishConversation([event], { app: a.app.id, deleted: gate }),
+      issueRoom(a.env, g.id).publishConversation([event], { app: a.app.id, deleted: gate })
     ])
   )
+  for (const p of parents!.results as { number: number }[])
+    emit(a.env, a.ctx, {
+      app: a.app,
+      origin: a.origin,
+      actor: a.actor,
+      type: "issue.updated",
+      issue: await summary(a, p.number),
+      liveOnly: true
+    })
 }
 async function history(a: Access, n: number, id?: string) {
   const issue = await full(a, n),
-    v = { team: can(a.role, "read"), actorId: a.actor.id }
+    v = who(a)
   if (id && !seesComment(v, findComment(issue, id).hidden)) missing()
   const [versions, team] = await Promise.all([
     rows<Omit<Revision, "actor"> & { actor: string }>(
       sql(
         a.env,
         `SELECT r.id,r.actor,r.title,r.body,r.created_at FROM revisions r JOIN issues i ON i.id=r.issue_id
-    LEFT JOIN comments c ON c.id=r.comment_id WHERE r.issue_id=? AND r.comment_id IS ? AND ${visibleSQL(v)} ${v.team ? "" : "AND c.hidden IS NULL"} ORDER BY r.created_at DESC,r.rowid DESC`,
+     LEFT JOIN comments c ON c.id=r.comment_id WHERE i.app_id=? AND r.issue_id=? AND r.comment_id IS ? AND ${visibleSQL(v)} ${v.team ? "" : "AND c.hidden IS NULL AND coalesce(c.internal,0)=0"} ORDER BY r.created_at DESC,r.rowid DESC`,
+        a.app.id,
         issue.id,
         id ?? null,
         ...actorBindings(v)
@@ -720,12 +1000,17 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
           )
           if (!num) continue
           const i = await full(a, num)
+          const comments = i.timeline.flatMap((t) => (t.kind === "comment" && cs.has(t.comment.id) ? [t.comment] : []))
           notify(a, {
             type: "issue.updated",
             issue: summaryOf(i),
             changes: ["moderation"],
             items: i.timeline.filter((t) => t.kind === "event" && t.event.id.startsWith(id + "-")),
-            comments: i.timeline.flatMap((t) => (t.kind === "comment" && cs.has(t.comment.id) ? [t.comment] : []))
+            comments,
+            internalOnly:
+              comments.length > 0 &&
+              comments.every((c) => c.internal) &&
+              !result[3]!.results.some((r) => r.issue_id === iid)
           })
         }
       })()
@@ -733,6 +1018,18 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
   return { id, actor, by: a.actor, created_at: at }
 }
 export const issues = new Hono<Bindings>()
+issues.on(["POST", "DELETE"], `${path}/vote`, async (c) => {
+  await allowWrite(c)
+  return c.json(await react(access(c), issueNumber(c.req.param("number")), null, c.req.method === "POST"))
+})
+issues.on(["POST", "DELETE"], `${path}/comments/:id/helpful`, async (c) => {
+  await allowWrite(c)
+  return c.json(await react(access(c), issueNumber(c.req.param("number")), c.req.param("id"), c.req.method === "POST"))
+})
+issues.post(`${path}/transfer`, async (c) => {
+  requireTeam(c, "triage")
+  return c.json(await transferIssue(access(c), issueNumber(c.req.param("number")), (await body(c)).app))
+})
 issues.delete(path, async (c) => {
   requireTeam(c, "setup")
   await deleteIssue(access(c), issueNumber(c.req.param("number")))
@@ -809,8 +1106,14 @@ issues.patch(path, async (c) => {
   return c.json(await updateIssue(access(c), issueNumber(c.req.param("number")), await body(c)))
 })
 issues.post(`${path}/comments`, async (c) => {
-  const b = await postBody(c)
-  return c.json(await addComment(access(c), issueNumber(c.req.param("number")), b), 201)
+  await allowWrite(c)
+  const n = issueNumber(c.req.param("number")),
+    b = await body(c),
+    a = access(c),
+    target = await commentTarget(a, n, b)
+  await namedPost(c, b)
+  a.actor = c.var.actor
+  return c.json(await addComment(a, n, b, target), 201)
 })
 issues.post(`${path}/relations`, async (c) => {
   requireTeam(c, "triage")

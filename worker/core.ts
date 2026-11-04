@@ -4,7 +4,15 @@ import type { Actor, App, Me } from "../shared/api"
 export type User = NonNullable<Me["user"]>
 export type Bindings = {
   Bindings: Env
-  Variables: { guestId: string; existingGuest: boolean; guestHash: string; user: User | null; app: App; actor: Actor }
+  Variables: {
+    guestId: string
+    existingGuest: boolean
+    guestHash: string
+    aliases: string[]
+    user: User | null
+    app: App
+    actor: Actor
+  }
 }
 export type Ctx = Context<Bindings>
 export const now = () => new Date().toISOString()
@@ -35,7 +43,8 @@ export class ApiFailure extends Error {
   constructor(
     readonly status: ErrorStatus,
     readonly code: string,
-    message: string
+    message: string,
+    readonly moved_to?: { slug: string; number: number; url: string }
   ) {
     super(message)
   }
@@ -89,6 +98,20 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("outdated comment writer") || message.includes("internal notes not enabled"))
+    return new ApiFailure(
+      503,
+      "conversation_upgrading",
+      "Conversation permissions are being upgraded; try again shortly"
+    )
+  if (message.includes("internal notes require team"))
+    return new ApiFailure(403, "forbidden", "Team membership required for internal notes")
+  if (message.includes("NOT NULL constraint failed: apps.issue_seq"))
+    return new ApiFailure(403, "forbidden", "Transfer requires triage access in both workspaces")
+  if (message.includes("workspace pin limit"))
+    return new ApiFailure(409, "pin_limit", "A workspace can pin at most three issues")
+  if (message.includes("issue is locked"))
+    return new ApiFailure(403, "locked", "Only the team can comment on this locked issue")
   if (message.includes("actor blocked") || message.includes("NOT NULL constraint failed: blocks.actor_id"))
     return new ApiFailure(403, "blocked", "You are blocked from writing in this workspace")
   if (message.includes("NOT NULL constraint failed: comments.issue_id"))
