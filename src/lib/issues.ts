@@ -1,4 +1,4 @@
-import type { Activity, Actor, AppDetail, Comment, Issue, IssueList, IssueRef, IssueSummary, TimelineItem } from "../../shared/api"
+import type { Activity, Actor, AppDetail, Comment, Issue, IssueList, IssueRef, IssueSort, IssueSummary, TimelineItem } from "../../shared/api"
 import type { VisibleState } from "../ui/primitives"
 import { api, keys } from "./api"
 import { entries, load, peek, prefetch, setData, updateAll } from "./cache"
@@ -7,7 +7,11 @@ export interface Filter {
   state: "open" | "closed"
   label: string
   text: string
+  /** `sort:votes` and friends; absent means newest first. */
+  sort?: IssueSort
 }
+
+const sorts: IssueSort[] = ["newest", "oldest", "votes", "updated", "comments"]
 
 const token = /(\w+):("[^"]*"|\S+)|("[^"]*"|\S+)/g
 
@@ -20,6 +24,7 @@ export function parseQuery(q: string): Filter {
     const unquoted = (value ?? "").replace(/^"|"$/g, "")
     if (key === "is" && (unquoted === "open" || unquoted === "closed")) filter.state = unquoted
     else if (key === "label") filter.label = unquoted
+    else if (key === "sort" && sorts.includes(unquoted as IssueSort)) filter.sort = unquoted === "newest" ? undefined : (unquoted as IssueSort)
     else words.push(word ?? m[0])
   }
   filter.text = words.join(" ")
@@ -29,11 +34,16 @@ export function parseQuery(q: string): Filter {
 export function formatQuery(f: Filter) {
   const parts = [`is:${f.state}`]
   if (f.label) parts.push(`label:${/\s/.test(f.label) ? `"${f.label}"` : f.label}`)
+  if (f.sort && f.sort !== "newest") parts.push(`sort:${f.sort}`)
   if (f.text) parts.push(f.text)
   return parts.join(" ")
 }
 
-export const listKey = (slug: string, f: Filter) => `${keys.lists(slug)}${f.state}|${f.label}|${f.text}`
+export const listKey = (slug: string, f: Filter) => `${keys.lists(slug)}${f.state}|${f.label}|${f.text}|${f.sort ?? "newest"}`
+
+/** One page of an app's issue list for `f`. */
+export const fetchList = (slug: string, f: Filter, cursor?: string) =>
+  api.issues(slug, { state: f.state, label: f.label, q: f.text, sort: f.sort, cursor })
 
 export function visibleState(issue: Pick<IssueRef, "status" | "close_reason">): VisibleState {
   if (issue.status !== "closed") return issue.status
@@ -84,18 +94,28 @@ export function applySummary(slug: string, summary: IssueSummary, created = fals
   if (created || previous) bumpCounts(slug, created ? null : (previous?.status ?? null), summary)
 
   updateAll<IssueList>(keys.lists(slug), (list, key) => {
+    const pinned = pinnedAfter(list.pinned, summary)
     const at = list.issues.findIndex((i) => i.id === summary.id)
     const fits = matches(summary, key, slug)
-    if (at >= 0 && !fits) return { ...list, issues: list.issues.filter((i) => i.id !== summary.id) }
-    if (at >= 0) return { ...list, issues: list.issues.map((i) => (i.id === summary.id ? summary : i)) }
-    if (!fits) return undefined
+    if (at >= 0 && !fits) return { ...list, pinned, issues: list.issues.filter((i) => i.id !== summary.id) }
+    if (at >= 0) return { ...list, pinned, issues: list.issues.map((i) => (i.id === summary.id ? summary : i)) }
+    // Only newest-first lists take new arrivals; other orders would need the server's ranking.
+    const newest = (key.split("|")[3] ?? "newest") === "newest"
+    if (!fits || !newest) return pinned === list.pinned ? undefined : { ...list, pinned }
     // Lists are newest first; only insert when the issue falls within the loaded range.
     const last = list.issues[list.issues.length - 1]
-    if (list.next_cursor && last && summary.number < last.number) return undefined
+    if (list.next_cursor && last && summary.number < last.number) return pinned === list.pinned ? undefined : { ...list, pinned }
     const issues = [...list.issues, summary].sort((a, b) => b.number - a.number)
-    return { ...list, issues }
+    return { ...list, pinned, issues }
   })
   setData<Issue>(keys.issue(slug, summary.number), (issue) => (issue ? { ...issue, ...summary } : issue))
+}
+
+/** The pinned strip after `summary` changed: in or out of it, or updated in place (absent on later pages). */
+function pinnedAfter(pinned: IssueSummary[] = [], summary: IssueSummary): IssueSummary[] {
+  const at = pinned.findIndex((i) => i.id === summary.id)
+  if (summary.pinned) return at >= 0 ? pinned.map((i) => (i.id === summary.id ? summary : i)) : [...pinned, summary]
+  return at >= 0 ? pinned.filter((i) => i.id !== summary.id) : pinned
 }
 
 const sameActivity = (a: Activity | null, b: Activity | null) =>
@@ -168,19 +188,34 @@ export function removeComment(slug: string, issueId: string, commentId: string) 
     )
 }
 
-/** An issue was deleted: out of every list, one less in its tab's count, and its page says so. */
-export function removeIssue(slug: string, issueId: string, number: number) {
-  const known = peek<Issue>(keys.issue(slug, number)) ?? findSummary(slug, number)
+/** An issue left this app (deleted or moved): out of every list and the pinned strip, one less in its tab's count. */
+export function dropIssue(slug: string, issueId: string, number?: number) {
+  const known =
+    (number ? (peek<Issue>(keys.issue(slug, number)) ?? findSummary(slug, number)) : undefined) ??
+    entries<IssueList>(keys.lists(slug))
+      .flatMap(([, l]) => l.issues)
+      .find((i) => i.id === issueId)
   updateAll<IssueList>(keys.lists(slug), (list) => {
     const hit = list.issues.find((i) => i.id === issueId)
-    if (!hit) return undefined
-    const side = hit.status === "closed" ? "closed" : "open"
-    return { ...list, issues: list.issues.filter((i) => i.id !== issueId), counts: { ...list.counts, [side]: Math.max(0, list.counts[side] - 1) } }
+    const pinned = list.pinned?.some((i) => i.id === issueId)
+    if (!hit && !pinned) return undefined
+    const side = hit?.status === "closed" ? "closed" : "open"
+    return {
+      ...list,
+      pinned: (list.pinned ?? []).filter((i) => i.id !== issueId),
+      issues: list.issues.filter((i) => i.id !== issueId),
+      counts: hit ? { ...list.counts, [side]: Math.max(0, list.counts[side] - 1) } : list.counts,
+    }
   })
   if (known) {
     const side = known.status === "closed" ? "closed" : "open"
     setData<AppDetail>(keys.app(slug), (app) => (app ? { ...app, counts: { ...app.counts, [side]: Math.max(0, app.counts[side] - 1) } } : app))
   }
+}
+
+/** An issue was deleted: out of every list, and its page says so. */
+export function removeIssue(slug: string, issueId: string, number: number) {
+  dropIssue(slug, issueId, number)
   markDeleted(slug, number)
 }
 
@@ -216,7 +251,7 @@ export function prefetchIssue(slug: string, number: number) {
 }
 
 export function prefetchList(slug: string, filter: Filter) {
-  prefetch(listKey(slug, filter), () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text }))
+  prefetch(listKey(slug, filter), () => fetchList(slug, filter))
 }
 
 const isActor = (v: unknown): v is Actor =>

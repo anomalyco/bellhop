@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client"
 import { Route, Switch } from "wouter"
 import { api, keys, loadConfig, loadMe } from "./lib/api"
 import { load } from "./lib/cache"
-import { listKey, parseQuery } from "./lib/issues"
+import { fetchList, listKey, parseQuery } from "./lib/issues"
 import { appPath, hostSlug, onHome } from "./lib/site"
 import { Feed, feedKey, fetchFeed } from "./routes/Feed"
 import { NewWorkspacePage, WorkspacesPage } from "./routes/Home"
@@ -52,7 +52,7 @@ function warmInitialRoute() {
   if (subpath === "/" || subpath === "") {
     const q = new URLSearchParams(window.location.search).get("q") ?? "is:open"
     const filter = parseQuery(q)
-    load(listKey(slug, filter), () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text })).catch(() => {})
+    load(listKey(slug, filter), () => fetchList(slug, filter)).catch(() => {})
     return
   }
   const issueMatch = /^\/issues\/([1-9]\d*)$/.exec(subpath)

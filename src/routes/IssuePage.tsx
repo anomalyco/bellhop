@@ -9,6 +9,7 @@ import {
   applyActivity,
   applyActorUpdate,
   applySummary,
+  dropIssue,
   findSummary,
   isDeleted,
   onDeleted,
@@ -18,11 +19,11 @@ import {
   storeIssue,
 } from "../lib/issues"
 import { useLive } from "../lib/live"
-import { appPath } from "../lib/site"
+import { appPath, isAbsolute } from "../lib/site"
 import { loadMarkdown } from "../ui/Markdown"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
 import { IssueView } from "./issue/IssueView"
-import { DeletedIssue } from "./issue/Moderation"
+import { DeletedIssue, MovedIssue } from "./issue/Moderation"
 import type { IssueModel } from "./issue/model"
 import { relationRequest, type IssueActions, type RelationKind } from "./issue/Properties"
 
@@ -48,6 +49,8 @@ interface Pending {
   attachmentIds: string[]
   /** Sent as guest_name by a guest naming themselves with this post. */
   guestName?: string
+  /** A team note rather than a reply. */
+  internal?: boolean
   error?: string
 }
 
@@ -69,6 +72,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const [, navigate] = useLocation()
   // Deleted while open (live) or by us: say so in place of the issue.
   const [gone, setGone] = useState(() => isDeleted(slug, number))
+  // Moved to another workspace while open: offer the new place rather than pulling the page away.
+  const [movedTo, setMovedTo] = useState<{ slug: string; number: number; url: string } | null>(null)
   useEffect(() => onDeleted(() => setGone(isDeleted(slug, number))), [slug, number])
 
   useEffect(() => {
@@ -111,6 +116,10 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
         case "issue.deleted":
           removeIssue(slug, event.issue_id, event.number)
           break
+        case "issue.moved":
+          dropIssue(slug, event.issue_id, number)
+          setMovedTo(event.to)
+          break
       }
     },
     (reconnected) => {
@@ -119,6 +128,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   )
 
   if (gone || (error instanceof ApiFailure && (error.status === 410 || error.code === "deleted"))) return <DeletedIssue slug={slug} number={number} />
+  if (movedTo) return <MovedIssue number={number} to={movedTo} />
+  if (error instanceof ApiFailure && error.code === "moved" && error.movedTo) return <MovedIssue number={number} to={error.movedTo} redirect />
   if (!issue) {
     if (error) return <ErrorPage error={error} />
     return <IssueLoading slug={slug} number={number} />
@@ -194,6 +205,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
         body: p.body,
         attachment_ids: p.attachmentIds.length ? p.attachmentIds : undefined,
         guest_name: guestName,
+        internal: p.internal || undefined,
       })
       appendTimeline(slug, number, { kind: "comment", comment })
       setPending((list) => list.filter((x) => x.id !== p.id))
@@ -209,8 +221,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     }
   }
 
-  const postComment = (body: string, attachmentIds: string[], guestName?: string) => {
-    const p: Pending = { id: `pending-${Date.now()}`, body, attachmentIds, guestName }
+  const postComment = (body: string, attachmentIds: string[], guestName?: string, internal?: boolean) => {
+    const p: Pending = { id: `pending-${Date.now()}`, body, attachmentIds, guestName, internal }
     setPending((list) => [...list, p])
     return send(p)
   }
@@ -237,6 +249,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       id: p.id,
       body: p.body,
       name: p.guestName,
+      internal: p.internal,
       note: p.error ? (
         <span className="pending-error">
           Not sent: {p.error}{" "}
@@ -260,6 +273,31 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     },
     onPrivacy: (next) => run({ private: next }, () => api.patchIssue(slug, number, { private: next })),
     onHide: (reason) => run(null, () => (reason ? api.hideIssue(slug, number, reason) : api.unhideIssue(slug, number))),
+    onVote: async (on) => {
+      const before = current()
+      setActionError(null)
+      storeIssue(slug, { ...before, viewer_voted: on, votes: Math.max(0, (before.votes ?? 0) + (on ? 1 : -1)) })
+      try {
+        await ensureHuman(!!me?.user)
+        const r = await api.vote(slug, number, on)
+        storeIssue(slug, { ...current(), ...r })
+      } catch (e) {
+        storeIssue(slug, { ...current(), viewer_voted: before.viewer_voted, votes: before.votes })
+        setActionError(errorMessage(e))
+      }
+    },
+    onLock: async (on) => storeIssue(slug, await api.patchIssue(slug, number, { locked: on })),
+    onPin: async (on) => storeIssue(slug, await api.patchIssue(slug, number, { pinned: on })),
+    onTransfer: async (to) => {
+      const moved = await api.transferIssue(slug, number, to)
+      dropIssue(slug, issue.id, number)
+      const href = appPath(to, `/issues/${moved.number}`)
+      if (isAbsolute(href)) window.location.assign(href)
+      else {
+        storeIssue(to, moved)
+        navigate(href)
+      }
+    },
     onDelete: async () => {
       setActionError(null)
       try {

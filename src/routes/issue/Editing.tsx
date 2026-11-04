@@ -71,6 +71,7 @@ export function BodyForm({ app, issue, onDone }: { app: AppDetail; issue: Issue;
         value={body}
         onChange={setBody}
         member={!!app.role}
+        mentions={!!app.role}
         onAttachment={() => {}}
         onBusyChange={setBusy}
         onSubmit={save}

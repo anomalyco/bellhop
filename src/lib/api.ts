@@ -1,5 +1,6 @@
 import type {
   AgentAccess,
+  ApiError,
   App,
   AppAgent,
   AppDetail,
@@ -16,7 +17,9 @@ import type {
   IssuePatch,
   LabelInput,
   Label,
+  IssueSort,
   Me,
+  Mentionable,
   ModerationReason,
   NewApp,
   NewComment,
@@ -38,6 +41,8 @@ export class ApiFailure extends Error {
     readonly status: number,
     readonly code: string,
     message: string,
+    /** Where a transferred issue went (code "moved"). */
+    readonly movedTo?: { slug: string; number: number; url: string },
   ) {
     super(message)
   }
@@ -53,8 +58,8 @@ export function errorMessage(error: unknown): string {
 }
 
 async function failure(res: Response) {
-  const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null
-  return new ApiFailure(res.status, body?.error?.code ?? `http_${res.status}`, body?.error?.message ?? res.statusText)
+  const body = (await res.json().catch(() => null)) as ApiError | null
+  return new ApiFailure(res.status, body?.error?.code ?? `http_${res.status}`, body?.error?.message ?? res.statusText, body?.error?.moved_to)
 }
 
 const seenKey = "bh_seen"
@@ -156,10 +161,11 @@ export const api = {
   patchTemplate: (slug: string, id: string, input: TemplateInput) =>
     request<Template>("PATCH", `${app(slug)}/templates/${enc(id)}`, input),
   deleteTemplate: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/templates/${enc(id)}`),
-  issues: (slug: string, params: { state: "open" | "closed"; label?: string; q?: string; cursor?: string }) => {
+  issues: (slug: string, params: { state: "open" | "closed"; label?: string; q?: string; sort?: IssueSort; cursor?: string }) => {
     const qs = new URLSearchParams({ state: params.state })
     if (params.label) qs.set("label", params.label)
     if (params.q) qs.set("q", params.q)
+    if (params.sort && params.sort !== "newest") qs.set("sort", params.sort)
     if (params.cursor) qs.set("cursor", params.cursor)
     return get<IssueList>(`${app(slug)}/issues?${qs}`)
   },
@@ -169,6 +175,12 @@ export const api = {
   deleteIssue: (slug: string, number: number) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}`),
   hideIssue: (slug: string, number: number, reason: ModerationReason) => request<Issue>("POST", `${app(slug)}/issues/${number}/hide`, { reason }),
   unhideIssue: (slug: string, number: number) => request<Issue>("DELETE", `${app(slug)}/issues/${number}/hide`),
+  vote: (slug: string, number: number, on: boolean) =>
+    request<{ votes: number; viewer_voted: boolean }>(on ? "POST" : "DELETE", `${app(slug)}/issues/${number}/vote`),
+  helpful: (slug: string, number: number, id: string, on: boolean) =>
+    request<{ helpful: number; viewer_helpful: boolean }>(on ? "POST" : "DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}/helpful`),
+  transferIssue: (slug: string, number: number, to: string) => request<Issue>("POST", `${app(slug)}/issues/${number}/transfer`, { app: to }),
+  mentionables: (slug: string) => get<Mentionable[]>(`${app(slug)}/mentionables`),
   issueHistory: (slug: string, number: number) => get<Revision[]>(`${app(slug)}/issues/${number}/history`),
   patchComment: (slug: string, number: number, id: string, body: string) =>
     request<Comment>("PATCH", `${app(slug)}/issues/${number}/comments/${enc(id)}`, { body }),
@@ -222,6 +234,7 @@ export const keys = {
   /** Earlier versions of an issue (commentId omitted) or of one comment. */
   history: (slug: string, number: number, commentId?: string) => `history:${slug}:${number}:${commentId ?? "issue"}`,
   blocks: (slug: string) => `blocks:${slug}`,
+  mentionables: (slug: string) => `mentionables:${slug}`,
   /** All list pages of one app share this prefix; the rest of the key is the filter. */
   lists: (slug: string) => `issues:${slug}:`,
 }

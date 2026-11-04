@@ -1092,9 +1092,8 @@ a.box-row:hover {
   margin: 0;
 }
 .markdown blockquote {
-  padding: 0 12px;
+  padding: 0 0 0 16px;
   color: var(--fg-muted);
-  border-left: 2px solid var(--border-strong);
 }
 .markdown code {
   padding: 1px 5px;

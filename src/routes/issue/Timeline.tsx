@@ -5,7 +5,21 @@ import { appPath } from "../../lib/site"
 import { Time, useUntil } from "../../lib/time"
 import { formatSize } from "../../lib/upload"
 import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
-import { ChevronDownIcon, EyeOffIcon, ImageIcon, LinkIcon, LockIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon } from "../../ui/icons"
+import {
+  ArrowUpIcon,
+  ChevronDownIcon,
+  CommentIcon,
+  EyeOffIcon,
+  ImageIcon,
+  LinkIcon,
+  LockIcon,
+  PaperclipIcon,
+  PersonIcon,
+  PinIcon,
+  StatusIcon,
+  TagIcon,
+  VideoIcon,
+} from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Dots, Label } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
@@ -19,15 +33,17 @@ export function MessageGroup({
   byAuthor,
   messages,
   ctx,
+  internal,
 }: {
   slug: string
   author: Actor
   byAuthor: boolean
   messages: MessageEntry[]
   ctx: CommentContext
+  internal?: boolean
 }) {
   return (
-    <section className="group">
+    <section className="group" data-internal={internal || undefined}>
       <header className="group-head">
         <span className="group-avatar" data-reporter={byAuthor || undefined} title={byAuthor ? `${actorName(author)} opened this issue` : undefined}>
           <ActorAvatar actor={author} size={20} />
@@ -36,12 +52,17 @@ export function MessageGroup({
         <span className="group-time">
           <Time iso={messages[0]!.createdAt} />
         </span>
+        {internal && (
+          <span className="note-label">
+            Internal note<span className="note-label-more"> · only the team and agents see this</span>
+          </span>
+        )}
       </header>
       {messages.map((m) => {
         const loose = m.attachments.filter((a) => !m.body.includes(a.url))
         const content = (
           <>
-            <Markdown source={m.body} slug={slug} />
+            <Markdown source={m.body} slug={slug} mentions={m.comment?.mentions} />
             {loose.length > 0 && <AttachmentList attachments={loose} />}
           </>
         )
@@ -200,6 +221,34 @@ export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode
       icon = <LockIcon size={14} />
       body = "made this public"
       break
+    case "locked":
+      icon = <CommentIcon size={14} />
+      body = "locked the conversation to the team"
+      break
+    case "unlocked":
+      icon = <CommentIcon size={14} />
+      body = "unlocked the conversation"
+      break
+    case "pinned":
+      icon = <PinIcon size={14} />
+      body = "pinned this"
+      break
+    case "unpinned":
+      icon = <PinIcon size={14} />
+      body = "unpinned this"
+      break
+    case "transferred": {
+      const from = d.from as { slug?: string; number?: number } | undefined
+      icon = <ArrowUpIcon size={14} style={{ transform: "rotate(90deg)" }} />
+      body = from?.slug ? (
+        <>
+          moved this from <span className="mono">{from.slug}</span> #{from.number}
+        </>
+      ) : (
+        "moved this here from another workspace"
+      )
+      break
+    }
     default:
       body = "updated this"
   }

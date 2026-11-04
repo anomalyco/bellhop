@@ -14,12 +14,12 @@ export interface IssueModel {
   viewer: Actor | null
   actions: IssueActions
   /** Comments still on their way, each with a "Sending…" or "Not sent: … Retry · Discard" note. */
-  pending: { id: string; body: string; note: ReactNode; name?: string }[]
+  pending: { id: string; body: string; note: ReactNode; name?: string; internal?: boolean }[]
   actionError: string | null
   /** The server asked for a guest name (400 name_required); the composer shows and focuses the field. */
   askName: boolean
-  /** Posts a comment; `guestName` goes along for guests who are naming themselves. */
-  onComment: (body: string, attachmentIds: string[], guestName?: string) => Promise<boolean>
+  /** Posts a comment (or, for the team, an internal note); `guestName` goes along for guests naming themselves. */
+  onComment: (body: string, attachmentIds: string[], guestName?: string, internal?: boolean) => Promise<boolean>
   onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
   onDuplicate: (other: number) => Promise<void>
   /** Team (or the reporter, when the workspace lets them choose): make the issue private or public. */
@@ -28,6 +28,13 @@ export interface IssueModel {
   onHide: (reason: ModerationReason | null) => Promise<void>
   /** Admins: delete for good. */
   onDelete: () => Promise<void>
+  /** "Me too": anyone (guests pass the human check). */
+  onVote: (on: boolean) => Promise<void>
+  /** Team: lock or unlock the conversation; pin or unpin (409 past three). Errors reach the caller. */
+  onLock: (on: boolean) => Promise<void>
+  onPin: (on: boolean) => Promise<void>
+  /** Team: move to another workspace, then go there. */
+  onTransfer: (to: string) => Promise<void>
 }
 
 export interface MessageEntry {
@@ -41,6 +48,8 @@ export interface MessageEntry {
   note?: ReactNode
   /** The comment itself (absent while still sending), for its menu, hidden state and "edited". */
   comment?: Comment
+  /** An internal note (team only). */
+  internal: boolean
 }
 
 /** A hidden comment, as people outside the team see it: no author, no text. */
@@ -65,6 +74,8 @@ export function entries(model: IssueModel): Entry[] {
   for (const item of issue.timeline) {
     if (item.kind === "comment") {
       const c = item.comment
+      // Notes are the team's; the server never sends them to anyone else, and the page never shows one if it did.
+      if (c.internal && !member) continue
       if (c.hidden && !member) list.push({ kind: "hidden", key: c.id, reason: c.hidden.reason })
       else
         list.push({
@@ -76,6 +87,7 @@ export function entries(model: IssueModel): Entry[] {
           attachments: c.attachments,
           byAuthor: c.by_issue_author,
           comment: c,
+          internal: !!c.internal,
         })
     } else list.push({ kind: "event", key: item.event.id, event: item.event })
   }
@@ -90,12 +102,13 @@ export function entries(model: IssueModel): Entry[] {
         attachments: [],
         byAuthor: issue.viewer_is_author,
         note: p.note,
+        internal: !!p.internal,
       })
   return list
 }
 
 export type Block =
-  | { kind: "run"; key: string; author: Actor; byAuthor: boolean; messages: MessageEntry[] }
+  | { kind: "run"; key: string; author: Actor; byAuthor: boolean; internal: boolean; messages: MessageEntry[] }
   | { kind: "events"; key: string; events: IssueEvent[] }
   | { kind: "hidden"; key: string; reason: ModerationReason }
 
@@ -107,8 +120,9 @@ export function blocks(list: Entry[]): Block[] {
   for (const e of list) {
     const last = out[out.length - 1]
     if (e.kind === "message") {
-      if (last?.kind === "run" && sameActor(last.author, e.author)) last.messages.push(e)
-      else out.push({ kind: "run", key: e.key, author: e.author, byAuthor: e.byAuthor, messages: [e] })
+      // Notes and replies never share a run, so a note always reads as one.
+      if (last?.kind === "run" && sameActor(last.author, e.author) && last.internal === e.internal) last.messages.push(e)
+      else out.push({ kind: "run", key: e.key, author: e.author, byAuthor: e.byAuthor, internal: e.internal, messages: [e] })
     } else if (e.kind === "hidden") out.push(e)
     else if (last?.kind === "events") last.events.push(e.event)
     else out.push({ kind: "events", key: e.key, events: [e.event] })

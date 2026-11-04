@@ -1,19 +1,20 @@
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+import { useLocation } from "wouter"
 import type { Actor, AppDetail, Comment, Issue, ModerationReason, Revision } from "../../../shared/api"
 import { api, errorMessage, keys } from "../../lib/api"
 import { load, useResource } from "../../lib/cache"
 import { ensureHuman } from "../../lib/human"
 import { removeComment, replaceComment } from "../../lib/issues"
-import { appPath } from "../../lib/site"
+import { appPath, isAbsolute } from "../../lib/site"
 import { Time } from "../../lib/time"
 import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
 import { Editor } from "../../ui/Editor"
-import { EyeOffIcon, KebabIcon, LockIcon } from "../../ui/icons"
+import { CommentIcon, EyeOffIcon, KebabIcon, LockIcon, PinIcon, ThumbIcon } from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Menu, MenuHeader, MenuItem } from "../../ui/Menu"
 import { Button } from "../../ui/primitives"
 import { Page } from "../../ui/Shell"
-import { AppLink } from "../../ui/SiteLink"
+import { AppLink, SiteLink } from "../../ui/SiteLink"
 import "../../styles/moderation.css"
 
 export const reasons: { value: ModerationReason; label: string }[] = [
@@ -85,9 +86,27 @@ function History({ slug, number, commentId }: { slug: string; number: number; co
 
 /** The lock and eye markers under an issue's title, each with who can see it. */
 export function IssueFlags({ issue }: { issue: Issue }) {
-  if (!issue.private && !issue.hidden) return null
+  if (!issue.private && !issue.hidden && !issue.locked && !issue.pinned) return null
   return (
     <div className="report-flags">
+      {issue.pinned && (
+        <p className="flag-line">
+          <span className="flag">
+            <PinIcon size={12} />
+            Pinned
+          </span>
+          <span className="flag-text">Shown at the top of the issue list.</span>
+        </p>
+      )}
+      {issue.locked && (
+        <p className="flag-line">
+          <span className="flag">
+            <CommentIcon size={12} />
+            Locked
+          </span>
+          <span className="flag-text">Only the team can reply. Anyone can still say "Me too".</span>
+        </p>
+      )}
       {issue.private && (
         <p className="flag-line">
           <span className="flag">
@@ -131,6 +150,8 @@ export interface CommentContext {
   member: boolean
   /** The viewer as an actor, to keep "Block" off their own comments. */
   viewerId: string | null
+  /** Signed in (accounts skip the guest human check). */
+  signedIn: boolean
 }
 
 type Mode = "edit" | "delete" | "block" | null
@@ -246,6 +267,7 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
             value={draft}
             onChange={setDraft}
             member={member}
+            mentions={member}
             onAttachment={() => {}}
             onBusyChange={setUploading}
             onSubmit={() => void save()}
@@ -277,9 +299,19 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
       ) : (
         children
       )}
-      {comment.edited_at && mode !== "edit" && (!comment.hidden || expanded) && (
+      {mode !== "edit" && (!comment.hidden || expanded) && (comment.edited_at || !mine || (comment.helpful ?? 0) > 0) && (
         <div className="msg-meta">
-          <EditedMarker slug={slug} number={issue.number} commentId={comment.id} />
+          {!mine ? (
+            <Helpful ctx={ctx} comment={comment} onError={setError} />
+          ) : (
+            (comment.helpful ?? 0) > 0 && (
+              <span className="helpful-count">
+                <ThumbIcon size={12} />
+                {comment.helpful} found this helpful
+              </span>
+            )
+          )}
+          {comment.edited_at && <EditedMarker slug={slug} number={issue.number} commentId={comment.id} />}
         </div>
       )}
       {mode === "delete" && (
@@ -350,5 +382,56 @@ export function DeletedIssue({ slug, number }: { slug: string; number: number })
         </AppLink>
       </div>
     </Page>
+  )
+}
+
+/** In place of an issue that moved to another workspace: straight there (an old link), or an offer (moved while open). */
+export function MovedIssue({ number, to, redirect }: { number: number; to: { slug: string; number: number }; redirect?: boolean }) {
+  const [, navigate] = useLocation()
+  const href = appPath(to.slug, `/issues/${to.number}`)
+  useEffect(() => {
+    if (!redirect) return
+    if (isAbsolute(href)) window.location.replace(href)
+    else navigate(href, { replace: true })
+  }, [redirect, href, navigate])
+  return (
+    <Page narrow>
+      <div className="blank moved">
+        <h1 className="blank-title">This issue moved</h1>
+        <p className="muted-text">
+          #{number} is now <span className="mono">{to.slug}</span> #{to.number}
+          {redirect ? ". Taking you there…" : ", in another workspace."}
+        </p>
+        <SiteLink href={href} className="btn" data-variant="primary">
+          Go to #{to.number}
+        </SiteLink>
+      </div>
+    </Page>
+  )
+}
+
+/** "This helped" on someone else's comment: a quiet toggle with its count (guests pass the human check first). */
+function Helpful({ ctx, comment, onError }: { ctx: CommentContext; comment: Comment; onError: (e: string | null) => void }) {
+  const { app, issue } = ctx
+  const on = !!comment.viewer_helpful
+  const count = comment.helpful ?? 0
+  const toggle = async () => {
+    onError(null)
+    const next = !on
+    replaceComment(app.slug, issue.id, { ...comment, viewer_helpful: next, helpful: Math.max(0, count + (next ? 1 : -1)) })
+    try {
+      await ensureHuman(ctx.signedIn)
+      const r = await api.helpful(app.slug, issue.number, comment.id, next)
+      replaceComment(app.slug, issue.id, { ...comment, ...r })
+    } catch (e) {
+      replaceComment(app.slug, issue.id, comment)
+      onError(errorMessage(e))
+    }
+  }
+  return (
+    <button type="button" className="helpful" aria-pressed={on} onClick={toggle} title={on ? "You found this helpful" : "Mark as helpful"}>
+      <ThumbIcon size={12} />
+      This helped{count > 0 && <span className="mono-num helpful-n">{count}</span>}
+    </button>
   )
 }

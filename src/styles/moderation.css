@@ -164,9 +164,7 @@
 }
 .msg-hidden-body {
   margin-top: 4px;
-  padding-left: 10px;
   color: var(--fg-muted);
-  border-left: 2px solid var(--border);
 }
 .msg-confirm {
   display: flex;
@@ -269,5 +267,290 @@
   }
   .issue-visibility label.checkbox {
     min-height: 40px;
+  }
+}
+
+/* Internal notes: the faintest tint and a label in the head. No side rule (Ryan: never a left-border accent). */
+.group[data-internal] {
+  margin: 0 -12px;
+  padding: 8px 12px;
+  background: color-mix(in oklab, var(--progress) 5%, transparent);
+  border-radius: var(--radius-large);
+}
+.group[data-internal] .group-head {
+  flex-wrap: wrap;
+}
+.note-label {
+  min-width: 0;
+  color: color-mix(in oklab, var(--progress) 75%, var(--fg-muted));
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+}
+.note-label-more {
+  color: var(--fg-faint);
+  font-weight: var(--weight-regular);
+}
+.composer-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 0 0 8px;
+}
+.composer-mode-switch {
+  flex: none;
+}
+.composer-mode-switch > button .icon {
+  color: inherit;
+}
+.composer-mode-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer[data-internal] .composer-mode-hint {
+  color: color-mix(in oklab, var(--progress) 75%, var(--fg-muted));
+}
+.composer[data-internal] .composer-mode-switch > [aria-pressed="true"] {
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+}
+.composer[data-internal] .editor {
+  background: color-mix(in oklab, var(--progress) 6%, var(--layer-1));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in oklab, var(--progress) 40%, transparent),
+    var(--elevation-raised);
+}
+.composer-locked {
+  padding: 14px 0 max(14px, env(safe-area-inset-bottom));
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  text-align: center;
+  border-top: 1px solid var(--border-muted);
+}
+
+/* Votes: "Me too" on the issue, "This helped" on comments */
+.btn.me-too[data-active] {
+  color: var(--fg);
+  background-color: var(--pressed);
+}
+.btn.me-too[data-active] .icon {
+  color: var(--fg);
+}
+.me-too-n {
+  margin-left: 2px;
+  color: var(--fg-muted);
+}
+.msg-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+.helpful,
+.helpful-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.helpful {
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-small);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.helpful:hover {
+  color: var(--fg-muted);
+}
+.helpful[aria-pressed="true"] {
+  color: var(--fg);
+}
+.helpful-n {
+  margin-left: 2px;
+}
+.issue-row-votes {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--fg-faint);
+}
+
+/* @mentions: a quiet token (not a link); and the suggestions while typing one */
+.mention {
+  padding: 0 3px;
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+  background: var(--layer-2);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.mention-menu {
+  position: absolute;
+  left: 8px;
+  z-index: 30;
+  display: grid;
+  width: min(320px, calc(100% - 16px));
+  padding: 4px;
+  background: var(--layer-1);
+  border-radius: var(--radius-large);
+  box-shadow: var(--elevation-overlay);
+}
+.mention-menu[data-place="above"] {
+  bottom: calc(100% + 6px);
+}
+.mention-menu[data-place="below"] {
+  top: calc(100% + 6px);
+}
+.mention-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.mention-option[aria-selected="true"] {
+  background: var(--hover);
+}
+.mention-option > .avatar,
+.mention-option > .logo-mark {
+  flex: none;
+}
+.mention-option-name {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.mention-option-handle {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* The list: sort, and the pinned strip */
+.list-label {
+  gap: 8px;
+}
+.pin-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+.pin-strip + .issue-row::before {
+  display: none;
+}
+.pin-card {
+  display: grid;
+  align-content: start;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  color: var(--fg);
+  border-radius: 10px;
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.pin-card:hover {
+  color: var(--fg);
+  text-decoration: none;
+  background: var(--hover);
+}
+.pin-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.pin-card-top .icon {
+  color: var(--icon-muted);
+}
+.pin-card-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+/* Moving an issue */
+.move-pick {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.move-pick .report-confirm-text {
+  flex: none;
+}
+.btn.move-select {
+  max-width: 260px;
+}
+.move-select-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.move-note {
+  flex-basis: 100%;
+}
+.report-error {
+  margin: 10px 0 0;
+}
+
+@media (pointer: coarse) {
+  .mention-option {
+    height: 40px;
+  }
+  .helpful {
+    position: relative;
+  }
+  .helpful::after {
+    content: "";
+    position: absolute;
+    inset: -12px -6px;
+  }
+}
+
+@media (max-width: 640px) {
+  .group[data-internal] {
+    margin: 0 -8px;
+    padding: 8px;
+  }
+  .list-sort-text {
+    display: none;
+  }
+  /* Sort and Label share the search row as compact icon buttons (a chosen label still shows its name) */
+  .list-label .btn > .icon:last-child {
+    display: none;
+  }
+  .list-label .btn:not([data-active]) .filter-text {
+    display: none;
+  }
+  .pin-strip {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  .pin-card-title {
+    -webkit-line-clamp: 1;
   }
 }

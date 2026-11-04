@@ -1,11 +1,13 @@
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react"
-import type { Attachment } from "../../shared/api"
-import { errorMessage } from "../lib/api"
+import { useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent, type ReactNode } from "react"
+import type { Actor, Attachment, Mentionable } from "../../shared/api"
+import { api, errorMessage, keys } from "../lib/api"
+import { useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
 import { kindOf, upload, type UploadHandle } from "../lib/upload"
 import { ImageIcon, PaperclipIcon, RecordIcon, VideoIcon, XIcon } from "./icons"
 import { Markdown, loadMarkdown } from "./Markdown"
-import { Button } from "./primitives"
+import { ActorAvatar } from "./Actor"
+import { AiBadge, Button } from "./primitives"
 
 interface Chip {
   id: number
@@ -43,6 +45,7 @@ export function Editor({
   actions,
   extra,
   variant,
+  mentions,
 }: {
   slug: string
   value: string
@@ -61,6 +64,8 @@ export function Editor({
   extra?: ReactNode
   /** "chat": the docked composer on an issue. */
   variant?: "chat"
+  /** The team: `@` suggests members and agents to mention. Guests get plain text. */
+  mentions?: boolean
 }) {
   const [tab, setTab] = useState<"write" | "preview">("write")
   const [chips, setChips] = useState<Chip[]>([])
@@ -73,6 +78,53 @@ export function Editor({
   latest.current = value
   // Where uploads land: the last caret position, or the end until the person has clicked into the text.
   const caret = useRef<{ start: number; end: number } | null>(null)
+
+  // @ autocomplete: the handle being typed (from the @ to the caret), and which suggestion is highlighted.
+  const [at, setAt] = useState<{ start: number; query: string } | null>(null)
+  const [highlight, setHighlight] = useState(0)
+  const [wantPeople, setWantPeople] = useState(false)
+  const { data: people } = useResource<Mentionable[]>(mentions && wantPeople ? keys.mentionables(slug) : null, () => api.mentionables(slug), 60_000)
+  const suggestions =
+    at && people
+      ? people.filter((p) => p.handle.startsWith(at.query) || p.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(at.query))).slice(0, 6)
+      : []
+  const suggesting = !!at && suggestions.length > 0
+  const listId = `mentions-${slug}-${variant ?? "page"}`
+
+  const detect = (el: HTMLTextAreaElement) => {
+    if (!mentions) return
+    if (el.selectionStart !== el.selectionEnd) return setAt(null)
+    const before = el.value.slice(0, el.selectionStart)
+    const m = /(^|[\s([{])@([a-z0-9-]{0,40})$/i.exec(before)
+    if (!m) return setAt(null)
+    setWantPeople(true)
+    setAt((prev) => {
+      const next = { start: el.selectionStart - m[2]!.length - 1, query: m[2]!.toLowerCase() }
+      if (prev?.query !== next.query || prev.start !== next.start) setHighlight(0)
+      return next
+    })
+  }
+
+  const choose = (p: Mentionable) => {
+    const el = area.current
+    if (!at) return
+    const v = latest.current
+    const end = at.start + 1 + at.query.length
+    const tail = v.slice(end)
+    const text = `@${p.handle}${tail.startsWith(" ") ? "" : " "}`
+    caretAfter.current = at.start + text.length
+    set(v.slice(0, at.start) + text + tail)
+    setAt(null)
+    el?.focus()
+  }
+  // After a pick, put the caret after the handle as soon as the new text is committed, before the next keystroke.
+  const caretAfter = useRef<number | null>(null)
+  useLayoutEffect(() => {
+    const el = area.current
+    if (caretAfter.current === null || !el) return
+    el.setSelectionRange(caretAfter.current, caretAfter.current)
+    caretAfter.current = null
+  }, [value])
 
   const busy = chips.some((c) => !c.error) || !!recording
   useEffect(() => onBusyChange?.(busy), [busy, onBusyChange])
@@ -155,6 +207,25 @@ export function Editor({
   }
 
   const onKeyDown = (e: KeyboardEvent) => {
+    if (suggesting) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault()
+        const step = e.key === "ArrowDown" ? 1 : -1
+        setHighlight((i) => (i + step + suggestions.length) % suggestions.length)
+        return
+      }
+      if ((e.key === "Enter" && !e.metaKey && !e.ctrlKey) || e.key === "Tab") {
+        e.preventDefault()
+        choose(suggestions[Math.min(highlight, suggestions.length - 1)]!)
+        return
+      }
+      if (e.key === "Escape") {
+        e.preventDefault()
+        e.stopPropagation()
+        setAt(null)
+        return
+      }
+    }
     if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && onSubmit) {
       e.preventDefault()
       onSubmit()
@@ -247,8 +318,20 @@ export function Editor({
           placeholder={placeholder}
           aria-label={label ?? "Markdown"}
           autoFocus={autoFocus}
-          onChange={(e) => set(e.target.value)}
-          onSelect={(e) => (caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd })}
+          aria-autocomplete={mentions ? "list" : undefined}
+          aria-controls={suggesting ? listId : undefined}
+          aria-expanded={mentions ? suggesting : undefined}
+          aria-activedescendant={suggesting ? `${listId}-${highlight}` : undefined}
+          onChange={(e) => {
+            set(e.target.value)
+            detect(e.target)
+          }}
+          onSelect={(e) => {
+            caret.current = { start: e.currentTarget.selectionStart, end: e.currentTarget.selectionEnd }
+            detect(e.currentTarget)
+          }}
+          // Later than a tap on a suggestion, which some phones deliver after the blur.
+          onBlur={() => setTimeout(() => setAt(null), 150)}
           onPaste={onPaste}
           onDrop={onDrop}
           onDragOver={onDragOver}
@@ -258,6 +341,34 @@ export function Editor({
       ) : (
         <div className="editor-preview" style={{ minHeight }}>
           {value.trim() ? <Markdown source={value} slug={slug} /> : <p className="muted-text">Nothing to preview.</p>}
+        </div>
+      )}
+
+      {suggesting && (
+        <div className="mention-menu" id={listId} role="listbox" aria-label="People to mention" data-place={variant === "chat" ? "above" : "below"}>
+          {suggestions.map((p, i) => {
+            const actor: Actor = p.type === "agent" ? { type: "agent", id: p.id, name: p.name } : { type: "member", id: p.id, name: p.name, avatar_url: p.avatar_url }
+            return (
+              <button
+                key={p.id}
+                id={`${listId}-${i}`}
+                type="button"
+                role="option"
+                aria-selected={i === highlight}
+                className="mention-option"
+                // Keep the caret in the text: choosing mustn't blur it first.
+                onMouseDown={(e) => e.preventDefault()}
+                onPointerDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlight(i)}
+                onClick={() => choose(p)}
+              >
+                <ActorAvatar actor={actor} size={20} />
+                <span className="mention-option-name">{p.name}</span>
+                {p.type === "agent" && <AiBadge />}
+                <span className="mention-option-handle mono">@{p.handle}</span>
+              </button>
+            )
+          })}
         </div>
       )}
 

@@ -198,6 +198,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
             value={body}
             onChange={setBody}
             member={member}
+            mentions={member}
             onAttachment={(a) => setAttachments((list) => [...list, a])}
             onSubmit={submit}
             onBusyChange={setBusy}

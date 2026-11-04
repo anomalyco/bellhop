@@ -1,6 +1,8 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState, type ComponentType, type MouseEvent, type SyntheticEvent } from "react"
 import { createPortal } from "react-dom"
 import { useLocation } from "wouter"
+import type { Mention } from "../../shared/api"
+import { actorName } from "./Actor"
 import { navigateAppHref, prefetchAppHref } from "./SiteLink"
 
 type Renderer = typeof import("../lib/markdown")
@@ -31,7 +33,7 @@ function sameAppHref(target: EventTarget | null) {
 }
 
 /** Rendered markdown. Until the parser chunk arrives, shows the plain text. */
-export const Markdown = memo(function Markdown({ source, slug }: { source: string; slug: string }) {
+export const Markdown = memo(function Markdown({ source, slug, mentions }: { source: string; slug: string; mentions?: Mention[] }) {
   const [ready, setReady] = useState(!!renderer)
   const [, navigate] = useLocation()
 
@@ -55,7 +57,8 @@ export const Markdown = memo(function Markdown({ source, slug }: { source: strin
 
   if (!source.trim()) return <p className="muted-text">No description provided.</p>
   if (!renderer) return <div className="markdown markdown-plain">{source}</div>
-  return <Rendered html={renderer.render(source, slug)} onClick={onClick} onWarm={warm} />
+  const resolved = mentions?.map((m) => ({ handle: m.handle, name: actorName(m.actor), agent: m.actor.type === "agent" }))
+  return <Rendered html={renderer.render(source, slug, resolved)} onClick={onClick} onWarm={warm} />
 })
 
 /** The rendered HTML, with each video slot taken over by a React player through a portal. */

@@ -164,6 +164,24 @@ export const BlockIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const ThumbIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M5.25 7.25v6.5H3.25a.5.5 0 0 1-.5-.5v-5.5a.5.5 0 0 1 .5-.5zM5.25 7.25 7.6 2.9a1.15 1.15 0 0 1 2.15.7l-.4 2.65h3.05a1.25 1.25 0 0 1 1.22 1.52l-1 4.5a1.25 1.25 0 0 1-1.22.98H5.25" />
+  </Icon>
+)
+
+export const PinIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M9.75 2.25 13.75 6.25M10.9 3.4 6.6 6.4l-2.35-.3-1 1 5.65 5.65 1-1-.3-2.35 3-4.3M5.6 10.4 2.75 13.25" />
+  </Icon>
+)
+
+export const SortIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.75 4.25h10.5M4.75 8h6.5M6.75 11.75h2.5" />
+  </Icon>
+)
+
 export const XIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="m4 4 8 8M12 4l-8 8" />

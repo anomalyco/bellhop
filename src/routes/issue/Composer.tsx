@@ -5,7 +5,7 @@ import { setData } from "../../lib/cache"
 import { ensureHuman } from "../../lib/human"
 import { signInHref } from "../../lib/site"
 import { Editor } from "../../ui/Editor"
-import { ChevronDownIcon } from "../../ui/icons"
+import { ChevronDownIcon, LockIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Button, StateIcon } from "../../ui/primitives"
 import { SiteLink } from "../../ui/SiteLink"
@@ -91,6 +91,10 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
   const [dupOf, setDupOf] = useState("")
   const [dupError, setDupError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
+  // The team writes either a reply (everyone sees it) or an internal note (the team and agents only). The choice
+  // stays put between posts, and everything about the box says which one it is.
+  const [internal, setInternal] = useState(false)
+  const note = member && internal
   const hasText = !!body.trim()
 
   useEffect(() => {
@@ -113,7 +117,7 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
     const ids = attachments.filter((a) => text.includes(a.url)).map((a) => a.id)
     setBody("")
     setAttachments([])
-    const ok = await model.onComment(text, ids, guestName)
+    const ok = await model.onComment(text, ids, guestName, note)
     if (ok) setChanging(false)
     return ok
   }
@@ -146,8 +150,8 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
   }
 
   const option = closeOptions.find((o) => o.reason === reason)!
-  const closeLabel = reason === "completed" ? (hasText ? "Close with comment" : "Close issue") : option.label
-  const reopenLabel = hasText ? "Reopen with comment" : "Reopen issue"
+  const closeLabel = reason === "completed" ? (hasText ? (note ? "Close with note" : "Close with comment") : "Close issue") : option.label
+  const reopenLabel = hasText ? (note ? "Reopen with note" : "Reopen with comment") : "Reopen issue"
   const duplicating = member && reason === "duplicate" && issue.status !== "closed"
 
   // The team, and the reporter (completed or not planned; duplicates need the team).
@@ -190,7 +194,21 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
 
   return (
     <div className="composer-slot" ref={slot}>
-      <div className="composer" ref={dock} style={dockStyle}>
+      <div className="composer" ref={dock} style={dockStyle} data-internal={note || undefined}>
+        {member && (
+          <div className="composer-mode">
+            <div className="segmented composer-mode-switch" role="radiogroup" aria-label="Post as">
+              <button type="button" role="radio" aria-checked={!note} aria-pressed={!note} onClick={() => setInternal(false)}>
+                Reply
+              </button>
+              <button type="button" role="radio" aria-checked={note} aria-pressed={note} onClick={() => setInternal(true)}>
+                <LockIcon size={12} />
+                Internal note
+              </button>
+            </div>
+            <span className="composer-mode-hint">{note ? "Only the team and agents see this" : "Everyone who can see the issue sees this"}</span>
+          </div>
+        )}
         {guest && (
           <GuestBar
             me={me!}
@@ -206,6 +224,7 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
         )}
         <Editor
           variant="chat"
+          mentions={member}
           slug={app.slug}
           value={body}
           onChange={setBody}
@@ -213,7 +232,8 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
           onAttachment={(a) => setAttachments((l) => [...l, a])}
           onBusyChange={setBusy}
           onSubmit={() => void comment()}
-          label="Reply"
+          label={note ? "Internal note" : "Reply"}
+          placeholder={note ? "Add an internal note for the team…" : undefined}
           minHeight={40}
           extra={
             duplicating && (
@@ -233,7 +253,7 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
             <>
               {splitControl}
               <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
-                {busy ? "Uploading…" : "Send"}
+                {busy ? "Uploading…" : note ? "Add note" : "Send"}
               </Button>
             </>
           }
@@ -342,5 +362,14 @@ function GuestBar({
         </>
       )}
     </form>
+  )
+}
+
+/** In place of the composer on a locked issue, for anyone outside the team. */
+export function LockedComposer() {
+  return (
+    <div className="composer-locked" role="note">
+      Locked: only the team can reply.
+    </div>
   )
 }

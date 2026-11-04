@@ -1,14 +1,14 @@
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useSearch } from "wouter"
-import type { AppDetail, IssueList, IssueSummary, LiveEvent } from "../../shared/api"
+import type { AppDetail, IssueList, IssueSort, IssueSummary, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, useResource } from "../lib/cache"
-import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, removeIssue, visibleState, type Filter } from "../lib/issues"
+import { applyActivity, applyActorUpdate, applySummary, dropIssue, fetchList, formatQuery, listKey, parseQuery, removeIssue, visibleState, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
 import { appPath } from "../lib/site"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
-import { ChevronDownIcon, CommentIcon, EyeOffIcon, LockIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
+import { ChevronDownIcon, CommentIcon, EyeOffIcon, LockIcon, PinIcon, PlusIcon, SearchIcon, SortIcon, TagIcon, ThumbIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppIcon, Button, Dots, Label, StateIcon } from "../ui/primitives"
 import { AppLayout, Page } from "../ui/Shell"
@@ -50,7 +50,12 @@ function IssuesLoading({ slug }: { slug: string }) {
           <input aria-label="Search issues" defaultValue={q} placeholder="Search issues" spellCheck={false} readOnly />
         </div>
         <div className="list-label">
-          <button type="button" className="btn" data-variant="default" disabled>
+          <button type="button" className="btn list-sort" data-variant="default" disabled>
+            <SortIcon size={14} />
+            <span className="filter-text list-sort-text">{sortLabel[filter.sort ?? "newest"]}</span>
+            <ChevronDownIcon size={14} />
+          </button>
+          <button type="button" className="btn" data-variant="default" data-active={filter.label ? "" : undefined} disabled>
             <TagIcon size={14} />
             <span className="filter-text">{filter.label || "Label"}</span>
             <ChevronDownIcon size={14} />
@@ -122,7 +127,7 @@ function IssuesList({ app }: { app: AppDetail }) {
   const q = new URLSearchParams(search).get("q") ?? "is:open"
   const filter = parseQuery(q)
   const key = listKey(slug, filter)
-  const { data, error } = useResource<IssueList>(key, () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text }))
+  const { data, error } = useResource<IssueList>(key, () => fetchList(slug, filter))
   const lastList = useRef<{ slug: string; list: IssueList } | null>(null)
   if (data) lastList.current = { slug, list: data }
   else if (lastList.current?.slug !== slug) lastList.current = null
@@ -153,12 +158,13 @@ function IssuesList({ app }: { app: AppDetail }) {
       else if (event.type === "activity") applyActivity(slug, event.issue_id, event.activity)
       else if (event.type === "actor.updated") applyActorUpdate(slug, event.previous_id, event.actor)
       else if (event.type === "issue.deleted") removeIssue(slug, event.issue_id, event.number)
+      else if (event.type === "issue.moved") dropIssue(slug, event.issue_id)
     },
     (reconnected) => {
       // Events sent while we were away are gone; refetch what's on screen.
       if (reconnected) {
         invalidate(keys.lists(slug))
-        load(key, () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text })).catch(() => {})
+        load(key, () => fetchList(slug, filter)).catch(() => {})
       }
     },
   )
@@ -168,7 +174,7 @@ function IssuesList({ app }: { app: AppDetail }) {
     setLoadingMore(true)
     setMoreError(null)
     try {
-      const page = await api.issues(slug, { state: filter.state, label: filter.label, q: filter.text, cursor: data.next_cursor })
+      const page = await fetchList(slug, filter, data.next_cursor)
       setData<IssueList>(key, (list) => {
         if (!list) return page
         const seen = new Set(list.issues.map((i) => i.id))
@@ -212,6 +218,7 @@ function IssuesList({ app }: { app: AppDetail }) {
           onClear={() => go({ ...filter, label: "", text: "" })}
         />
         <div className="list-label">
+          <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
         <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
@@ -223,6 +230,8 @@ function IssuesList({ app }: { app: AppDetail }) {
       <section className="issue-list" aria-label="Issues" data-pending={pending || undefined} aria-busy={pending || undefined}>
         {!!error && !shown && <div className="list-empty">{errorMessage(error)}</div>}
         {!shown && !error && <SkeletonRows />}
+        {/* Inside the list, where the skeleton was, so it never pushes painted rows down */}
+        {!!shown?.pinned?.length && !filtered && <PinStrip slug={slug} issues={shown.pinned.slice(0, 3)} />}
         {shown && shown.issues.length === 0 && (
           filtered ? (
             <NoResults query={[filter.label && `label:${filter.label}`, filter.text].filter(Boolean).join(" ")} onClear={() => go({ ...filter, label: "", text: "" })} />
@@ -273,7 +282,14 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
       width={280}
       onOpenChange={(open) => !open && setQuery("")}
       trigger={(props) => (
-        <button type="button" className="btn" data-variant="default" data-active={value ? "" : undefined} {...props}>
+        <button
+          type="button"
+          className="btn"
+          data-variant="default"
+          data-active={value ? "" : undefined}
+          aria-label={value ? `Label: ${value}` : "Filter by label"}
+          {...props}
+        >
           <TagIcon size={14} />
           <span className="filter-text">{value ? value : "Label"}</span>
           <ChevronDownIcon size={14} />
@@ -377,6 +393,12 @@ export const IssueRow = memo(function IssueRow({
         </div>
       </div>
       <div className="issue-row-side">
+        {(issue.votes ?? 0) > 0 && (
+          <span className="issue-row-votes" title={`${issue.votes} ${issue.votes === 1 ? "person has" : "people have"} this too`}>
+            <ThumbIcon size={14} />
+            <span className="mono-num">{issue.votes}</span>
+          </span>
+        )}
         {active && issue.activity && (
           <span className="issue-row-activity" title={issue.activity.text ?? undefined}>
             <Dots />
@@ -402,3 +424,61 @@ export const IssueRow = memo(function IssueRow({
     </div>
   )
 })
+
+const sortLabel: Record<IssueSort, string> = {
+  newest: "Newest",
+  oldest: "Oldest",
+  votes: "Most votes",
+  updated: "Recently updated",
+  comments: "Most comments",
+}
+
+/** How the list is ordered; the choice lives in the query as `sort:votes` and friends. */
+function SortMenu({ value, onChange }: { value: IssueSort; onChange: (sort: IssueSort) => void }) {
+  return (
+    <Menu
+      align="end"
+      width={220}
+      trigger={(props) => (
+        <button type="button" className="btn list-sort" data-variant="default" aria-label={`Sort: ${sortLabel[value]}`} {...props}>
+          <SortIcon size={14} />
+          <span className="filter-text list-sort-text">{sortLabel[value]}</span>
+          <ChevronDownIcon size={14} />
+        </button>
+      )}
+    >
+      {(close) =>
+        (Object.keys(sortLabel) as IssueSort[]).map((s) => (
+          <MenuItem
+            key={s}
+            checked={s === value}
+            onSelect={() => {
+              close()
+              if (s !== value) onChange(s)
+            }}
+          >
+            {sortLabel[s]}
+          </MenuItem>
+        ))
+      }
+    </Menu>
+  )
+}
+
+/** Up to three pinned issues, compact, above the rows. */
+function PinStrip({ slug, issues }: { slug: string; issues: IssueSummary[] }) {
+  return (
+    <nav className="pin-strip" aria-label="Pinned issues">
+      {issues.map((issue) => (
+        <AppLink key={issue.id} slug={slug} href={appPath(slug, `/issues/${issue.number}`)} className="pin-card">
+          <span className="pin-card-top">
+            <PinIcon size={12} />
+            <StateIcon state={visibleState(issue)} size={14} />
+            <span className="mono pin-card-number">#{issue.number}</span>
+          </span>
+          <span className="pin-card-title">{issue.title}</span>
+        </AppLink>
+      ))}
+    </nav>
+  )
+}
