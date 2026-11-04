@@ -1,4 +1,6 @@
 import { Hono } from "hono"
+import { agentBatch } from "./audit"
+import { memberActor } from "./core"
 import type { OAuthRequest } from "../shared/api"
 import { attachScopes, createFlag, defaultRole, selection } from "./agents"
 import { page } from "./pages"
@@ -385,7 +387,14 @@ oauth.post("/api/oauth/requests/:id/approve", async (c) => {
         grant
       )
     )
-  const [changed] = await c.env.DB.batch(statements)
+  const [changed] = await agentBatch(
+    c.env,
+    memberActor(c.var.user!, null),
+    grant,
+    { user },
+    "agent.created",
+    statements
+  )
   if (!changed?.meta.changes) {
     await pending(c) // Already answered/expired is distinct from selecting somebody else's app.
     denied()

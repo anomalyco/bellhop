@@ -36,7 +36,10 @@
 //   GET    /api/me/reports?state=open|closed&cursor=     -> FeedList           issues this browser (any guest id it
 //          has used) or the signed-in account opened, across workspaces, newest activity first; includes their own
 //          private issues, never hidden or deleted ones
-//   List search also takes author:@me (this browser's guest id or the account in that workspace).
+//   List search (q) qualifiers, combinable with free text: is:open|closed|private|locked|pinned|hidden (hidden: team
+//   only), status:open|in_progress|waiting|closed, reason:completed|not_planned|duplicate, label:<name> (repeatable,
+//   all must match), no:label, no:assignee, assignee:@me|<handle>, author:@me|<handle>, has:metadata,
+//   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description?, public?, visibility? } -> AppDetail   admin
@@ -123,6 +126,11 @@
 //   DELETE /api/apps/:slug/report-keys/:id               -> { ok: true }       admin
 //   Pages: https://<slug>.blhp.app/new?metadata=<id> (and /<slug>/new?metadata= in path mode) opens new issue with it
 //   attached and its title suggested; https://blhp.app/new?metadata=<id> redirects to the right workspace.
+//   GET    /api/apps/:slug/saved-replies                 -> SavedReply[]       team (viewer and up) and agents
+//   POST   /api/apps/:slug/saved-replies SavedReplyInput -> SavedReply         member
+//   PATCH  /api/apps/:slug/saved-replies/:id SavedReplyInput -> SavedReply     member
+//   DELETE /api/apps/:slug/saved-replies/:id             -> { ok: true }       member
+//   GET    /api/apps/:slug/audit?cursor=&actor=&action=  -> AuditPage          admin; newest first, kept 90 days
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -541,6 +549,40 @@ export interface AppAgent {
   last_used_at: string | null
 }
 
+/** A reply the team (and agents) reuse, e.g. "Needs logs". Markdown; {reporter} becomes the reporter's name. */
+export interface SavedReply {
+  id: string
+  name: string
+  body: string
+  created_by: Actor
+  updated_at: string
+}
+
+export interface SavedReplyInput {
+  name: string
+  body: string
+}
+
+/** What someone (a person or an agent) did in a workspace. */
+export interface AuditEntry {
+  id: string
+  actor: Actor
+  /** e.g. "member.invited", "member.role_changed", "agent.access_changed", "webhook.updated", "label.deleted",
+   *  "issue.deleted", "issue.hidden", "comment.hidden", "actor.blocked", "tier.assigned", "app.updated",
+   *  "report_key.created", "issue.transferred". */
+  action: string
+  /** What it acted on, for display: { type: "issue", number: 12 }, { type: "member", email } etc. */
+  target: Record<string, unknown> | null
+  /** Before/after or other details, never secrets. */
+  data: Record<string, unknown>
+  created_at: string
+}
+
+export interface AuditPage {
+  entries: AuditEntry[]
+  next_cursor: string | null
+}
+
 export interface Label {
   id: string
   name: string
@@ -847,6 +889,7 @@ export interface WebhookPayload {
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
 //   get_metadata   { id }                        report metadata: specs, context, log attachments, fingerprint, matches
+//   list_saved_replies {}                        saved replies; use one by posting its body via comment
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)
@@ -866,7 +909,7 @@ export interface WebhookPayload {
 //   Workspace setup (same roles as the REST routes: owner for the app itself and webhooks; member for labels and
 //   templates). Labels and templates are named by name, matched case-insensitively.
 //   get_app        {}                            name, description, icon, counts, labels, templates
-//   update_app     { name?, description? }       owner
+//   update_app     { name?, description? }       admin
 //   get_webhook    {}                            URL, whether a secret is set, recent deliveries
 //   set_webhook    { url: string|null, events?: WebhookEventType[] }   https only; null removes it
 //   redeliver_webhook { delivery_id }

@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { recorded, auditActor } from "./audit"
 import {
   appUrl,
   bad,
@@ -212,25 +213,42 @@ reports.post(`${base}/report-keys`, async (c) => {
   requireTeam(c, "setup")
   const key = "bh_pub_" + secret(),
     name = str((await body(c)).name, "name", 120).trim()
-  const r = await sql(
+  const id = uid(),
+    preview = key.slice(0, 15) + "…"
+  const r = await recorded<ReportKey>(
     c.env,
-    `INSERT INTO report_keys(id,app_id,name,preview,hash,created_at) VALUES(?,?,?,?,?,?) RETURNING ${keyFields}`,
-    uid(),
+    sql(
+      c.env,
+      `INSERT INTO report_keys(id,app_id,name,preview,hash,created_at) VALUES(?,?,?,?,?,?) RETURNING ${keyFields}`,
+      id,
+      c.var.app.id,
+      name,
+      preview,
+      await sha256(key),
+      now()
+    ),
     c.var.app.id,
-    name,
-    key.slice(0, 15) + "…",
-    await sha256(key),
-    now()
-  ).first<ReportKey>()
-  return c.json({ ...r, key }, 201)
+    c.var.actor,
+    "report_key.created",
+    { type: "report_key", id, preview }
+  )
+  return c.json({ ...r.results[0], key }, 201)
 })
 reports.delete(`${base}/report-keys/:id`, async (c) => {
   requireTeam(c, "setup")
-  if (
-    !(await sql(c.env, "DELETE FROM report_keys WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")).run()).meta
-      .changes
-  )
-    missing()
+  const app = c.var.app.id,
+    id = c.req.param("id"),
+    [, r] = await c.env.DB.batch([
+      sql(
+        c.env,
+        `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'report_key.revoked',json_object('type','report_key','id',id,'preview',preview) FROM report_keys WHERE app_id=? AND id=?`,
+        auditActor(c.var.actor),
+        app,
+        id
+      ),
+      sql(c.env, "DELETE FROM report_keys WHERE app_id=? AND id=?", app, id)
+    ])
+  if (!r!.meta.changes) missing()
   return c.json({ ok: true })
 })
 async function viewer(c: Ctx): Promise<Viewer> {

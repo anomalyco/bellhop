@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import {entry} from './audit'
 import { detail } from "./apps"
 import { fail, missing, sql, uid } from "./core"
 import { requireTeam } from "./permissions"
@@ -53,7 +54,7 @@ async function replaceIcon(c: Ctx, image: Awaited<ReturnType<typeof readIcon>> |
   try {
     const [result] = await c.env.DB.batch<{ icon_version: string | null }>([
       sql(c.env, "SELECT icon_version FROM apps WHERE id=?", app.id),
-      sql(c.env, "UPDATE apps SET icon_version=?,icon_mime=? WHERE id=?", version, image?.mime ?? null, app.id)
+      sql(c.env, "UPDATE apps SET icon_version=?,icon_mime=? WHERE id=?", version, image?.mime ?? null, app.id),entry(c.env,app.id,c.var.actor,'app.updated',{type:'app',id:app.id},{fields:['icon'],configured:!!image})
     ])
     previous = result!.results[0]!.icon_version
   } catch (error) {

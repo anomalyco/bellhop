@@ -25,6 +25,8 @@ import { pollFeedback } from "./mail-feedback"
 import { secrets } from "./mail-provider"
 import { atom, ogImage, page, robots, sitemap } from "./pages"
 import { similar } from "./similar"
+import { teamTools } from "./team-tools"
+import { pruneAudit } from "./audit"
 import { reports, uploadReport } from "./reports"
 import { expireReports } from "./report-data"
 export { Room } from "./room"
@@ -122,7 +124,9 @@ async function feedViewer(c: Ctx) {
     team: false
   }
 }
-api.get("/api/feed", async (c) => c.json(await feed(c.env, c.req.query(), (await feedViewer(c)).voter)))
+api.get("/api/feed", async (c) =>
+  c.json(await feed(c.env, c.req.query(), (await feedViewer(c)).voter, undefined, browserGuest(c)))
+)
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
 api.get("/api/me/reports", async (c) => {
   const cookie = browserGuest(c),
@@ -162,6 +166,7 @@ api.route("/", agents)
 api.route("/", apps)
 api.route("/", tierRoutes)
 api.route("/", reports)
+api.route("/", teamTools)
 api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
@@ -251,6 +256,7 @@ api.onError((e, c) => {
 export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(pruneAudit(env))
     ctx.waitUntil(expireReports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))
     ctx.waitUntil(pollInbound(env, ctx))

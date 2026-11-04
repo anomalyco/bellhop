@@ -2,6 +2,7 @@ import { DEFAULT_WEBHOOK_EVENTS, type WebhookPayload, type WebhookEventType, typ
 import { appUrl, bad, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
 import { teamProjection } from "./tier-actors"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
+import { entry, recorded } from "./audit"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -38,6 +39,7 @@ export const webhookEvents = [
 export async function configureWebhook(
   env: Env,
   app: string,
+  actor: NonNullable<WebhookPayload["actor"]>,
   value: unknown,
   selection: unknown = DEFAULT_WEBHOOK_EVENTS
 ) {
@@ -45,12 +47,27 @@ export async function configureWebhook(
   if (!Array.isArray(selection) || selection.some((e) => !webhookEvents.includes(e)))
     bad("Unknown webhook event or invalid events list")
   const events = [...new Set<WebhookEventType>(selection)]
-  await sql(env, "UPDATE webhook_settings SET url=?,events=? WHERE app_id=?", url, JSON.stringify(events), app).run()
+  await recorded(
+    env,
+    sql(env, "UPDATE webhook_settings SET url=?,events=? WHERE app_id=?", url, JSON.stringify(events), app),
+    app,
+    actor,
+    "webhook.updated",
+    { type: "webhook" },
+    { enabled: url !== null, events }
+  )
   return { url, events }
 }
-export async function rotateWebhook(env: Env, app: string) {
+export async function rotateWebhook(env: Env, app: string, actor: NonNullable<WebhookPayload["actor"]>) {
   const key = secret()
-  await sql(env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", key, app).run()
+  await recorded(
+    env,
+    sql(env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", key, app),
+    app,
+    actor,
+    "webhook.rotated",
+    { type: "webhook" }
+  )
   return { secret: key }
 }
 export async function testWebhook(
@@ -168,7 +185,12 @@ export async function enqueueWebhooks(
       )
       return { id, statement }
     })
-    const result = await env.DB.batch(pending.map((p) => p.statement))
+    const result = await env.DB.batch([
+      ...pending.map((p) => p.statement),
+      ...(events.length === 1 && events[0]!.type === "ping"
+        ? [entry(env, app.id, actor, "webhook.tested", { type: "delivery", id: pending[0]!.id })]
+        : [])
+    ])
     const added = pending.flatMap((p, i) => (result[i]!.meta.changes ? [p.id] : []))
     await sendJobs(env, added, destinationHash)
     ids.push(...added)
@@ -176,7 +198,7 @@ export async function enqueueWebhooks(
   return ids
 }
 
-export async function redeliver(env: Env, app: string, original: string) {
+export async function redeliver(env: Env, app: string, actor: NonNullable<WebhookPayload["actor"]>, original: string) {
   const id = uid()
   // Copy inside the transaction: a concurrently purged snapshot cannot be resurrected.
   // Keep the original event timestamp and content; only delivery identity changes.
@@ -195,7 +217,8 @@ export async function redeliver(env: Env, app: string, original: string) {
       now(),
       app,
       original
-    )
+    ),
+    entry(env, app, actor, "webhook.redelivered", { type: "delivery", id: original }, { delivery_id: id })
   ])
   const row = old!.results[0] ?? missing()
   if (!row.url || !copy!.meta.changes) bad("Configure a webhook subscribed to this event first")

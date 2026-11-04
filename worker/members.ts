@@ -1,4 +1,5 @@
-import type { Member, Role } from "../shared/api"
+import type { Actor, Member, Role } from "../shared/api"
+import { recorded } from "./audit"
 import { bad, denied, email, missing, rows, sql, uid } from "./core"
 import { agentAccessSQL, can } from "./permissions"
 
@@ -14,7 +15,7 @@ export async function roster(env: Env, app: string): Promise<Member[]> {
   )
   return members.map((m) => ({ ...m, joined: !!m.joined }))
 }
-export type Manager = { user: string; agent?: string }
+export type Manager = { user: string; agent?: string; actor: Actor }
 // Recheck the caller inside sensitive writes, not only when the request was authenticated.
 function gate(app: string, manager: Manager, elevated: boolean): [string, string[]] {
   const where = elevated ? "p.role='owner'" : "p.role IN ('admin','owner')"
@@ -29,11 +30,12 @@ function gate(app: string, manager: Manager, elevated: boolean): [string, string
 export async function invite(env: Env, app: string, manager: Manager, address: unknown, role: Role) {
   const e = email(address),
     [allowed, args] = gate(app, manager, can(role, "setup"))
-  const r = await sql(
+  const id = uid()
+  const write = sql(
     env,
     `INSERT INTO workspace_invitations(id,app_id,email,role,invited_by) SELECT ?,?,?,?,${manager.agent ? "(SELECT json_object('name',name,'avatar_url',NULL) FROM agents WHERE id=?)" : "(SELECT json_object('name',name,'avatar_url',avatar_url) FROM users WHERE id=?)"}
      WHERE NOT EXISTS(SELECT 1 FROM members WHERE app_id=? AND email=?) AND ${allowed}`,
-    uid(),
+    id,
     app,
     e,
     role,
@@ -41,7 +43,8 @@ export async function invite(env: Env, app: string, manager: Manager, address: u
     app,
     e,
     ...args
-  ).run()
+  )
+  const r = await recorded(env, write, app, manager.actor, "member.invited", { type: "invitation", id }, { role })
   if (!r.meta.changes) denied()
 }
 export async function changeMember(
@@ -63,7 +66,7 @@ export async function changeMember(
   if (!row) missing()
   if (transfer && !row.user_id) bad("Ownership can only be transferred to a joined member")
   const [allowed, args] = gate(app, manager, can(row.role, "setup") || can(role, "setup"))
-  const r = await sql(
+  const write = sql(
     env,
     `${role === null ? "DELETE FROM" : "UPDATE"} ${row.pending ? "workspace_invitations" : "members"} ${role === null ? "" : "SET role=?"} WHERE app_id=? AND id=? AND role=? AND ${allowed}`,
     ...(role === null ? [] : [role]),
@@ -71,6 +74,15 @@ export async function changeMember(
     row.id,
     row.role,
     ...args
-  ).run()
+  )
+  const r = await recorded(
+    env,
+    write,
+    app,
+    manager.actor,
+    transfer ? "app.ownership_transferred" : role ? "member.role_changed" : "member.removed",
+    { type: row.pending ? "invitation" : "member", id: row.user_id ?? row.id },
+    { from: row.role, to: role }
+  )
   if (!r.meta.changes) denied()
 }

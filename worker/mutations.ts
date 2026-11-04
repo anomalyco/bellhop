@@ -31,6 +31,7 @@ import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, 
 import type { AttachmentRow } from "./issues"
 import { teamProjection } from "./tier-actors"
 import { enqueueWebhooks } from "./webhooks"
+import { entry, recorded, auditActor } from "./audit"
 import { attachReport, getReport } from "./report-data"
 
 export interface Access {
@@ -517,6 +518,26 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       issue.id
     )
   )
+  for (const item of items) {
+    if (item.kind !== "event") continue
+    const e = item.event
+    if (
+      ["assigned", "claimed", "locked", "unlocked", "pinned", "unpinned", "made_private", "made_public"].includes(
+        e.type
+      )
+    )
+      q.push(
+        entry(
+          env,
+          app.id,
+          actor,
+          `issue.${e.type}`,
+          { type: "issue", number: n },
+          e.type === "assigned" ? { assignee_id: (e.data.assignee as Actor | null)?.id ?? null } : {},
+          "1"
+        )
+      )
+  }
   for (const m of mentioned)
     q.push(
       sql(
@@ -714,6 +735,18 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
     ],
     items: TimelineItem[] = []
   record(a, id, "transferred", { from: { slug: a.app.slug, number: n } }, at, q, items)
+  q.push(
+    entry(a.env, a.app.id, a.actor, "issue.transferred", { type: "issue", id, number: n }, { to: dest.slug }, "1"),
+    sql(
+      a.env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'issue.transferred',json_object('type','issue','id',id,'number',number),json_object('from',?,'previous_number',?) FROM issues WHERE app_id=? AND id=?`,
+      auditActor(a.actor),
+      a.app.slug,
+      n,
+      dest.id,
+      id
+    )
+  )
   const results = await a.env.DB.batch<{ number: number }>(q),
     num = results[7]!.results[0]?.number ?? missing(),
     to = { slug: dest.slug, number: num, url: appUrl(a.env, a.origin, dest.slug, `/issues/${num}`) }
@@ -762,7 +795,8 @@ export async function removeLabel(a: Access, id: string) {
       id
     ),
     sql(env, `UPDATE issues SET revision=revision+1,updated_at=max(updated_at,?) WHERE id IN (${affected})`, at, id),
-    sql(env, "DELETE FROM labels WHERE id=? AND app_id=?", id, app.id)
+    sql(env, "DELETE FROM labels WHERE id=? AND app_id=?", id, app.id),
+    entry(env, app.id, actor, "label.deleted", { type: "label", id })
   ])
   for (const issue of results[0]!.results) {
     notify(a, {
@@ -861,6 +895,7 @@ async function deleteComment(a: Access, n: number, id: string) {
       Number(can(a.role, "triage")),
       JSON.stringify(actorIds(v))
     ),
+    entry(a.env, a.app.id, a.actor, "comment.deleted", { type: "comment", id, number: n }, { internal: c.internal }),
     ...(!c.internal
       ? [sql(a.env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=? AND changes()>0", now(), issue.id)]
       : []),
@@ -924,7 +959,19 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
     q,
     items
   )
-  await a.env.DB.batch([...q, stillHere(a, issue.id)])
+  await a.env.DB.batch([
+    ...q,
+    entry(
+      a.env,
+      a.app.id,
+      a.actor,
+      `${c ? "comment" : "issue"}.${hide ? "hidden" : "unhidden"}`,
+      c ? { type: "comment", number: n, id: c.id } : { type: "issue", number: n },
+      hidden ? { reason: hidden.reason } : {},
+      "1"
+    ),
+    stillHere(a, issue.id)
+  ])
   const next = await full(a, n),
     comment = id ? findComment(next, id) : null
   notify(a, {
@@ -975,7 +1022,8 @@ async function deleteIssue(a: Access, n: number) {
       a.app.id,
       n
     ),
-    sql(a.env, "DELETE FROM issues WHERE app_id=? AND number=?", a.app.id, n)
+    sql(a.env, "DELETE FROM issues WHERE app_id=? AND number=?", a.app.id, n),
+    entry(a.env, a.app.id, a.actor, "issue.deleted", { type: "issue", number: n, id: before.id })
   ])
   if (!tomb?.results.length) missing()
   const g = JSON.parse((tomb.results[0] as { gate: string }).gate) as {
@@ -1097,6 +1145,18 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
       )
     )
   }
+  q.push(
+    entry(
+      env,
+      app,
+      a.actor,
+      "actor.blocked",
+      { type: "actor", id: actorId },
+      { hide_content: !!b.hide_content },
+      "EXISTS(SELECT 1 FROM blocks WHERE app_id=? AND id=?)",
+      [app, id]
+    )
+  )
   const result = await env.DB.batch<{ issue_id: string; id?: string }>(q)
   if (!result[0]?.meta.changes) denied()
   if (b.hide_content)
@@ -1208,11 +1268,19 @@ issues.post("/api/apps/:slug/blocks", async (c) => {
 })
 issues.delete("/api/apps/:slug/blocks/:id", async (c) => {
   requireTeam(c, "triage")
-  if (
-    !(await sql(c.env, "DELETE FROM blocks WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")).run()).meta
-      .changes
-  )
-    missing()
+  const app = c.var.app.id,
+    id = c.req.param("id"),
+    [, deleted] = await c.env.DB.batch([
+      sql(
+        c.env,
+        `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'actor.unblocked',json_object('type','actor','id',actor_id),json_object('block_id',id) FROM blocks WHERE app_id=? AND id=?`,
+        auditActor(c.var.actor),
+        app,
+        id
+      ),
+      sql(c.env, "DELETE FROM blocks WHERE app_id=? AND id=?", app, id)
+    ])
+  if (!deleted!.meta.changes) missing()
   return c.json({ ok: true })
 })
 issues.post(base, async (c) => {

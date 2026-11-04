@@ -18,7 +18,7 @@ import type {
   Relation,
   TimelineItem
 } from "../shared/api"
-import { ApiFailure, appUrl, bad, choice, fail, missing, now, rows, sql, str } from "./core"
+import { ApiFailure, appUrl, bad, choice, fail, missing, now, rows, scopedGuestId, sql, str } from "./core"
 import {
   actorIds,
   owns,
@@ -31,7 +31,8 @@ import {
   visibleSQL,
   type Viewer
 } from "./visibility"
-import { voteCount } from "./conversation"
+import { mentionables, voteCount } from "./conversation"
+import { parseSearch, sorts } from "./search"
 import { projectTiers, tierBag } from "./tier-actors"
 import { appIdSQL, appKey, readBatch } from "./read-scope"
 import type { ReadScope } from "./read-scope"
@@ -177,12 +178,15 @@ const pageSize = 30
 // Issue visibility within a selected workspace. Discovery additionally requires a public
 // workspace; direct links intentionally do not. Add future issue-level visibility rules here.
 export const visibleIssues = (workspace: string, v: Viewer = outsider) => `i.app_id=${workspace} AND ${visibleSQL(v)}`
-export const myAuthorFilter = (q: unknown) => typeof q === "string" && /(?:^|\s)author:@me(?=\s|$)/i.test(q)
+export const myAuthorFilter = (q: unknown) => parseSearch(q).terms.some((t) => t.key === "author" && t.value === "@me")
 function issueFilter(
   workspace: string,
   options: { label?: unknown; query?: unknown },
   v: Viewer = outsider,
-  mine = false
+  parsed = parseSearch(options.query),
+  handles: Map<string, string> = new Map(),
+  feedUser?: string | null,
+  feedIds: string[] = []
 ) {
   const where = [visibleIssues(workspace, v)],
     values: unknown[] = [...actorBindings(v)]
@@ -192,25 +196,78 @@ function issueFilter(
     )
     values.push(str(options.label, "label", 60))
   }
-  if (options.query) {
-    let query = str(options.query, "query", 512)
-    if (mine) {
-      where.push("i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?))")
-      values.push(JSON.stringify(actorIds(v)))
-      query = query.replace(/(?:^|\s)author:@me(?=\s|$)/gi, " ").trim()
+  for (const { key, value } of parsed.terms) {
+    switch (key) {
+      case "is":
+        if (value === "hidden") {
+          if (v.team) where.push("i.hidden IS NOT NULL")
+        } else if (value === "closed" || value === "open")
+          where.push(`(i.status='closed')=${value === "closed" ? 1 : 0}`)
+        else where.push(`i.${value}=1`)
+        break
+      case "reason":
+      case "status":
+        where.push(`i.${key === "reason" ? "close_reason" : "status"}=?`)
+        values.push(value)
+        break
+      case "label":
+        where.push(
+          `EXISTS(SELECT 1 FROM issue_labels il WHERE il.issue_id=i.id AND il.label_id=(SELECT l.id FROM labels l WHERE l.app_id=i.app_id AND l.name=?))`
+        )
+        values.push(value)
+        break
+      case "no":
+        where.push(
+          value === "label"
+            ? "NOT EXISTS(SELECT 1 FROM issue_labels il WHERE il.issue_id=i.id)"
+            : "json_extract(i.assignee,'$.id') IS NULL"
+        )
+        break
+      case "author":
+      case "assignee":
+        if (value === "@me") {
+          where.push(`json_extract(i.${key},'$.id') IN (SELECT value FROM json_each(?))`)
+          values.push(JSON.stringify(actorIds(v)))
+          if (key === "author" && !parsed.terms.some((t) => t.key === "is" && t.value === "hidden" && v.team))
+            where.push("i.hidden IS NULL")
+        } else if (key === "author" && /^@?guest-[a-f0-9]{4}$/.test(value)) {
+          // Guests have a workspace-scoped public handle but aren't mentionable team members.
+          where.push(
+            "(json_extract(i.author,'$.id')=? OR (json_extract(i.author,'$.type')='guest' AND json_extract(i.author,'$.handle')=?))"
+          )
+          const handle = value.replace(/^@/, "")
+          values.push(handles.get(handle) ?? null, handle)
+        } else {
+          where.push(`json_extract(i.${key},'$.id')=?`)
+          values.push(handles.get(value.replace(/^@/, "")) ?? null)
+        }
+        break
+      case "has": {
+        // The existence of diagnostics on someone else's post (especially an internal note)
+        // is not public. Use the same post-author/parent visibility as Issue.metadata.
+        const check = v.team
+          ? "1"
+          : `${feedUser ? "EXISTS(SELECT 1 FROM members m WHERE m.app_id=i.app_id AND m.user_id=?) OR " : ""}(i.hidden IS NULL AND (c.id IS NULL OR (c.internal=0 AND c.hidden IS NULL)) AND json_extract(coalesce(c.author,i.author),'$.id') IN(SELECT value FROM json_each(?)))`
+        where.push(
+          `EXISTS(SELECT 1 FROM report_metadata md LEFT JOIN comments c ON c.id=md.comment_id WHERE md.issue_id=i.id AND md.app_id=i.app_id AND md.ready=1 AND (${check}))`
+        )
+        if (!v.team) {
+          if (feedUser) values.push(feedUser)
+          values.push(JSON.stringify(feedUser !== undefined ? feedIds : actorIds(v)))
+        }
+        break
+      }
     }
-    const hidden = /(?:^|\s)is:hidden(?=\s|$)/i.test(query)
-    if (hidden) {
-      where.push("i.hidden IS NOT NULL")
-      query = query.replace(/(?:^|\s)is:hidden(?=\s|$)/gi, " ").trim()
-    }
+  }
+  if (parsed.text) {
+    const query = parsed.text
     const words = query.match(/[\p{L}\p{N}\p{M}_]+/gu)?.slice(0, 24)
     if (words?.length) {
       const phrase = words.map((w) => `"${w}"*`).join(" AND ")
       where.push(`(i.rowid IN (SELECT rowid FROM issue_fts WHERE issue_fts MATCH ?) OR i.id IN
         (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ? ${v.team ? "" : "AND c.hidden IS NULL AND c.internal=0"}))`)
       values.push(phrase, phrase)
-    } else if ((!hidden && !mine) || query) where.push("0")
+    } else where.push("0")
   }
   return { where: where.join(" AND "), values }
 }
@@ -228,8 +285,22 @@ export async function listIssues(
   },
   viewer: Viewer = outsider
 ): Promise<IssueList> {
-  const mine = myAuthorFilter(options.query),
-    filter = issueFilter(appIdSQL(scope), options, viewer, mine),
+  const parsed = parseSearch(options.query),
+    mine = parsed.terms.some((t) => t.key === "author" && t.value === "@me"),
+    needsHandles = parsed.terms.some((t) => (t.key === "author" || t.key === "assignee") && t.value !== "@me"),
+    handles = needsHandles
+      ? new Map(
+          (
+            await mentionables(
+              env,
+              typeof scope === "string"
+                ? scope
+                : ((await sql(env, "SELECT id FROM apps WHERE slug=?", scope.slug).first<string>("id")) ?? missing())
+            )
+          ).map((m) => [m.handle, m.id])
+        )
+      : new Map<string, string>(),
+    filter = issueFilter(appIdSQL(scope), options, viewer, parsed, handles),
     values = [appKey(scope), ...filter.values]
   const base = ` FROM issues i WHERE ${filter.where}`
   const totals = sql(
@@ -237,8 +308,8 @@ export async function listIssues(
     `SELECT count(*) FILTER (WHERE i.status!='closed') AS open,count(*) FILTER (WHERE i.status='closed') AS closed${base}`,
     ...values
   )
-  const state = choice(options.state ?? "open", ["open", "closed"] as const, "state")
-  const sort = choice(options.sort ?? "newest", ["newest", "oldest", "updated", "votes", "comments"] as const, "sort"),
+  const state = parsed.tab ?? choice(options.state ?? "open", ["open", "closed"] as const, "state")
+  const sort = parsed.sort ?? choice(options.sort ?? "newest", sorts, "sort"),
     limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? pageSize)))
   const metric =
       sort === "votes" ? "votes" : sort === "comments" ? "comment_count" : sort === "updated" ? "updated_at" : "number",
@@ -321,43 +392,78 @@ export async function feed(
   env: Env,
   options: { state?: string; q?: string; cursor?: string },
   voter: string | null = null,
-  reportIds?: string[]
+  reportIds?: string[],
+  guestCookie?: string | null
 ): Promise<FeedList> {
-  const closed = Number(choice(options.state ?? "open", ["open", "closed"] as const, "state") === "closed"),
+  const parsed = parseSearch(options.q, true),
+    sort = parsed.sort ?? "updated",
+    user = voter && !voter.startsWith("g:") ? voter : null,
+    ids = user ? [user] : []
+  if (!user && guestCookie && parsed.terms.some((t) => t.key === "has")) {
+    // Derive scoped IDs only for publishable report-bearing guest posts, including moved
+    // issues. Never widen the feed's public issue gate, even for team/account viewers.
+    const origins = await rows<{ id: string }>(
+      sql(
+        env,
+        `WITH eligible AS (SELECT DISTINCT i.id,i.app_id FROM report_metadata md JOIN issues i ON i.id=md.issue_id JOIN apps a ON a.id=i.app_id LEFT JOIN comments c ON c.id=md.comment_id WHERE a.public=1 AND i.private=0 AND i.hidden IS NULL AND (c.id IS NULL OR (c.hidden IS NULL AND c.internal=0)) AND json_extract(coalesce(c.author,i.author),'$.type')='guest') SELECT app_id id FROM eligible UNION SELECT mv.from_app FROM eligible e JOIN issue_moves mv ON mv.issue_id=e.id`
+      )
+    )
+    ids.push(...(await Promise.all(origins.map((o) => scopedGuestId(guestCookie, o.id)))))
+  }
+  const closed = Number(
+      (parsed.tab ?? choice(options.state ?? "open", ["open", "closed"] as const, "state")) === "closed"
+    ),
     filter = reportIds
       ? {
           where: "i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?))",
           values: [JSON.stringify(reportIds)]
         }
-      : issueFilter("a.id", { query: options.q })
+      : issueFilter("a.id", { query: options.q }, outsider, parsed, undefined, user, ids)
   let boundary = "",
     keys: string[] = []
   if (options.cursor !== undefined) {
-    const match = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)~([\w-]{1,80})$/.exec(options.cursor)
+    const parts = options.cursor.split("~")
+    if (sort !== "updated" && parts.shift() !== sort) bad("Invalid feed cursor")
+    const match = (
+      sort === "votes" || sort === "comments"
+        ? /^(\d+)~([\w-]{1,80})$/
+        : /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)~([\w-]{1,80})$/
+    ).exec(parts.join("~"))
     if (!match) bad("Invalid feed cursor")
-    boundary = "AND (i.updated_at,i.id)<(?,?)"
+    boundary =
+      sort === "updated" ? "AND (i.updated_at,i.id)<(?,?)" : `AND (sort_key,i.id)${sort === "oldest" ? ">" : "<"}(?,?)`
     keys = [match[1]!, match[2]!]
   }
   // Personal discovery starts at the indexed author IDs, not the workspace directory.
   // Public discovery seeks one page per listed workspace so private backlogs don't dominate it.
-  const candidates = reportIds
-    ? `SELECT i.id,i.updated_at FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
+  const direction = sort === "oldest" ? "ASC" : "DESC",
+    metric =
+      sort === "comments"
+        ? `(SELECT count(*) FROM comments WHERE issue_id=i.id AND internal=0)`
+        : sort === "votes"
+          ? voteCount("0", "'[]'")
+          : "i.created_at"
+  const candidates =
+    sort !== "updated"
+      ? `SELECT i.id,${metric} sort_key FROM apps a JOIN issues i ON i.app_id=a.id WHERE a.public=1 AND ${filter.where} AND (i.status='closed')=? ${boundary} ORDER BY sort_key ${direction},i.id ${direction} LIMIT ?`
+      : reportIds
+        ? `SELECT i.id,i.updated_at FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
       ORDER BY i.updated_at DESC,i.id DESC LIMIT ?`
-    : `SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
+        : `SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
       WHERE a.public=1 AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
         ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?`
   const [page, totals] = await env.DB.batch<unknown>([
     sql(
       env,
       `WITH ${viewerCTE}, page AS MATERIALIZED (${candidates})
-      SELECT ${feedFields(true)} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
-      ORDER BY p.updated_at DESC,p.id DESC`,
+      SELECT ${feedFields(true)}${sort === "updated" ? "" : ",p.sort_key"} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
+      ORDER BY p.${sort === "updated" ? "updated_at" : "sort_key"} ${direction},p.id ${direction}`,
       voter,
       JSON.stringify(reportIds ?? []),
       ...filter.values,
       closed,
-      ...keys,
-      ...(reportIds ? [] : [pageSize + 1]),
+      ...keys.map((s, i) => (i === 0 && (sort === "comments" || sort === "votes") ? Number(s) : s)),
+      ...(reportIds || sort !== "updated" ? [] : [pageSize + 1]),
       pageSize + 1
     ),
     sql(
@@ -367,12 +473,15 @@ export async function feed(
       ...filter.values
     )
   ])
-  const items = page!.results as FeedRow[],
+  const items = page!.results as (FeedRow & { sort_key?: number | string })[],
     last = items[pageSize - 1]
   return {
     issues: items.slice(0, pageSize).map(feedIssue),
     counts: totals!.results[0] as FeedList["counts"],
-    next_cursor: items.length > pageSize ? `${last!.updated_at}~${last!.id}` : null
+    next_cursor:
+      items.length > pageSize
+        ? `${sort === "updated" ? last!.updated_at : `${sort}~${last!.sort_key}`}~${last!.id}`
+        : null
   }
 }
 const latest = (closed: number) =>

@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { savedReplies } from "./team-tools"
 import { allowed, clientIP } from "./rate-limits"
 import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
@@ -39,6 +40,7 @@ const states = ["open", "closed"] as const,
 const toolRoles = {
   list_apps: "discover",
   list_tiers: "read",
+  list_saved_replies: "read",
   set_tier: "triage",
   list_mentionables: "read",
   transfer_issue: "triage",
@@ -111,6 +113,7 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool("list_saved_replies", "List saved Markdown replies. Substitute {reporter} only when composing a reply.", {}),
   tool("list_tiers", "List this workspace’s reporter tiers and handling rules.", {}),
   tool(
     "set_tier",
@@ -279,7 +282,7 @@ function integer(v: unknown, field: string, max = Number.MAX_SAFE_INTEGER) {
   return v
 }
 type Workspace = Omit<App, "role"> & { role: AgentRole }
-type Caller = { actor: Access["actor"]; apps: Workspace[]; user: string; create: boolean }
+type Caller = { actor: Extract<Access["actor"], { type: "agent" }>; apps: Workspace[]; user: string; create: boolean }
 function named<T extends { name: string }>(items: T[], value: unknown, kind: "label" | "template"): T {
   const name = str(value, "name", kind === "template" ? 120 : 60)
     .trim()
@@ -306,7 +309,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
   if (action === "discover") return textResult(caller.apps)
   if (action === "create") {
     if (!caller.create) denied()
-    return textResult(await createApp(c, { id: caller.user }, args, caller.actor.id))
+    return textResult(await createApp(c, { id: caller.user }, args, caller.actor))
   }
   const { app: slug, ...b } = args
   const options = caller.apps.map((app) => app.slug).join(", ") || "(none)"
@@ -324,8 +327,10 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
   }
   const { env, app, actor } = a,
     n = () => integer(b.number, "number")
-  const manager = { user: caller.user, agent: caller.actor.id }
+  const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "list_saved_replies":
+      return textResult(await savedReplies(env, app.id))
     case "list_tiers":
       return textResult(await listTiers(env, app.id))
     case "set_tier": {
@@ -339,7 +344,13 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
               str(b.tier, "tier", 100).trim()
             ).first<string>("id")) ?? bad("Unknown workspace tier"))
       return textResult(
-        await setTier(env, app.id, { email: b.email, actor_id: b.actor_id, tier_id: id }, can(chosen.role, "setup"))
+        await setTier(
+          env,
+          app.id,
+          actor,
+          { email: b.email, actor_id: b.actor_id, tier_id: id },
+          can(chosen.role, "setup")
+        )
       )
     }
     case "list_mentionables":
@@ -352,7 +363,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     case "get_app":
       return textResult({ ...(await detail(c, { ...chosen, role: null }, teamViewer)), role: chosen.role })
     case "update_app":
-      return textResult(await detail(c, await updateApp(env, { ...chosen, role: "admin" }, b)))
+      return textResult(await detail(c, await updateApp(env, { ...chosen, role: "admin" }, actor, b)))
     case "list_members":
       return textResult(await roster(env, app.id))
     case "invite_member":
@@ -379,20 +390,20 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       })
     }
     case "set_webhook":
-      return textResult(await configureWebhook(env, app.id, b.url, b.events))
+      return textResult(await configureWebhook(env, app.id, actor, b.url, b.events))
     case "redeliver_webhook":
-      return textResult(await redeliver(env, app.id, str(b.delivery_id, "delivery id", 64)))
+      return textResult(await redeliver(env, app.id, actor, str(b.delivery_id, "delivery id", 64)))
     case "rotate_webhook_secret":
-      return textResult(await rotateWebhook(env, app.id))
+      return textResult(await rotateWebhook(env, app.id, actor))
     case "test_webhook":
       return textResult(await testWebhook(env, a.origin, app, actor))
     case "create_label":
-      return textResult(await writeLabel(env, app.id, b))
+      return textResult(await writeLabel(env, app.id, actor, b))
     case "update_label":
     case "delete_label": {
       const label = named(await labels(env, app.id), b.name, "label")
       if (name === "update_label")
-        return textResult(await writeLabel(env, app.id, { ...b, name: b.new_name }, label.id))
+        return textResult(await writeLabel(env, app.id, actor, { ...b, name: b.new_name }, label.id))
       await removeLabel(a, label.id)
       return textResult({ ok: true })
     }
@@ -402,7 +413,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     }
     case "delete_template": {
       const t = named(await templates(env, app.id), b.name, "template")
-      return textResult(await deleteTemplate(env, app.id, t.id))
+      return textResult(await deleteTemplate(env, app.id, actor, t.id))
     }
     case "create_template":
     case "update_template": {
@@ -411,6 +422,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       const t = await writeTemplate(
         env,
         app.id,
+        actor,
         {
           ...b,
           name: old ? b.new_name : b.name,
@@ -561,7 +573,8 @@ export async function authenticate(c: Ctx): Promise<Caller | null> {
     )
   ])
   const agent = identity!.results[0] as
-    { id: string; user_id: string; name: string; create_workspaces: number; stale: number } | undefined
+    | { id: string; user_id: string; name: string; create_workspaces: number; stale: number }
+    | undefined
   if (!agent) return null
   // One activity timestamp covers both bearer types. The second check avoids redundant writes
   // if several calls authenticated before the first background update committed.

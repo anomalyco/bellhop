@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type { AgentRole, AppAgent, ConnectedAgent, NewAgentToken } from "../shared/api"
-import { bad, body, fail, input, missing, rows, secret, sha256, sql, str, uid } from "./core"
+import { bad, body, fail, input, memberActor, missing, rows, secret, sha256, sql, str, uid } from "./core"
+import { agentBatch } from "./audit"
 import type { Bindings, Ctx } from "./core"
 import { agentAccessSQL, agentRole, requireTeam, withinCapSQL } from "./permissions"
 
@@ -93,7 +94,7 @@ agents.post("/api/me/agents", async (c) => {
   if (!items.some((s) => s.role) && !create && !all) bad("Choose a workspace or allow creating workspaces")
   const id = uid(),
     key = await credential()
-  await c.env.DB.batch([
+  await agentBatch(c.env, memberActor(account(c), null), id, { user }, "agent.created", [
     sql(
       c.env,
       `INSERT INTO agents(id,user_id,kind,name,token_hash,preview,created_at,create_workspaces,all_workspaces)
@@ -142,7 +143,14 @@ agents.patch("/api/me/agents/:id", async (c) => {
       ),
       attachScopes(c.env, id, user, selection(b.apps))
     )
-  const [r] = await c.env.DB.batch(q)
+  const [r] = await agentBatch(
+    c.env,
+    memberActor(account(c), null),
+    id,
+    { user },
+    b.name !== undefined || b.create_workspaces !== undefined ? "agent.updated" : "agent.access_changed",
+    q
+  )
   if (!r?.meta.changes) missing()
   return c.json(await one(c.env, user, id))
 })
@@ -150,25 +158,31 @@ agents.post("/api/me/agents/:id/rotate", async (c) => {
   const user = account(c).id,
     id = c.req.param("id"),
     key = await credential()
-  const r = await sql(
-    c.env,
-    "UPDATE agents SET token_hash=?,preview=? WHERE id=? AND user_id=? AND kind='token' AND revoked_at IS NULL",
-    key.hash,
-    key.preview,
-    id,
-    user
-  ).run()
-  if (!r.meta.changes) missing()
+  const [r] = await agentBatch(c.env, memberActor(account(c), null), id, { user }, "agent.rotated", [
+    sql(
+      c.env,
+      "UPDATE agents SET token_hash=?,preview=? WHERE id=? AND user_id=? AND kind='token' AND revoked_at IS NULL",
+      key.hash,
+      key.preview,
+      id,
+      user
+    )
+  ])
+  if (!r!.meta.changes) missing()
   return c.json({ ...(await one(c.env, user, id)), token: key.token } satisfies NewAgentToken)
 })
 agents.delete("/api/me/agents/:id", async (c) => {
-  const r = await sql(
-    c.env,
-    "UPDATE agents SET revoked_at=unixepoch() WHERE id=? AND user_id=? AND revoked_at IS NULL",
-    c.req.param("id"),
-    account(c).id
-  ).run()
-  if (!r.meta.changes) missing()
+  const user = account(c),
+    id = c.req.param("id")
+  const [r] = await agentBatch(c.env, memberActor(user, null), id, { user: user.id }, "agent.revoked", [
+    sql(
+      c.env,
+      "UPDATE agents SET revoked_at=unixepoch() WHERE id=? AND user_id=? AND revoked_at IS NULL",
+      c.req.param("id"),
+      account(c).id
+    )
+  ])
+  if (!r!.meta.changes) missing()
   return c.json({ ok: true })
 })
 async function appAgents(env: Env, app: string, id?: string): Promise<AppAgent[]> {
@@ -208,26 +222,28 @@ agents.patch("/api/apps/:slug/agents/:id", async (c) => {
   const role = agentRole((await body(c)).role),
     app = c.var.app.id,
     id = c.req.param("id")
-  const r = await sql(
-    c.env,
-    `INSERT INTO agent_apps(agent_id,app_id,role,delegated_admin) SELECT agent_id,app_id,?1,
+  const [r] = await agentBatch(c.env, c.var.actor, id, { app }, "agent.access_changed", [
+    sql(
+      c.env,
+      `INSERT INTO agent_apps(agent_id,app_id,role,delegated_admin) SELECT agent_id,app_id,?1,
     ?1='admin' AND (delegated_admin=1 OR EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?4 AND role='owner')) FROM (${agentAccessSQL}) acl
     WHERE acl.app_id=?2 AND acl.agent_id=?3 AND acl.role IS NOT NULL AND ${withinCapSQL("?1", "acl.team")}
     ON CONFLICT(agent_id,app_id) DO UPDATE SET role=excluded.role,delegated_admin=excluded.delegated_admin`,
-    role,
-    app,
-    id,
-    c.var.user!.id
-  ).run()
+      role,
+      app,
+      id,
+      c.var.user!.id
+    )
+  ])
   const agent = (await appAgents(c.env, app, id))[0] ?? missing()
-  if (!r.meta.changes) bad("Agent role exceeds its owner's access")
+  if (!r!.meta.changes) bad("Agent role exceeds its owner's access")
   return c.json(agent)
 })
 agents.delete("/api/apps/:slug/agents/:id", async (c) => {
   requireTeam(c, "setup")
   const app = c.var.app.id,
     id = c.req.param("id")
-  const result = await c.env.DB.batch([
+  const result = await agentBatch(c.env, c.var.actor, id, { app }, "agent.access_changed", [
     sql(
       c.env,
       `INSERT INTO agent_apps(agent_id,app_id,role) SELECT acl.agent_id,acl.app_id,NULL FROM (${agentAccessSQL}) acl

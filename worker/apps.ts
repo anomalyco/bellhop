@@ -10,6 +10,7 @@ import type {
   Template,
   WebhookDelivery
 } from "../shared/api"
+import { auditActor, entry, recorded } from "./audit"
 import {
   bad,
   body,
@@ -241,7 +242,13 @@ apps.post("/api/apps", async (c) => {
   if (!u) fail(401, "sign_in", "Sign in to create an app")
   return c.json(await createApp(c, u, await body(c)), 201)
 })
-export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unknown>, grant?: string) {
+export async function createApp(
+  c: Ctx,
+  u: { id: string },
+  b: Record<string, unknown>,
+  agent?: Extract<Actor, { type: "agent" }>
+) {
+  const grant = agent?.id
   const slug = str(b.slug, "slug", 40)
   if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(slug) || slug.length < 2 || reservedSlugs.has(slug))
     bad("Invalid or reserved slug")
@@ -296,6 +303,17 @@ export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unk
         app.id
       )
     )
+  q.push(
+    entry(
+      c.env,
+      app.id,
+      agent ?? memberActor(c.var.user!, null),
+      "app.created",
+      { type: "app", id: app.id },
+      { public: app.public },
+      "1"
+    )
+  )
   await c.env.DB.batch(q)
   return detail(c, grant ? { ...app, role: "admin" } : app)
 }
@@ -303,12 +321,12 @@ function publicFlag(v: unknown) {
   if (typeof v !== "boolean") bad("public must be a boolean")
   return v
 }
-export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
+export async function updateApp(env: Env, app: App, actor: Actor, b: Record<string, unknown>): Promise<App> {
   const v = b.visibility === undefined ? null : input(b.visibility)
   const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
   if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
-  const changed = await sql(
+  const change = sql(
     env,
     `UPDATE apps SET default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
     WHERE id=? RETURNING name,description,public`,
@@ -318,12 +336,23 @@ export async function updateApp(env: Env, app: App, b: Record<string, unknown>):
     b.description === undefined ? null : str(b.description, "description", 4000, true),
     b.public === undefined ? null : Number(publicFlag(b.public)),
     app.id
-  ).first<{ name: string; description: string; public: number }>()
+  )
+  const changed = (
+    await recorded<{ name: string; description: string; public: number }>(
+      env,
+      change,
+      app.id,
+      actor,
+      "app.updated",
+      { type: "app", id: app.id },
+      { fields: ["name", "description", "public", "visibility"].filter((k) => b[k] !== undefined) }
+    )
+  ).results[0]
   return { ...app, ...fromAppRow(changed ?? missing()) }
 }
 apps.patch("/api/apps/:slug", async (c) => {
   requireTeam(c, "setup")
-  c.set("app", await updateApp(c.env, c.var.app, await body(c)))
+  c.set("app", await updateApp(c.env, c.var.app, c.var.actor, await body(c)))
   return c.json(await detail(c))
 })
 apps.get("/api/apps/:slug/settings", async (c) => {
@@ -333,12 +362,12 @@ apps.get("/api/apps/:slug/settings", async (c) => {
 apps.put("/api/apps/:slug/webhook", async (c) => {
   requireTeam(c, "setup")
   const b = await body(c)
-  await configureWebhook(c.env, c.var.app.id, b.url, b.events)
+  await configureWebhook(c.env, c.var.app.id, c.var.actor, b.url, b.events)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
   requireTeam(c, "setup")
-  await rotateWebhook(c.env, c.var.app.id)
+  await rotateWebhook(c.env, c.var.app.id, c.var.actor)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/test", async (c) => {
@@ -347,7 +376,7 @@ apps.post("/api/apps/:slug/webhook/test", async (c) => {
 })
 apps.post("/api/apps/:slug/webhook/deliveries/:id/redeliver", async (c) => {
   requireTeam(c, "setup")
-  return c.json(await redeliver(c.env, c.var.app.id, c.req.param("id")))
+  return c.json(await redeliver(c.env, c.var.app.id, c.var.actor, c.req.param("id")))
 })
 apps.post("/api/apps/:slug/members", async (c) => {
   requireTeam(c, "setup")
@@ -355,7 +384,7 @@ apps.post("/api/apps/:slug/members", async (c) => {
   await invite(
     c.env,
     c.var.app.id,
-    { user: c.var.user!.id },
+    { user: c.var.user!.id, actor: c.var.actor },
     b.email,
     teamRole(b.role === undefined ? "member" : b.role)
   )
@@ -366,7 +395,7 @@ apps.patch("/api/apps/:slug/members/:id", async (c) => {
   await changeMember(
     c.env,
     c.var.app.id,
-    { user: c.var.user!.id },
+    { user: c.var.user!.id, actor: c.var.actor },
     { id: c.req.param("id") },
     teamRole((await body(c)).role)
   )
@@ -377,7 +406,7 @@ apps.post("/api/apps/:slug/transfer", async (c) => {
   await changeMember(
     c.env,
     c.var.app.id,
-    { user: c.var.user!.id },
+    { user: c.var.user!.id, actor: c.var.actor },
     { id: str((await body(c)).member_id, "member_id", 64) },
     "owner",
     true
@@ -412,6 +441,13 @@ apps.post("/api/me/invitations/:id/accept", async (c) => {
       id,
       u.id
     ),
+    sql(
+      c.env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'member.accepted',json_object('type','invitation','id',id),json_object('role',role) FROM workspace_invitations WHERE id=? AND email=?`,
+      auditActor(memberActor(u, null)),
+      id,
+      u.email
+    ),
     sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", id, u.email)
   ])
   if (!seat!.meta.changes) missing()
@@ -419,28 +455,43 @@ apps.post("/api/me/invitations/:id/accept", async (c) => {
 })
 apps.post("/api/me/invitations/:id/decline", async (c) => {
   const u = c.var.user ?? fail(401, "sign_in", "Sign in to decline an invitation")
-  if (
-    !(await sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", c.req.param("id"), u.email).run())
-      .meta.changes
-  )
-    missing()
+  const id = c.req.param("id")
+  const [, removed] = await c.env.DB.batch([
+    sql(
+      c.env,
+      `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'member.declined',json_object('type','invitation','id',id) FROM workspace_invitations WHERE id=? AND email=?`,
+      auditActor(memberActor(u, null)),
+      id,
+      u.email
+    ),
+    sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", id, u.email)
+  ])
+  if (!removed!.meta.changes) missing()
   return c.json({ ok: true })
 })
 apps.delete("/api/apps/:slug/members/me", async (c) => {
   requireTeam(c, "read")
   if (
-    !(await sql(c.env, "DELETE FROM members WHERE app_id=? AND user_id=?", c.var.app.id, c.var.user!.id).run()).meta
-      .changes
+    !(
+      await recorded(
+        c.env,
+        sql(c.env, "DELETE FROM members WHERE app_id=? AND user_id=?", c.var.app.id, c.var.user!.id),
+        c.var.app.id,
+        c.var.actor,
+        "member.left",
+        { type: "member", id: c.var.user!.id }
+      )
+    ).meta.changes
   )
     missing()
   return c.json({ ok: true })
 })
 apps.delete("/api/apps/:slug/members/:id", async (c) => {
   requireTeam(c, "setup")
-  await changeMember(c.env, c.var.app.id, { user: c.var.user!.id }, { id: c.req.param("id") }, null)
+  await changeMember(c.env, c.var.app.id, { user: c.var.user!.id, actor: c.var.actor }, { id: c.req.param("id") }, null)
   return c.json(await settings(c))
 })
-export async function writeLabel(env: Env, appId: string, b: Record<string, unknown>, id?: string) {
+export async function writeLabel(env: Env, appId: string, actor: Actor, b: Record<string, unknown>, id?: string) {
   const old = id
     ? await sql(env, `SELECT ${labelCols} FROM labels WHERE id=? AND app_id=?`, id, appId).first<Label>()
     : null
@@ -452,35 +503,32 @@ export async function writeLabel(env: Env, appId: string, b: Record<string, unkn
     description: str(b.description ?? old?.description ?? "", "description", 500, true)
   }
   if (!/^[0-9a-f]{6}$/.test(label.color)) bad("Invalid label color")
-  if (old)
-    await sql(
-      env,
-      "UPDATE labels SET name=?,color=?,description=? WHERE app_id=? AND id=?",
-      label.name,
-      label.color,
-      label.description,
-      appId,
-      id
-    ).run()
-  else
-    await sql(
-      env,
-      "INSERT INTO labels VALUES(?,?,?,?,?)",
-      label.id,
-      appId,
-      label.name,
-      label.color,
-      label.description
-    ).run()
+  const write = old
+    ? sql(
+        env,
+        "UPDATE labels SET name=?,color=?,description=? WHERE app_id=? AND id=?",
+        label.name,
+        label.color,
+        label.description,
+        appId,
+        id
+      )
+    : sql(env, "INSERT INTO labels VALUES(?,?,?,?,?)", label.id, appId, label.name, label.color, label.description)
+  if (
+    !(
+      await recorded(env, write, appId, actor, old ? "label.updated" : "label.created", { type: "label", id: label.id })
+    ).meta.changes
+  )
+    missing()
   return label
 }
 async function saveLabel(c: Ctx, id?: string) {
   requireTeam(c, "setup")
-  return c.json(await writeLabel(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
+  return c.json(await writeLabel(c.env, c.var.app.id, c.var.actor, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/labels", (c) => saveLabel(c))
 apps.patch("/api/apps/:slug/labels/:id", (c) => saveLabel(c, c.req.param("id")))
-export async function writeTemplate(env: Env, appId: string, b: Record<string, unknown>, id?: string) {
+export async function writeTemplate(env: Env, appId: string, actor: Actor, b: Record<string, unknown>, id?: string) {
   const old = id ? (await templates(env, appId)).find((t) => t.id === id) : null
   if (id && !old) missing()
   const ls = b.label_ids !== undefined ? await selectedLabels(env, appId, b.label_ids) : null
@@ -529,20 +577,37 @@ export async function writeTemplate(env: Env, appId: string, b: Record<string, u
     q.push(sql(env, "DELETE FROM template_labels WHERE template_id=?", t.id))
     for (const l of ls) q.push(sql(env, "INSERT INTO template_labels VALUES(?,?)", t.id, l.id))
   }
+  q.splice(
+    1,
+    0,
+    entry(env, appId, actor, old ? "template.updated" : "template.created", { type: "template", id: t.id })
+  )
   await env.DB.batch(q)
   return t
 }
 async function saveTemplate(c: Ctx, id?: string) {
   requireTeam(c, "setup")
-  return c.json(await writeTemplate(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
+  return c.json(await writeTemplate(c.env, c.var.app.id, c.var.actor, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/templates", (c) => saveTemplate(c))
 apps.patch("/api/apps/:slug/templates/:id", (c) => saveTemplate(c, c.req.param("id")))
-export async function deleteTemplate(env: Env, appId: string, id: string) {
-  if (!(await sql(env, "DELETE FROM templates WHERE app_id=? AND id=?", appId, id).run()).meta.changes) missing()
+export async function deleteTemplate(env: Env, appId: string, actor: Actor, id: string) {
+  if (
+    !(
+      await recorded(
+        env,
+        sql(env, "DELETE FROM templates WHERE app_id=? AND id=?", appId, id),
+        appId,
+        actor,
+        "template.deleted",
+        { type: "template", id }
+      )
+    ).meta.changes
+  )
+    missing()
   return { ok: true }
 }
 apps.delete("/api/apps/:slug/templates/:id", async (c) => {
   requireTeam(c, "setup")
-  return c.json(await deleteTemplate(c.env, c.var.app.id, c.req.param("id")))
+  return c.json(await deleteTemplate(c.env, c.var.app.id, c.var.actor, c.req.param("id")))
 })

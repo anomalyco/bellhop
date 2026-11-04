@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import type { Actor, Person, Tier } from "../shared/api"
 import { bad, body, denied, email, ids, input, missing, rows, sql, str, uid } from "./core"
 import type { Bindings } from "./core"
+import { entry, recorded } from "./audit"
 import { can, requireTeam } from "./permissions"
 
 type TierRow = Omit<Tier, "rules"> & {
@@ -32,7 +33,7 @@ function flag(v: unknown, key: string) {
   if (typeof v !== "boolean") bad(`Invalid ${key}`)
   return v
 }
-async function save(env: Env, app: string, b: Record<string, unknown>, id?: string) {
+async function save(env: Env, app: string, actor: Actor, b: Record<string, unknown>, id?: string) {
   const rules = b.rules === undefined ? {} : input(b.rules),
     key = id ?? uid(),
     fields: Record<string, string | number | null> = {}
@@ -92,7 +93,20 @@ async function save(env: Env, app: string, b: Record<string, unknown>, id?: stri
       )
     )
   }
-  if (q.length) await env.DB.batch(q)
+  if (q.length)
+    await env.DB.batch([
+      ...q,
+      entry(
+        env,
+        app,
+        actor,
+        id ? "tier.updated" : "tier.created",
+        { type: "tier", id: key },
+        { fields: [...columns, ...(rules.label_ids !== undefined ? ["label_ids"] : [])] },
+        "EXISTS(SELECT 1 FROM tiers WHERE app_id=? AND id=?)",
+        [app, key]
+      )
+    ])
   return one(env, app, key)
 }
 type Identity = { actor_id: string | null; address: string | null }
@@ -152,7 +166,13 @@ async function people(
     return { actor, email: r.address, tier, issue_count: r.issue_count, last_seen_at: r.last_seen_at }
   })
 }
-export async function setTier(env: Env, app: string, b: Record<string, unknown>, showEmail: boolean): Promise<Person> {
+export async function setTier(
+  env: Env,
+  app: string,
+  actor: Actor,
+  b: Record<string, unknown>,
+  showEmail: boolean
+): Promise<Person> {
   if ((b.actor_id === undefined) === (b.email === undefined)) bad("Provide either email or actor_id")
   const identity: Identity = {
       actor_id: b.actor_id === undefined ? null : str(b.actor_id, "actor_id", 64),
@@ -194,7 +214,17 @@ export async function setTier(env: Env, app: string, b: Record<string, unknown>,
             id,
             address
           )
-        ])
+        ]),
+    entry(
+      env,
+      app,
+      actor,
+      "tier.assigned",
+      id
+        ? { type: "person", id }
+        : { type: "person", email: address![0] + "***" + address!.slice(address!.lastIndexOf("@")) },
+      { tier_id: tier }
+    )
   ])
   if (!allowed!.results.length) denied()
   if (address)
@@ -209,16 +239,25 @@ tierRoutes.get(base, async (c) => {
 })
 tierRoutes.post(base, async (c) => {
   requireTeam(c, "setup")
-  return c.json(await save(c.env, c.var.app.id, await body(c)), 201)
+  return c.json(await save(c.env, c.var.app.id, c.var.actor, await body(c)), 201)
 })
 tierRoutes.patch(`${base}/:id`, async (c) => {
   requireTeam(c, "setup")
-  return c.json(await save(c.env, c.var.app.id, await body(c), c.req.param("id")))
+  return c.json(await save(c.env, c.var.app.id, c.var.actor, await body(c), c.req.param("id")))
 })
 tierRoutes.delete(`${base}/:id`, async (c) => {
   requireTeam(c, "setup")
   if (
-    !(await sql(c.env, "DELETE FROM tiers WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")).run()).meta.changes
+    !(
+      await recorded(
+        c.env,
+        sql(c.env, "DELETE FROM tiers WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")),
+        c.var.app.id,
+        c.var.actor,
+        "tier.deleted",
+        { type: "tier", id: c.req.param("id") }
+      )
+    ).meta.changes
   )
     missing()
   return c.json({ ok: true })
@@ -231,5 +270,5 @@ tierRoutes.get("/api/apps/:slug/people", async (c) => {
 })
 tierRoutes.put("/api/apps/:slug/people/tier", async (c) => {
   requireTeam(c, "triage")
-  return c.json(await setTier(c.env, c.var.app.id, await body(c), can(c.var.app.role, "setup")))
+  return c.json(await setTier(c.env, c.var.app.id, c.var.actor, await body(c), can(c.var.app.role, "setup")))
 })
