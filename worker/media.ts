@@ -9,6 +9,8 @@ import type { Bindings } from "./core"
 import { guestWrite } from "./guest-history"
 import { attachment } from "./issues"
 import type { AttachmentRow } from "./issues"
+import { reportLog } from "./report-data"
+import type { Ctx } from "./core"
 
 const MiB = 1024 * 1024
 function tooLarge(): never {
@@ -124,6 +126,25 @@ function range(value: string, size: number) {
 }
 media.get("/media/:id/:name", async (c) => {
   c.header("Cache-Control", "private, no-store")
+  if (c.req.param("id").startsWith("ml_")) {
+    const id = c.req.param("id"),
+      slug =
+        (await sql(
+          c.env,
+          "SELECT a.slug FROM report_logs l JOIN report_metadata m ON m.id=l.metadata_id JOIN apps a ON a.id=m.app_id WHERE l.id=?",
+          id
+        ).first<string>("slug")) ?? missing()
+    const { viewer, app } = await viewerApp(c, slug)
+    if (c.req.header("Authorization")) {
+      const agent = await authenticate(c)
+      if (!agent?.apps.some((a) => a.id === app.id)) missing()
+      viewer.team = true
+      viewer.actorId = agent.actor.id
+    }
+    const file = await reportLog(c.env, id, app.id, viewer, c.req.query("metadata"))
+    if (!file || file.name !== c.req.param("name")) missing()
+    return serveFile(c, { ...file, kind: "file", mime: "text/plain" }, true)
+  }
   const a = await sql(
     c.env,
     `SELECT a.id,a.name,a.mime,a.size,a.kind,a.object_key,a.owner_id,a.app_id,app.slug,l.issue_id,i.private,i.hidden,c.internal,
@@ -163,6 +184,13 @@ media.get("/media/:id/:name", async (c) => {
     )
       missing()
   }
+  return serveFile(c, a, restricted)
+})
+async function serveFile(
+  c: Ctx,
+  a: Pick<AttachmentRow, "name" | "mime" | "kind" | "size"> & { object_key: string },
+  restricted: boolean
+) {
   const size = a.size,
     requested = c.req.header("range"),
     slice = requested ? range(requested, a.size) : null,
@@ -200,4 +228,4 @@ media.get("/media/:id/:name", async (c) => {
   })
   if (slice) headers.set("Content-Range", `bytes ${slice.offset}-${slice.offset + slice.length - 1}/${a.size}`)
   return new Response(obj.body, { headers, status: slice ? 206 : 200 })
-})
+}

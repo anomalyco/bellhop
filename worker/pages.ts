@@ -47,6 +47,28 @@ export async function page(c: Ctx) {
     url = new URL(c.req.url)
   const subdomain = c.env.APP_DOMAIN && url.hostname.endsWith(`.${c.env.APP_DOMAIN}`)
   const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
+  const capability = /^\/new\/?$/.test(path) ? url.searchParams.get("metadata") : null
+  if (capability !== null) {
+    const result = await sql(
+      c.env,
+      `SELECT a.slug,m.expires_at FROM report_metadata m JOIN apps a ON a.id=m.app_id WHERE m.id=?1 AND m.ready=1 AND m.issue_id IS NULL AND (?2 IS NULL OR a.slug=?2)
+      UNION ALL SELECT a.slug,'expired' FROM expired_reports e JOIN apps a ON a.id=e.app_id WHERE e.id=?1 AND (?2 IS NULL OR a.slug=?2)`,
+      capability,
+      slug
+    ).first<{ slug: string; expires_at: string }>()
+    c.header("Referrer-Policy", "no-referrer")
+    c.header("Cache-Control", "no-store")
+    if (!result || result.expires_at === "expired" || result.expires_at <= new Date().toISOString()) {
+      const title = result ? "This report has expired" : "Report not found"
+      return c.html(
+        `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · Bellhop</title><meta name="robots" content="noindex"></head><body><h1>${title}</h1><p>Return to the app to start a new report.</p></body></html>`,
+        result ? 410 : 404,
+        { "X-Robots-Tag": "noindex" }
+      )
+    }
+    if (slug === null)
+      return c.redirect(appUrl(c.env, origin(c), result.slug, `/new?metadata=${encodeURIComponent(capability)}`), 302)
+  }
   const segment = /^\/issues\/([^/]+)\/?$/.exec(path)?.[1]
   // SQLite's numeric affinity would otherwise resolve e.g. /issues/1e1 as issue 10.
   const number =
@@ -109,6 +131,10 @@ export async function page(c: Ctx) {
   const headers = new Headers(asset.headers)
   for (const h of ["etag", "last-modified", "content-length", "content-range"]) headers.delete(h)
   headers.set("Cache-Control", "public, max-age=0, must-revalidate")
+  if (capability !== null) {
+    headers.set("Cache-Control", "no-store")
+    headers.set("Referrer-Policy", "no-referrer")
+  }
   if (noindex) headers.set("X-Robots-Tag", "noindex")
   const rw = new HTMLRewriter()
   for (const selector of [

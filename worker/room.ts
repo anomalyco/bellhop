@@ -6,6 +6,7 @@ import { sql, now } from "./core"
 import { agentAccessSQL } from "./permissions"
 import { actorIds, commentView, gateOf, includesComment, outsider, sees, type Gate, type Viewer } from "./visibility"
 import { voteCount } from "./conversation"
+import { logAttachment } from "./report-data"
 import { actorIdsIn, tierBag, tierQuery, tierReplacer, type TierMap } from "./tier-actors"
 
 type Attachment = Viewer & {
@@ -93,6 +94,7 @@ type PolicyRow = {
   pinned: number
 }
 type CommentRow = {
+  report_logs: string
   via: Comment["via"]
   tier_bag: string | null
   id: string
@@ -259,6 +261,7 @@ export class Room extends DurableObject<Env> {
           sql(
             this.env,
             `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,c.via,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
+      ,(SELECT json_group_array(json_object('id',l.id,'name',l.name,'size',l.size,'metadata_id',md.id)) FROM report_metadata md JOIN report_logs l ON l.metadata_id=md.id WHERE md.app_id=i.app_id AND md.comment_id=c.id AND md.issue_id=i.id) report_logs
       FROM comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
@@ -368,6 +371,14 @@ export class Room extends DurableObject<Env> {
         return commentView(
           {
             ...c,
+            attachments: [
+              ...c.attachments.filter((l) => !l.id.startsWith("ml_")),
+              ...(v.team || actorIds(v).includes(author.id)
+                ? (
+                    JSON.parse(row.report_logs) as { id: string; name: string; size: number; metadata_id: string }[]
+                  ).map((l) => logAttachment(l, l.metadata_id))
+                : [])
+            ],
             body: row.body,
             via: row.via,
             hidden: row.hidden ? JSON.parse(row.hidden) : null,

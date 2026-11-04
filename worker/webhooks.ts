@@ -1,6 +1,7 @@
 import { DEFAULT_WEBHOOK_EVENTS, type WebhookPayload, type WebhookEventType, type IssueSummary } from "../shared/api"
 import { appUrl, bad, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
 import { teamProjection } from "./tier-actors"
+import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -82,6 +83,15 @@ export async function enqueueWebhooks(
   const enabled = new Set<string>(JSON.parse(settings.events)),
     selected = events.filter((e) => e.type === "ping" || enabled.has(e.type))
   if (!selected.length) return []
+  const parents = selected.flatMap((h): (string | null)[] =>
+    h.type === "issue.opened" ? [null] : h.type === "comment.created" && h.comment ? [h.comment.id] : []
+  )
+  const metadata =
+    issue && parents.length
+      ? (
+          await reportQuery(env, app.id, { team: true, actorId: null }, "issue", issue.number, parents).all<ReportRow>()
+        ).results.map(decodeReport)
+      : []
   // Source tombstones retain the pre-move/delete count; never count comments in a different app.
   const sourceSnapshot = selected.some((e) => e.type === "issue.moved" || e.type === "issue.deleted")
   const { base, hooks } = await teamProjection(env, app.id, {
@@ -108,11 +118,17 @@ export async function enqueueWebhooks(
   // payload memory bounded; queue messages only carry IDs and a destination fingerprint.
   for (let offset = 0; offset < hooks.length; offset += 16) {
     const pending = hooks.slice(offset, offset + 16).map(({ transition, ...hook }) => {
+      const attached = metadata.filter((m) =>
+        hook.type === "issue.opened"
+          ? m.attached_to!.comment_id === null
+          : hook.type === "comment.created" && m.attached_to!.comment_id === hook.comment?.id
+      )
       const id = uid(),
         created_at = now(),
-        payload: WebhookPayload = {
+        payload: WebhookPayload & { metadata?: typeof metadata } = {
           ...base,
           ...hook,
+          ...(attached.length && { metadata: attached }),
           ...(transition && base.issue && { issue: { ...base.issue, ...transition } }),
           id,
           created_at

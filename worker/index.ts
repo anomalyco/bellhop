@@ -25,9 +25,14 @@ import { pollFeedback } from "./mail-feedback"
 import { secrets } from "./mail-provider"
 import { atom, ogImage, page, robots, sitemap } from "./pages"
 import { similar } from "./similar"
+import { reports, uploadReport } from "./reports"
+import { expireReports } from "./report-data"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
+// This is the only report route callable cross-origin. It has no cookie authority and
+// handles its own streaming byte limit before the general browser/JSON middleware.
+api.on(["OPTIONS", "POST"], "/api/apps/:slug/metadata", uploadReport)
 const limit = bodyLimit({
   maxSize: 512 * 1024,
   onError: (c) => c.json({ error: { code: "too_large", message: "JSON payload too large" } }, 413)
@@ -97,6 +102,8 @@ api.on("POST", ["/oauth/register", "/oauth/device", "/oauth/token"], oauthLimit)
 api.use("*", async (c, next) => {
   if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
     return limit(c, next)
+  if (c.req.method === "DELETE" && /^\/api\/apps\/[^/]+\/metadata\/[^/]+\/items$/.test(c.req.path))
+    return limit(c, next)
   await next()
 })
 // These readers include their app/role lookup in their own batch; other routes still load the
@@ -154,6 +161,7 @@ api.route("/", oauth)
 api.route("/", agents)
 api.route("/", apps)
 api.route("/", tierRoutes)
+api.route("/", reports)
 api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
@@ -239,6 +247,7 @@ api.onError((e, c) => {
 export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(expireReports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))
     ctx.waitUntil(pollInbound(env, ctx))
     ctx.waitUntil(pollFeedback(env))

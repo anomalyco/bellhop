@@ -31,6 +31,7 @@ import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, 
 import type { AttachmentRow } from "./issues"
 import { teamProjection } from "./tier-actors"
 import { enqueueWebhooks } from "./webhooks"
+import { attachReport, getReport } from "./report-data"
 
 export interface Access {
   env: Env
@@ -188,6 +189,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       app.id
     ),
     ...attach(env, id, null, b.attachment_ids),
+    ...attachReport(env, app.id, b.metadata_id, id, null),
     ...guestNameGuard(a)
   ]
   const templateEvents = new Set<string>()
@@ -297,7 +299,7 @@ export async function addComment(
   const internal = b.internal === true
   const via = inbound ? "email" : actor.type === "agent" ? "mcp" : "web"
   const mentions = await mentionsIn(env, app.id, text, v.team)
-  if (!text.trim() && !links.length) bad("A comment needs text or an attachment")
+  if (!text.trim() && !links.length && b.metadata_id === undefined) bad("A comment needs text or an attachment")
   await env.DB.batch([
     ...(inbound
       ? [
@@ -329,6 +331,7 @@ export async function addComment(
       via
     ),
     ...links,
+    ...attachReport(env, app.id, b.metadata_id, s.id, id),
     ...guestNameGuard(a),
     stillHere(a, s.id),
     ...(!internal ? [sql(env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, s.id)] : [])
@@ -342,12 +345,13 @@ export async function addComment(
         )
       )
     : []
+  const report = b.metadata_id === undefined ? null : await getReport(env, app.id, b.metadata_id as string, v)
   const comment: Comment = {
     via,
     id,
     author: actor,
     body: text,
-    attachments: files.map(attachment),
+    attachments: [...files.map(attachment), ...(report?.logs ?? [])],
     by_issue_author: actor.id === s.author.id,
     created_at: at,
     updated_at: at,

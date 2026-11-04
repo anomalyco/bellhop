@@ -98,6 +98,10 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("expired report metadata")) return new ApiFailure(410, "expired", "Report metadata expired")
+  if (message.includes("unknown report metadata")) return new ApiFailure(404, "not_found", "Report metadata not found")
+  if (message.includes("report metadata already attached"))
+    return new ApiFailure(409, "already_attached", "Report already attached")
   if (message.includes("tier requires human reply"))
     return new ApiFailure(403, "humans_only", "A human must reply on this issue; agents can leave internal notes")
   if (message.includes("invalid tier label") || message.includes("invalid tier assignee"))

@@ -36,6 +36,7 @@ import { projectTiers, tierBag } from "./tier-actors"
 import { appIdSQL, appKey, readBatch } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
+import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 
 const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
@@ -403,7 +404,7 @@ export async function getIssue(
     target = `SELECT id FROM issues WHERE ${where}`,
     key = appKey(scope)
   const {
-    data: [items, team, files, comments, events, relations]
+    data: [items, team, files, comments, events, relations, reports]
   } = await readBatch<
     [
       StoredSummary & {
@@ -439,7 +440,8 @@ export async function getIssue(
         ref_author: string
         ref_private: number
         ref_hidden: string | null
-      }
+      },
+      ReportRow
     ]
   >(env, scope, [
     sql(
@@ -489,7 +491,8 @@ export async function getIssue(
       JOIN issues i ON i.id=CASE WHEN rel.source_id=t.id THEN rel.target_id ELSE rel.source_id END ORDER BY rel.rowid`,
       key,
       number
-    )
+    ),
+    reportQuery(env, scope, v, "issue", number)
   ])
   const r = items[0],
     roles = roleMap(team)
@@ -520,6 +523,11 @@ export async function getIssue(
     const group = byParent.get(a.comment_id) ?? []
     group.push(attachment(a))
     byParent.set(a.comment_id, group)
+  }
+  const metadata = reports.map(decodeReport)
+  for (const m of metadata) {
+    const parent = m.attached_to!.comment_id
+    byParent.set(parent, [...(byParent.get(parent) ?? []), ...m.logs])
   }
   const s = summary(r, roles),
     timeline: TimelineItem[] = []
@@ -574,7 +582,12 @@ export async function getIssue(
     mentions: projectTiers(parseMentions(r.mentions, roles), r.tier_bag ? JSON.parse(r.tier_bag) : undefined),
     body: r.body,
     template_id: r.template_id,
-    system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
+    metadata,
+    system_info: r.system_info
+      ? privileged || metadata.some((m) => m.attached_to?.comment_id === null)
+        ? JSON.parse(r.system_info)
+        : "hidden"
+      : null,
     viewer_is_author: owns(v, s.author.id),
     attachments: byParent.get(null) ?? [],
     timeline,
@@ -591,6 +604,7 @@ export function summaryOf(issue: Issue): IssueSummary {
     body,
     template_id,
     system_info,
+    metadata,
     viewer_is_author,
     attachments,
     timeline,

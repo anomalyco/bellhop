@@ -80,8 +80,19 @@ export function emit(env: Env, ctx: Work, change: Change) {
   const { type, app, issue, items = [] } = change
   const updated: LiveEvent = { type: "issue.updated", issue }
   const list: LiveEvent = type === "issue.opened" ? { type: "issue.created", issue } : updated
-  const timeline: LiveEvent[] = items.map((item) => ({ type: "timeline.added", issue_id: issue.id, item }))
-  for (const comment of change.comments ?? []) timeline.push({ type: "comment.updated", issue_id: issue.id, comment })
+  // The Room RPC is mixed-audience, including during rolling upgrades. Rehydrate diagnostic
+  // files inside the receiving Room only after checking the socket's live credentials.
+  const wire = (comment: Comment) => ({
+    ...comment,
+    attachments: comment.attachments.filter((l) => !l.id.startsWith("ml_"))
+  })
+  const timeline: LiveEvent[] = items.map((item) => ({
+    type: "timeline.added",
+    issue_id: issue.id,
+    item: item.kind === "comment" ? { kind: "comment", comment: wire(item.comment) } : item
+  }))
+  for (const comment of change.comments ?? [])
+    timeline.push({ type: "comment.updated", issue_id: issue.id, comment: wire(comment) })
   if (change.deletedComment)
     timeline.push({ type: "comment.deleted", issue_id: issue.id, comment_id: change.deletedComment })
   const affected = [...(change.comments ?? []), ...items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))]

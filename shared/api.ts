@@ -102,6 +102,21 @@
 //   PUT    /api/apps/:slug/people/tier { email?, actor_id?, tier_id: string | null } -> Person   member; by email for
 //          accounts (applies when that email signs in, like invites) or by actor id for a guest or account. Never
 //          for team members or agents.
+// Report metadata: an app (e.g. a crash dialog) uploads logs and system specs first; the person then opens the
+// returned URL, a new-issue page with that metadata attached, reviews or removes items, and writes what happened.
+// The API never creates an issue. Unattached metadata expires after 7 days (its logs are deleted).
+//   POST   /api/apps/:slug/metadata ReportMetadataInput  -> ReportMetadataCreated   Authorization: Bearer <report key>
+//          (publishable, safe to ship in an app: it can only upload metadata; limited per key and per IP). JSON up to
+//          10 MB in total; logs are text.
+//   GET    /api/apps/:slug/metadata/:id                  -> ReportMetadata    anyone with the id until it's attached;
+//          afterwards the team, agents and the reporter
+//   DELETE /api/apps/:slug/metadata/:id/items { logs?: string[] (names), system?: string[] (keys), context?: string[] }
+//          -> ReportMetadata   the person reviewing it before submitting (only while unattached)
+//   GET    /api/apps/:slug/report-keys                   -> ReportKey[]        admin
+//   POST   /api/apps/:slug/report-keys { name }          -> NewReportKey       admin; the key is shown once
+//   DELETE /api/apps/:slug/report-keys/:id               -> { ok: true }       admin
+//   Pages: https://<slug>.blhp.app/new?metadata=<id> (and /<slug>/new?metadata= in path mode) opens new issue with it
+//   attached and its title suggested; https://blhp.app/new?metadata=<id> redirects to the right workspace.
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -363,6 +378,65 @@ export interface Person {
   last_seen_at: string | null
 }
 
+/** What an app uploads before a report is written. */
+export interface ReportMetadataInput {
+  /** A suggested issue title, e.g. the error's first line. */
+  title?: string
+  /** The error message or a short description of what failed. */
+  message?: string
+  /** The app sending it, e.g. { name: "OpenCode Desktop", version: "1.4.2" }. */
+  source?: { name: string; version?: string }
+  /** System specs, shown like system info ("OS", "CPU", "GPU", "Memory"). */
+  system?: SystemInfo
+  /** Free-form context, e.g. { session: "ses_…", model: "…" }. */
+  context?: Record<string, string>
+  /** Log files as text. */
+  logs?: { name: string; content: string }[]
+  /** A stable signature of the failure (e.g. a hash of the stack); used to suggest matching open issues. */
+  fingerprint?: string
+}
+
+export interface ReportMetadataCreated {
+  /** "md_…" */
+  id: string
+  /** The new-issue page with this metadata attached; open it in the person's browser. */
+  url: string
+  expires_at: string
+}
+
+export interface ReportMetadata {
+  id: string
+  title: string | null
+  message: string | null
+  source: { name: string; version?: string } | null
+  system: SystemInfo
+  context: Record<string, string>
+  /** The logs as attachments (kind "file"), readable by whoever may read this metadata. */
+  logs: Attachment[]
+  fingerprint: string | null
+  created_at: string
+  /** Null once attached. */
+  expires_at: string | null
+  /** Where it was attached, if it was. */
+  attached_to: { number: number; comment_id: string | null } | null
+  /** Open issues the viewer may see with the same fingerprint, most recent first. */
+  matches: IssueRef[]
+}
+
+/** A publishable key that can only upload report metadata to one workspace. */
+export interface ReportKey {
+  id: string
+  name: string
+  /** e.g. "bh_pub_7f3a…" */
+  preview: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export interface NewReportKey extends ReportKey {
+  key: string
+}
+
 /** A blocked guest or account in one app. */
 export interface Block {
   id: string
@@ -557,6 +631,8 @@ export interface Issue extends IssueSummary {
   viewer_is_author: boolean
   /** When the title or body last changed after posting; GET .../history has the earlier versions. */
   edited_at: string | null
+  /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
+  metadata: ReportMetadata[]
   /** @mentions in the body. */
   mentions: Mention[]
   timeline: TimelineItem[]
@@ -581,6 +657,8 @@ export interface NewIssue {
   guest_name?: string
   /** Only honoured when the app lets reporters choose (or for the team); otherwise the app's default applies. */
   private?: boolean
+  /** Uploaded report metadata to attach (its logs and specs stay visible to the team, agents and the reporter only). */
+  metadata_id?: string
 }
 
 export interface IssuePatch {
@@ -601,6 +679,8 @@ export interface IssuePatch {
 
 export interface NewComment {
   body: string
+  /** Uploaded report metadata to attach to this comment (e.g. the same crash again, or more logs). */
+  metadata_id?: string
   /** Team only: an internal note, seen by the team and agents, never by guests or the reporter. */
   internal?: boolean
   attachment_ids?: string[]
@@ -734,6 +814,8 @@ export interface WebhookPayload {
   moved_to?: { slug: string; number: number; url: string }
   /** Set when this delivery is a manual redelivery of an earlier one. */
   redelivery_of?: string
+  /** For issue.opened / comment.created: report metadata attached to that post (team-facing). */
+  metadata?: ReportMetadata[]
   mcp_url: string
 }
 
@@ -748,6 +830,7 @@ export interface WebhookPayload {
 //   get_issue      { number }                    full issue: body, timeline, attachments, relations, system info
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
+//   get_metadata   { id }                        report metadata: specs, context, log attachments, fingerprint, matches
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)

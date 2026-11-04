@@ -22,6 +22,7 @@ import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
+import { getReport, reportLog } from "./report-data"
 import { addComment, editComment, moderate, relate, removeLabel, transferIssue, updateIssue } from "./mutations"
 import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
@@ -47,6 +48,7 @@ const toolRoles = {
   search_issues: "read",
   get_issue: "read",
   get_attachment: "read",
+  get_metadata: "read",
   list_labels: "read",
   list_templates: "read",
   comment: "respond",
@@ -183,9 +185,18 @@ const tools = [
   tool("search_issues", "Search titles, bodies, and comments across open and closed issues.", { query: text, limit }, [
     "query"
   ]),
-  tool("get_attachment", "Read an image or get an absolute link to a larger image, video, or file.", { id: text }, [
-    "id"
-  ]),
+  tool(
+    "get_metadata",
+    "Read a workspace report, its system specs, context, diagnostic log attachments and fingerprint matches.",
+    { id: text },
+    ["id"]
+  ),
+  tool(
+    "get_attachment",
+    "Read a report log as text, read an image, or get a link to a larger image, video, or file.",
+    { id: text },
+    ["id"]
+  ),
   tool("list_labels", "List the labels available in this app.", {}),
   tool("list_mentionables", "List current workspace member and agent handles.", {}),
   tool("transfer_issue", "Move to another workspace in which this agent may triage.", { number, to_app: text }, [
@@ -195,7 +206,7 @@ const tools = [
   tool(
     "comment",
     "Post a comment or a team-only internal note.",
-    { number, body: text, internal: { type: "boolean" } },
+    { number, body: text, internal: { type: "boolean" }, metadata_id: text },
     ["number", "body"]
   ),
   tool("edit_comment", "Edit this agent's own comment.", { comment_id: text, body: text }, ["comment_id", "body"]),
@@ -424,28 +435,45 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           { ...teamViewer, actorId: actor.id }
         )
       )
-    case "get_issue":
-      return textResult(
-        await getIssue(
-          env,
-          app.id,
-          n(),
-          { team: true, actorId: actor.id },
-          {
-            origin: a.origin,
-            viewer: async (slug) =>
-              caller.apps.some((x) => x.slug === slug) ? { team: true, actorId: actor.id } : null
-          }
-        )
+    case "get_issue": {
+      const issue = await getIssue(
+        env,
+        app.id,
+        n(),
+        { team: true, actorId: actor.id },
+        {
+          origin: a.origin,
+          viewer: async (slug) => (caller.apps.some((x) => x.slug === slug) ? { team: true, actorId: actor.id } : null)
+        }
       )
+      return textResult({
+        ...issue,
+        metadata: issue.metadata.map(({ id, title, source, fingerprint, attached_to, logs }) => ({
+          id,
+          title,
+          source,
+          fingerprint,
+          attached_to,
+          logs
+        }))
+      })
+    }
+    case "get_metadata":
+      return textResult(await getReport(env, app.id, str(b.id, "metadata id", 80), { team: true, actorId: actor.id }))
     case "list_labels":
       return textResult(await labels(env, app.id))
     case "get_attachment": {
+      const id = str(b.id, "id", 64)
+      if (id.startsWith("ml_")) {
+        const l = (await reportLog(env, id, app.id, { team: true, actorId: actor.id }, undefined)) ?? missing()
+        const o = (await env.MEDIA.get(l.object_key)) ?? missing()
+        return textResult(await o.text())
+      }
       const row = await sql(
         env,
         `SELECT id,name,mime,kind,size,object_key FROM attachments
         WHERE id=? AND app_id=?`,
-        str(b.id, "id", 64),
+        id,
         app.id
       ).first<AttachmentRow & { object_key: string }>()
       if (!row) missing()
