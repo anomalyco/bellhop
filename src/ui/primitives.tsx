@@ -139,6 +139,12 @@ export function AgentAvatar({ size = 20 }: { size?: number }) {
   )
 }
 
+/** An application's icon, rounded like the mark; the Bellhop mark when it has none. */
+export function AppIcon({ src, size = 20 }: { src: string | null; size?: number }) {
+  if (!src) return <span className="logo-mark"><AgentAvatar size={size} /></span>
+  return <img className="app-icon" src={src} width={size} height={size} alt="" style={{ borderRadius: Math.round(size * 0.26) }} />
+}
+
 export function Logo({ size = 24 }: { size?: number }) {
   return (
     <span className="logo">

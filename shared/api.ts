@@ -54,6 +54,29 @@
 //   GET    /auth/dev?email=<email>&next=<path>           only when DEV_LOGIN=1
 //   POST   /auth/logout
 //   POST   /mcp                                          MCP, Streamable HTTP, Authorization: Bearer <token>
+//                                                         (an app's agent token, or an OAuth access token; see below)
+//
+// OAuth for agents (MCP clients). blhp.app is both the authorization server and the protected resource; OAuth 2.1
+// public clients with PKCE (S256) only. A grant names the workspaces (apps) the agent may use; on each one it acts
+// with at most the approving user's role there, and posts as an agent (AI badge) named by the client.
+//   GET    /.well-known/oauth-protected-resource        RFC 9728 metadata for https://blhp.app/mcp
+//   GET    /.well-known/oauth-authorization-server      RFC 8414 metadata (issuer https://blhp.app)
+//          /mcp without a valid token -> 401, WWW-Authenticate: Bearer resource_metadata="<protected-resource URL>"
+//   POST   /oauth/register         RFC 7591 dynamic registration { client_name, redirect_uris } -> { client_id, ... }
+//   GET    /oauth/authorize        authorization code + PKCE; signs the user in if needed, then -> /oauth/consent?request=<id>
+//   POST   /oauth/device           RFC 8628 { client_id } -> { device_code, user_code, verification_uri (/device),
+//                                   verification_uri_complete, expires_in, interval }   ("polling" sign-in for headless agents)
+//   POST   /oauth/token            grant_type authorization_code | refresh_token | urn:ietf:params:oauth:grant-type:device_code
+//                                   -> { access_token (1 h), refresh_token (rotating), token_type: "Bearer", expires_in, scope }
+//                                   device polling errors: authorization_pending, slow_down, access_denied, expired_token
+//   POST   /oauth/revoke           RFC 7009
+// Pages on blhp.app (the web app): /oauth/consent?request=<id> and /device (enter or confirm a user code).
+//   GET    /api/oauth/requests/:id                      -> OAuthRequest       member (the signed-in user)
+//   POST   /api/oauth/device/lookup { user_code }       -> { request_id }     signed in
+//   POST   /api/oauth/requests/:id/approve { app_ids }  -> { redirect_to: string | null }   null for device requests
+//   POST   /api/oauth/requests/:id/deny                 -> { redirect_to: string | null }
+//   GET    /api/me/agents                               -> ConnectedAgent[]   the user's OAuth grants
+//   DELETE /api/me/agents/:id                           -> { ok: true }       revokes the grant and its tokens
 //
 // Errors: non-2xx responses carry ApiError. 401 = sign in, 403 = not allowed, 404, 409 (slug taken), 413 (too
 // large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited. A guest posting without a
@@ -355,7 +378,9 @@ export interface WebhookPayload {
   mcp_url: string
 }
 
-// MCP tools (POST /mcp, scoped to the token's application). Names and inputs:
+// MCP tools (POST /mcp). An app token is scoped to its app; an OAuth token to the apps in its grant. Every issue tool
+// takes an optional `app` (slug), required when the token covers more than one app. Names and inputs:
+//   list_apps      {}                            the apps this token can use, with the role the agent acts with
 //   list_issues    { state?: "open"|"closed", label?: string, query?: string, limit?: number }
 //   get_issue      { number }                    full issue: body, timeline, attachments, relations, system info
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
@@ -366,3 +391,30 @@ export interface WebhookPayload {
 //   relate_issues  { number, other_number, type: RelationType }
 //   claim_issue    { number }                    assigns the agent, adds a "claimed" event
 //   set_activity   { number, text?: string|null, clear?: boolean }   typing dots + short status; expires after 60 s
+//   Workspace setup (owner role needed for webhooks; member for labels):
+//   get_webhook    {}                            URL, whether a secret is set, recent deliveries
+//   set_webhook    { url: string|null }          https only; null removes it
+//   rotate_webhook_secret {}                     returns the new secret once
+//   test_webhook   {}                            sends a ping, returns the delivery id
+//   create_label   { name, color?, description? }
+//   update_label   { name, new_name?, color?, description? }
+
+/** The consent page's request: who is asking and which of the user's apps they can grant. */
+export interface OAuthRequest {
+  id: string
+  kind: "authorization_code" | "device"
+  client_name: string
+  /** For authorization_code: the host the user will be sent back to. */
+  redirect_host: string | null
+  apps: { id: string; slug: string; name: string; icon_url: string | null; role: "owner" | "member" }[]
+  expires_at: string
+}
+
+/** An agent the user has connected over OAuth. */
+export interface ConnectedAgent {
+  id: string
+  client_name: string
+  apps: { slug: string; name: string }[]
+  created_at: string
+  last_used_at: string | null
+}

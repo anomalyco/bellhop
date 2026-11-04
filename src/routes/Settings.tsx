@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { Link } from "wouter"
 import type { App, AppDetail, AppSettings, Label as LabelType, NewToken, Template, TemplateInput } from "../../shared/api"
-import { api, errorMessage, keys } from "../lib/api"
+import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { invalidate, setData, useResource } from "../lib/cache"
 import { Time } from "../lib/time"
 import { UserAvatar } from "../ui/Actor"
 import { PlusIcon } from "../ui/icons"
 import { AppLayout, Page } from "../ui/Shell"
-import { Button, Label } from "../ui/primitives"
+import { AppIcon, Button, Label } from "../ui/primitives"
 import { appLabel, appPath, signInHref } from "../lib/site"
 
 type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members"
@@ -129,6 +129,7 @@ function General({ app }: { app: AppDetail }) {
   return (
     <form className="settings-form" onSubmit={save}>
       <Heading title="General" />
+      <IconField app={app} />
       <div className="field">
         <label className="field-label" htmlFor="set-name">
           Name
@@ -169,6 +170,88 @@ function General({ app }: { app: AppDetail }) {
         <p className="muted-text">Only the owner can change these.</p>
       )}
     </form>
+  )
+}
+
+const iconTypes = ["image/png", "image/jpeg", "image/webp"]
+const iconLimit = 1024 * 1024
+const tooBig = "That image is over 1 MB. Try a smaller export."
+const wrongType = "Use a PNG, JPEG or WebP image."
+
+/** The app's icon: favicon and top-left logo on its pages. Owners upload or remove it. */
+function IconField({ app }: { app: AppDetail }) {
+  const owner = app.role === "owner"
+  const input = useRef<HTMLInputElement>(null)
+  const [busy, setBusy] = useState<"upload" | "remove" | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const store = (next: AppDetail) => {
+    setData(keys.app(app.slug), next)
+    setData<App[]>(keys.apps, (apps) => apps?.map((a) => (a.id === next.id ? { ...a, icon_url: next.icon_url } : a)))
+  }
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return
+    setError(null)
+    if (!iconTypes.includes(file.type)) return setError(wrongType)
+    if (file.size > iconLimit) return setError(tooBig)
+    setBusy("upload")
+    try {
+      store(await api.putIcon(app.slug, file))
+    } catch (e) {
+      setError(e instanceof ApiFailure && e.status === 413 ? tooBig : e instanceof ApiFailure && e.status === 415 ? wrongType : errorMessage(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const remove = async () => {
+    setError(null)
+    setBusy("remove")
+    try {
+      store(await api.deleteIcon(app.slug))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  return (
+    <div className="field">
+      <span className="field-label">Icon</span>
+      <div className="icon-field">
+        <AppIcon src={app.icon_url} size={48} />
+        {owner ? (
+          <div className="icon-field-main">
+            <div className="row">
+              <Button size="small" onClick={() => input.current?.click()} disabled={!!busy}>
+                {busy === "upload" ? "Uploading…" : app.icon_url ? "Replace" : "Upload"}
+              </Button>
+              {app.icon_url && (
+                <Button size="small" variant="invisible" onClick={remove} disabled={!!busy}>
+                  {busy === "remove" ? "Removing…" : "Remove"}
+                </Button>
+              )}
+            </div>
+            <span className="icon-field-hint">PNG, JPEG or WebP up to 1 MB. Square images work best; shown at 16–48 px.</span>
+            <input
+              ref={input}
+              type="file"
+              accept={iconTypes.join(",")}
+              hidden
+              onChange={(e) => {
+                void upload(e.currentTarget.files?.[0])
+                e.currentTarget.value = ""
+              }}
+            />
+          </div>
+        ) : (
+          <span className="icon-field-hint">{app.icon_url ? "Shown as the tab icon and logo on these pages." : "Using the Bellhop mark."}</span>
+        )}
+      </div>
+      {error && <p className="field-error">{error}</p>}
+    </div>
   )
 }
 

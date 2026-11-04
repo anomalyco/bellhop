@@ -407,6 +407,27 @@ img.avatar[data-photo] {
   font-weight: var(--weight-semibold);
   letter-spacing: -0.015em;
 }
+.logo[data-app-icon] .logo-word {
+  color: var(--fg-faint);
+}
+.logo-mark {
+  display: inline-flex;
+  flex: none;
+}
+/* The mark in lists and icon slots: the jacket on the white tile, like the logo */
+.logo-mark .avatar[data-agent] {
+  color: var(--brand);
+  background: var(--primary-bg);
+  box-shadow: none;
+}
+.app-icon {
+  display: inline-block;
+  flex: none;
+  object-fit: cover;
+  vertical-align: middle;
+  background: var(--layer-1);
+  box-shadow: 0 0 0 0.5px var(--border-strong);
+}
 
 /* Text inputs: OpenCode's text-input-v2 */
 .input {

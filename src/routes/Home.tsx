@@ -1,10 +1,11 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { Link, useLocation, useSearch } from "wouter"
-import type { App, Config } from "../../shared/api"
+import type { App, Config, ConnectedAgent } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { setData, useResource } from "../lib/cache"
 import { Header, Page, useMe } from "../ui/Shell"
-import { AgentAvatar, Button } from "../ui/primitives"
+import { AgentAvatar, AppIcon, Button } from "../ui/primitives"
+import { Time } from "../lib/time"
 import { appLabel, appPath, isAbsolute } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 
@@ -29,10 +30,11 @@ export function Home() {
   return me.user ? <Apps /> : <SignIn />
 }
 
-function SignIn() {
+/** The sign-in page. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
+export function SignIn({ back }: { back?: string }) {
   const { data: config } = useResource<Config>(keys.config, api.config, 60_000)
   const search = useSearch()
-  const raw = new URLSearchParams(search).get("next") ?? "/"
+  const raw = back ?? new URLSearchParams(search).get("next") ?? "/"
   // Absolute next URLs come from app subdomains; the Worker only follows them back onto this site.
   const next = (raw.startsWith("/") && !raw.startsWith("//")) || isAbsolute(raw) ? raw : "/"
   const [email, setEmail] = useState("")
@@ -106,6 +108,7 @@ function Apps() {
             {apps?.length === 0 && <div className="box-row muted-text">No applications yet.</div>}
             {apps?.map((app) => (
               <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
+                <AppIcon src={app.icon_url} size={28} />
                 <div className="app-row-main">
                   <div className="app-row-title">
                     <span className="app-row-name">{app.name}</span>
@@ -117,6 +120,7 @@ function Apps() {
               </SiteLink>
             ))}
             </div>
+            <ConnectedAgents />
           </section>
           <NewApp />
         </div>
@@ -135,7 +139,10 @@ const slugify = (name: string) =>
     .slice(0, 40)
     .replace(/-+$/, "")
 
-const reserved = new Set(["api", "auth", "media", "mcp", "new", "settings", "_design"])
+// The Worker's reserved slugs (they double as subdomains), plus the home domain's own pages.
+const reserved = new Set(
+  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device _design".split(" "),
+)
 
 function NewApp() {
   const [, navigate] = useLocation()
@@ -224,5 +231,82 @@ function NewApp() {
         </Button>
       </div>
     </form>
+  )
+}
+
+/** Agents the user connected over OAuth, each disconnectable after a small inline confirm. */
+function ConnectedAgents() {
+  const { data: agents, error } = useResource<ConnectedAgent[]>(keys.agents, api.agents, 10_000)
+  return (
+    <>
+      <h2 className="section-title section-title-gap">Connected agents</h2>
+      <div className="box">
+        {!agents && !error && <div className="box-row skeleton-row" />}
+        {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
+        {agents?.length === 0 && (
+          <div className="box-row muted-text">
+            <span>
+              Add <code className="mono agent-mcp-url">{window.location.origin}/mcp</code> to your agent's MCP servers.
+            </span>
+          </div>
+        )}
+        {agents?.map((agent) => <AgentRow key={agent.id} agent={agent} />)}
+      </div>
+    </>
+  )
+}
+
+function AgentRow({ agent }: { agent: ConnectedAgent }) {
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const disconnect = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.disconnectAgent(agent.id)
+      setData<ConnectedAgent[]>(keys.agents, (list) => list?.filter((a) => a.id !== agent.id))
+    } catch (e) {
+      setError(errorMessage(e))
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="box-row agent-row">
+      <AgentAvatar size={28} />
+      <div className="app-row-main">
+        <div className="app-row-title">
+          <span className="app-row-name">{agent.client_name}</span>
+        </div>
+        <div className="issue-meta">
+          {agent.apps.map((a) => a.name).join(", ") || "No workspaces"} · Connected <Time iso={agent.created_at} /> ·{" "}
+          {agent.last_used_at ? (
+            <>
+              last used <Time iso={agent.last_used_at} />
+            </>
+          ) : (
+            "not used yet"
+          )}
+        </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+      {confirming ? (
+        <div className="agent-confirm">
+          <span className="muted-text">Disconnect?</span>
+          <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button size="small" variant="danger" onClick={disconnect} disabled={busy}>
+            {busy ? "Disconnecting…" : "Disconnect"}
+          </Button>
+        </div>
+      ) : (
+        <Button size="small" onClick={() => setConfirming(true)}>
+          Disconnect
+        </Button>
+      )}
+    </div>
   )
 }

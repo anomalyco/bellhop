@@ -413,6 +413,92 @@ a.box-row:hover {
   text-align: center;
 }
 
+/* OAuth consent and device pages: one compact centred column, no surfaces */
+.oauth {
+  display: grid;
+  justify-items: center;
+  padding: 72px 20px 48px;
+}
+.oauth-card {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+  max-width: 440px;
+}
+.oauth-title {
+  margin: 0;
+  font-size: var(--text-heading);
+  font-weight: var(--weight-semibold);
+  line-height: 28px;
+  letter-spacing: -0.018em;
+  overflow-wrap: anywhere;
+}
+.oauth-sub {
+  margin: -8px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.oauth-done {
+  gap: 8px;
+}
+.oauth-done p {
+  margin: 0;
+}
+.oauth-apps {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-top: 1px solid var(--border-muted);
+}
+.oauth-app {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-muted);
+  cursor: pointer;
+}
+.oauth-app input {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--primary-bg);
+  cursor: pointer;
+}
+.oauth-app-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.oauth-scope {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.oauth-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.device-code input {
+  font-family: var(--font-mono);
+  font-size: 20px;
+  letter-spacing: 0.12em;
+  text-align: center;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 /* Home */
 .home-grid {
   display: grid;
@@ -420,8 +506,28 @@ a.box-row:hover {
   gap: 48px;
   align-items: start;
 }
-.app-row {
+.app-row,
+.agent-row {
   align-items: center;
+}
+.agent-row .avatar[data-agent] {
+  flex: none;
+}
+.agent-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+.agent-mcp-url {
+  padding: 1px 5px;
+  font-size: 12px;
+  color: var(--fg-muted);
+  background: var(--layer-2);
+  border-radius: var(--radius-small);
+}
+.section-title-gap {
+  margin-top: 28px;
 }
 .app-row-main {
   flex: 1;
@@ -1811,6 +1917,19 @@ button.prop:hover,
 }
 .settings-form .field {
   max-width: 520px;
+}
+.icon-field {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.icon-field-main {
+  display: grid;
+  gap: 6px;
+}
+.icon-field-hint {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
 }
 .settings-row {
   align-items: center;

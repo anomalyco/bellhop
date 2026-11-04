@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useEffect, type ReactNode } from "react"
 import { Link, useLocation } from "wouter"
 import type { AppDetail, Me } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
@@ -6,7 +6,8 @@ import { useResource } from "../lib/cache"
 import { UserAvatar } from "./Actor"
 import { IssueOpenIcon, SettingsIcon } from "./icons"
 import { Menu, MenuHeader, MenuItem } from "./Menu"
-import { Counter, Logo } from "./primitives"
+import { AppIcon, Counter, Logo } from "./primitives"
+import { setFavicon } from "../lib/favicon"
 import { appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
 import { SiteLink } from "./SiteLink"
 
@@ -77,7 +78,15 @@ export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: s
     <header className="header" data-app={app ? "" : undefined}>
       <div className="header-inner">
         <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
-          <Logo size={22} />
+          {detail?.icon_url ? (
+            // An app with its own icon leads with it; Bellhop stays as a quiet word beside it.
+            <span className="logo" data-app-icon>
+              <AppIcon src={detail.icon_url} size={22} />
+              <span className="logo-word">Bellhop</span>
+            </span>
+          ) : (
+            <Logo size={22} />
+          )}
         </SiteLink>
         {app && (
           <>
@@ -131,6 +140,11 @@ export function Page({ children, narrow }: { children: ReactNode; narrow?: boole
 /** Header with the Issues/Settings nav for every page inside an application. */
 export function AppLayout({ slug, tab, children }: { slug: string; tab: "issues" | "settings"; children: (app: AppDetail) => ReactNode }) {
   const { data: app, error } = useApp(slug)
+  const icon = app?.icon_url ?? null
+  useEffect(() => {
+    setFavicon(icon)
+    return () => setFavicon(null)
+  }, [icon])
   if (!app) {
     return (
       <>

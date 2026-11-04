@@ -4,6 +4,7 @@ import type {
   AppSettings,
   Comment,
   Config,
+  ConnectedAgent,
   Issue,
   IssueList,
   IssuePatch,
@@ -14,6 +15,7 @@ import type {
   NewComment,
   NewIssue,
   NewToken,
+  OAuthRequest,
   RelationType,
   Template,
   TemplateInput,
@@ -104,6 +106,20 @@ export const api = {
   removeRelation: (slug: string, number: number, id: string) =>
     request<Issue>("DELETE", `${app(slug)}/issues/${number}/relations/${enc(id)}`),
   logout: () => fetch("/auth/logout", { method: "POST", credentials: "same-origin" }),
+  /** The raw image goes up as the body with its own Content-Type. */
+  putIcon: async (slug: string, file: File) => {
+    const res = await fetch(`${app(slug)}/icon`, { method: "PUT", credentials: "same-origin", headers: { "Content-Type": file.type }, body: file })
+    if (!res.ok) throw await failure(res)
+    return (await res.json()) as AppDetail
+  },
+  deleteIcon: (slug: string) => request<AppDetail>("DELETE", `${app(slug)}/icon`),
+  oauthRequest: (id: string) => get<OAuthRequest>(`/api/oauth/requests/${enc(id)}`),
+  deviceLookup: (userCode: string) => request<{ request_id: string }>("POST", "/api/oauth/device/lookup", { user_code: userCode }),
+  approve: (id: string, appIds: string[]) =>
+    request<{ redirect_to: string | null }>("POST", `/api/oauth/requests/${enc(id)}/approve`, { app_ids: appIds }),
+  deny: (id: string) => request<{ redirect_to: string | null }>("POST", `/api/oauth/requests/${enc(id)}/deny`),
+  agents: () => get<ConnectedAgent[]>("/api/me/agents"),
+  disconnectAgent: (id: string) => request<{ ok: true }>("DELETE", `/api/me/agents/${enc(id)}`),
 }
 
 // Cache keys, so every page agrees on where a resource lives.
@@ -111,6 +127,7 @@ export const keys = {
   config: "config",
   me: "me",
   apps: "apps",
+  agents: "agents",
   app: (slug: string) => `app:${slug}`,
   settings: (slug: string) => `settings:${slug}`,
   issue: (slug: string, number: number) => `issue:${slug}:${number}`,
