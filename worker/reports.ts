@@ -23,13 +23,30 @@ import { decodeReport, getReport, reportQuery, purgeReportObjects, type ReportRo
 import type { Viewer } from "./visibility"
 import type { ReportKey } from "../shared/api"
 
-const MiB = 1024 * 1024,
-  ttl = 7 * 86400000
+const MiB = 1024 * 1024
+/** Upload limits, also rendered into the public docs (worker/docs.ts). */
+export const reportLimits = {
+  request: 10 * MiB,
+  logs: 20,
+  log: 5 * MiB,
+  logName: 255,
+  fields: 64,
+  fieldName: 120,
+  systemValue: 2048,
+  contextValue: 4096,
+  sections: 256 * 1024,
+  title: 256,
+  message: 8192,
+  fingerprint: 256,
+  source: 120,
+  ttlDays: 7
+}
+const ttl = reportLimits.ttlDays * 86400000
 const tooLarge = () => fail(413, "too_large", "Report exceeds the upload limit")
 async function jsonUpload(c: Ctx) {
   if (c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json")
     fail(415, "unsupported_media_type", "Expected application/json")
-  if (Number(c.req.header("content-length")) > 10 * MiB) {
+  if (Number(c.req.header("content-length")) > reportLimits.request) {
     // As for ordinary uploads, drain without retaining bytes. Closing an in-flight
     // request body early can reset the connection instead of returning the JSON 413.
     await c.req.raw.body?.pipeTo(new WritableStream())
@@ -44,7 +61,7 @@ async function jsonUpload(c: Ctx) {
       const r = await reader.read()
       if (r.done) break
       const end = size + r.value.byteLength
-      if (end > 10 * MiB) {
+      if (end > reportLimits.request) {
         buffer = new Uint8Array(0)
         while (!(await reader.read()).done) {
           /* discard the rest of a chunked upload */
@@ -52,7 +69,7 @@ async function jsonUpload(c: Ctx) {
         tooLarge()
       }
       if (end > buffer.length) {
-        const next = new Uint8Array(Math.min(10 * MiB, Math.max(end, buffer.length * 2)))
+        const next = new Uint8Array(Math.min(reportLimits.request, Math.max(end, buffer.length * 2)))
         next.set(buffer)
         buffer = next
       }
@@ -73,25 +90,27 @@ async function jsonUpload(c: Ctx) {
 function fields(value: unknown, limit: number) {
   if (value === undefined) return {}
   const entries = Object.entries(input(value))
-  if (entries.length > 64) bad("At most 64 fields per section")
-  return Object.fromEntries(entries.map(([k, v]) => [str(k, "field name", 120), str(v, "field value", limit, true)]))
+  if (entries.length > reportLimits.fields) bad(`At most ${reportLimits.fields} fields per section`)
+  return Object.fromEntries(
+    entries.map(([k, v]) => [str(k, "field name", reportLimits.fieldName), str(v, "field value", limit, true)])
+  )
 }
 function logs(value: unknown) {
   if (value === undefined) return []
   if (!Array.isArray(value)) bad("Expected logs")
-  if (value.length > 20) tooLarge()
+  if (value.length > reportLimits.logs) tooLarge()
   const seen = new Set<string>(),
     enc = new TextEncoder()
   return value.map((entry) => {
     const item = input(entry),
-      name = str(item.name, "log name", 255)
+      name = str(item.name, "log name", reportLimits.logName)
     if (/[\/\\\p{Cc}\p{Cs}]/u.test(name) || name === "." || name === ".." || seen.has(name))
       bad("Invalid or duplicate log name")
     seen.add(name)
     if (typeof item.content !== "string") bad("Expected text log content")
-    if (item.content.length > 5 * MiB) tooLarge()
+    if (item.content.length > reportLimits.log) tooLarge()
     const bytes = enc.encode(item.content)
-    if (bytes.length > 5 * MiB) tooLarge()
+    if (bytes.length > reportLimits.log) tooLarge()
     return { name, bytes, id: "ml_" + uid() }
   })
 }
@@ -120,14 +139,14 @@ export async function uploadReport(c: Ctx) {
     at = now(),
     expires = new Date(Date.now() + ttl).toISOString(),
     items = logs(b.logs),
-    system = fields(b.system, 2048),
-    context = fields(b.context, 4096)
+    system = fields(b.system, reportLimits.systemValue),
+    context = fields(b.context, reportLimits.contextValue)
   const src = b.source === undefined ? null : input(b.source),
     source = src && {
-      name: str(src.name, "source name", 120),
-      ...(src.version !== undefined && { version: str(src.version, "source version", 120) })
+      name: str(src.name, "source name", reportLimits.source),
+      ...(src.version !== undefined && { version: str(src.version, "source version", reportLimits.source) })
     }
-  if (new TextEncoder().encode(JSON.stringify([system, context])).length > 256 * 1024) tooLarge()
+  if (new TextEncoder().encode(JSON.stringify([system, context])).length > reportLimits.sections) tooLarge()
   await env.DB.batch([
     // Reserve the accepted wire bytes and upload slot together, before writing any R2
     // objects. Review/deletion never refunds this daily abuse budget.
@@ -144,12 +163,12 @@ export async function uploadReport(c: Ctx) {
       `INSERT INTO report_metadata(id,app_id,title,message,source,system,context,fingerprint,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,
       id,
       key.app_id,
-      b.title === undefined ? null : str(b.title, "title", 256, true),
-      b.message === undefined ? null : str(b.message, "message", 8192, true),
+      b.title === undefined ? null : str(b.title, "title", reportLimits.title, true),
+      b.message === undefined ? null : str(b.message, "message", reportLimits.message, true),
       source && JSON.stringify(source),
       JSON.stringify(system),
       JSON.stringify(context),
-      b.fingerprint === undefined ? null : str(b.fingerprint, "fingerprint", 256),
+      b.fingerprint === undefined ? null : str(b.fingerprint, "fingerprint", reportLimits.fingerprint),
       at,
       expires
     ),

@@ -31,6 +31,7 @@ import { reports, uploadReport } from "./reports"
 import { expireReports } from "./report-data"
 import { imports, wakeImports } from "./github-import"
 import { exportWorkspace } from "./workspace-export"
+import { docs } from "./docs"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -222,6 +223,7 @@ api.get("/issues/:number/feed.atom", (c) =>
     ? atom(c, c.req.param("number"))
     : c.notFound()
 )
+api.route("/", docs)
 api.get("/og/*", ogImage)
 api.get("*", (c) => {
   // Never turn unknown API/protocol routes into successful SPA documents.

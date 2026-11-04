@@ -205,6 +205,7 @@ export async function page(c: Ctx) {
     `<link rel="icon" href="${xml(icon ?? "/favicon.svg")}"><link rel="apple-touch-icon" href="${xml(icon ?? "/apple-touch-icon.png")}">`
   ]
   if (noindex) tags.push(meta("robots", "noindex"))
+  if (slug === null) tags.push(`<link rel="describedby" href="${xml(`${o}/llms.txt`)}">`)
   if (slug && p.listed && p.code === 200 && (article || path === "/"))
     tags.push(
       `<link rel="alternate" type="application/json+oembed" href="${xml(`${o}/oembed?url=${encodeURIComponent(canonical)}&format=json`)}">`
@@ -429,7 +430,8 @@ export async function robots(c: Ctx) {
     listed = slug === null ? 1 : await visibility(c, slug)
   if (listed === null) return notFound(c)
   const sitemap = slug === null ? `${origin(c)}/sitemap.xml` : appUrl(c.env, origin(c), slug, "/sitemap.xml")
-  return c.text(`User-agent: *\n${listed ? `Allow: /\nSitemap: ${sitemap}` : "Disallow: /"}\n`)
+  const docs = slug === null ? `\nSitemap: ${origin(c)}/docs/sitemap.xml` : ""
+  return c.text(`User-agent: *\n${listed ? `Allow: /\nSitemap: ${sitemap}${docs}` : "Disallow: /"}\n`)
 }
 export async function sitemap(c: Ctx) {
   const slug = workspace(c),
@@ -440,7 +442,7 @@ export async function sitemap(c: Ctx) {
     const apps = await rows<{ slug: string }>(
       sql(c.env, "SELECT slug FROM apps WHERE public=1 ORDER BY slug LIMIT 50000")
     )
-    doc = `<sitemapindex ${ns}>${apps.map((a) => `<sitemap><loc>${xml(appUrl(c.env, o, a.slug, "/sitemap.xml"))}</loc></sitemap>`).join("")}</sitemapindex>`
+    doc = `<sitemapindex ${ns}><sitemap><loc>${xml(`${o}/docs/sitemap.xml`)}</loc></sitemap>${apps.map((a) => `<sitemap><loc>${xml(appUrl(c.env, o, a.slug, "/sitemap.xml"))}</loc></sitemap>`).join("")}</sitemapindex>`
   } else {
     // Check visibility and enumerate URLs in the same snapshot: a just-unlisted workspace
     // cannot leave issue numbers behind in a response.

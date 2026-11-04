@@ -3,7 +3,7 @@ import type { IssueStatus, CloseReason } from "../shared/api"
 import { sha256, sql } from "./core"
 import { firstRow, type Read } from "./read-scope"
 
-const OG_DESIGN_VERSION = "b5a-3"
+export const OG_DESIGN_VERSION = "b10-1"
 export const homeTitle = "Bellhop: live support for your product"
 const tagline = "Report bugs, ask questions, and get answers from the people who build your product."
 export const statuses = {
@@ -14,7 +14,7 @@ export const statuses = {
 } satisfies Record<IssueStatus, { name: string; color: string }>
 
 export type PreviewCard = {
-  kind: "home" | "app" | "issue"
+  kind: "home" | "app" | "issue" | "docs"
   appId: string
   name: string
   slug: string

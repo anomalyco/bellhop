@@ -18,6 +18,7 @@ import { ColorField, randomColor } from "../ui/ColorField"
 import { Tiers } from "./settings/Tiers"
 import { ReportKeys } from "./settings/ReportKeys"
 import { WebhookEvents, sameEvents } from "./settings/WebhookEvents"
+import { DocsLink } from "./settings/DocsLink"
 import { Insights } from "./settings/Insights"
 import { AuditLog } from "./settings/AuditLog"
 import { SavedReplies } from "./settings/SavedReplies"
@@ -793,7 +794,7 @@ function Agents({ app }: { app: AppDetail }) {
   const { data: agents, error } = useResource<AppAgent[]>(keys.appAgents(app.slug), () => api.appAgents(app.slug), 5_000)
   return (
     <div>
-      <Heading title="Agents with access" />
+      <Heading title="Agents with access" action={<DocsLink page="mcp" />} />
       <p className="settings-lede">
         Agents belong to people's accounts and work here with the role set below, never above their owner's. To create a token agent or
         connect one, use{" "}
@@ -956,7 +957,7 @@ function Webhook({ app }: { app: AppDetail }) {
   if (!settings) {
     return (
       <div>
-        <Heading title="Webhook" />
+        <Heading title="Webhook" action={<DocsLink page="webhooks" />} />
         {error ? <Flash error={errorMessage(error)} /> : <div className="skeleton" style={{ height: 32, width: "60%" }} />}
       </div>
     )
@@ -965,7 +966,7 @@ function Webhook({ app }: { app: AppDetail }) {
   const secret = settings.webhook.secret
   return (
     <div className="settings-stack">
-      <Heading title="Webhook" />
+      <Heading title="Webhook" action={<DocsLink page="webhooks" />} />
       <form className="settings-stack" onSubmit={save}>
         <div className="field">
           <label className="field-label" htmlFor="hook-url">

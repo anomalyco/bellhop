@@ -38,7 +38,7 @@ const number = { type: "integer", minimum: 1 },
   limit = { ...number, maximum: 100 }
 const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
-const toolRoles = {
+export const toolRoles = {
   list_apps: "discover",
   list_tiers: "read",
   list_saved_replies: "read",
@@ -174,7 +174,7 @@ const workspaceTools = [
   ),
   tool("remove_member", "Remove a team member or invitation (admin).", { email: text }, ["email"])
 ]
-const tools = [
+export const tools = [
   ...workspaceTools,
   tool("list_apps", "List the workspaces this agent can use and its role in each.", {}),
   tool(

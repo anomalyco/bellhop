@@ -7,6 +7,7 @@ import { Time } from "../../lib/time"
 import { PlusIcon } from "../../ui/icons"
 import { Button } from "../../ui/primitives"
 import { CopyField, Snippet } from "../../ui/onboarding/Snippet"
+import { DocsLink } from "./DocsLink"
 import "../../styles/agents.css"
 import "../../styles/features.css"
 
@@ -27,11 +28,14 @@ export function ReportKeys({ app }: { app: AppDetail }) {
     <div>
       <div className="settings-heading">
         <h1>Report keys</h1>
-        {!creating && !created && (
-          <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setCreating(true)}>
-            New key
-          </Button>
-        )}
+        <div className="row">
+          <DocsLink page="reports" />
+          {!creating && !created && (
+            <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setCreating(true)}>
+              New key
+            </Button>
+          )}
+        </div>
       </div>
       <p className="settings-lede">
         Your app can upload logs and system specs, then open a new-issue page with them attached for the person to review and describe. These

@@ -85,7 +85,7 @@ function design(c: PreviewCard, icon: string) {
   const host = c.slug ? `${c.slug}.blhp.app` : "blhp.app"
   const identity = box(
     { alignItems: "center", gap: 22 },
-    tile(icon, c.kind === "issue" ? 72 : 108),
+    tile(icon, c.kind === "issue" || c.kind === "docs" ? 72 : 108),
     box(
       { flexDirection: "column", gap: 5, width: 875 },
       text(c.name, { ...titleFace, fontSize: 32, letterSpacing: -0.4, ...clamp(1) }),
@@ -140,6 +140,13 @@ function design(c: PreviewCard, icon: string) {
             )
           )
         : null
+    )
+  } else if (c.kind === "docs") {
+    // Like an issue card: the page title, with a quiet label where the issue number goes.
+    body = box(
+      { flexDirection: "column", gap: 14 },
+      text(c.title, { ...titleFace, fontSize: 62, lineHeight: 1.1, letterSpacing: -1.6, ...clamp(3) }),
+      text("Docs", { ...monoFace, fontSize: 29, color: "#a2a2a2" })
     )
   } else {
     body = box(
