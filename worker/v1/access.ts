@@ -31,6 +31,31 @@ export function cors(c: Ctx, origin: string) {
   c.header("Access-Control-Expose-Headers", "Challenge-Token, Retry-After")
   c.header("Vary", "Origin")
 }
+export function apiOrigin(c: Ctx) {
+  return c.env.APP_DOMAIN ? `https://api.${c.env.APP_DOMAIN}` : new URL(c.env.PUBLIC_ORIGIN || c.req.url).origin
+}
+export function ownOrigin(env: Env, slug: string, origin: string | null, requestOrigin: string) {
+  if (!origin) return false
+  if (env.APP_DOMAIN) return origin === `https://${slug}.${env.APP_DOMAIN}`
+  return (
+    origin === env.PUBLIC_ORIGIN ||
+    (origin === requestOrigin && ["127.0.0.1", "localhost", "[::1]"].includes(new URL(origin).hostname))
+  )
+}
+export async function preflightAllowed(c: Ctx, origin: string, app: string | null = null) {
+  const domain = c.env.APP_DOMAIN,
+    h = new URL(c.req.url),
+    slug = domain && h.hostname !== `api.${domain}` ? h.hostname.slice(0, -domain.length - 1) : null
+  return sql(
+    c.env,
+    `SELECT 1 FROM api_keys k JOIN apps a ON a.id=k.app_id WHERE k.kind='publishable' AND a.mode='helpdesk' AND (?1 IS NULL OR a.slug=?1) AND (?2 IS NULL OR a.id=?2) AND (?3 OR ?4='https://'||a.slug||'.'||?5 OR EXISTS(SELECT 1 FROM api_origins WHERE key_id=k.id AND origin=?4)) LIMIT 1`,
+    slug,
+    app,
+    Number(!domain && ownOrigin(c.env, "", origin, h.origin)),
+    origin,
+    domain || null
+  ).first()
+}
 export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<Scope> {
   const m = /^Bearer (bh_(pk|sk|us)_[0-9a-f]{64})$/i.exec(c.req.header("Authorization") ?? "")
   if (m?.[2]?.toLowerCase() === "sk" && c.req.raw.headers.has("Origin")) denied()
@@ -77,7 +102,7 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
       row.kind,
       row.key
     ).first()
-    if (!allowed) denied()
+    if (!allowed && !ownOrigin(env, row.slug, origin, new URL(c.req.url).origin)) denied()
     cors(c, origin)
   }
   if (row.mode !== "helpdesk") fail(403, "helpdesk_only", "Help desk workspace required")

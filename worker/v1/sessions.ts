@@ -5,7 +5,7 @@ import { siteverify } from "../auth"
 import { consumeIdentity, hostClaims, identityFailure, resolveHost, verifyIdentity } from "../identity"
 import { issueCode, redeemCode } from "../email-codes"
 import { clientIP, enforce } from "../rate-limits"
-import { liveGuard, type Scope } from "./access"
+import { liveGuard, ownOrigin, type Scope } from "./access"
 
 const language = (c: Ctx) => browserLocale(c.req.header("Accept-Language"))
 async function human(c: Ctx, s: Scope, token: unknown) {
@@ -97,6 +97,16 @@ export async function mint(
     anon = "anon_" + uid()
   }
   if (setLocale) q.push(sql(env, "UPDATE contacts SET locale=? WHERE app_id=? AND external_id=?", locale, s.app, sub))
+  if (s.kind === "publishable" && ownOrigin(env, s.slug, s.origin, new URL(c.req.url).origin))
+    q.push(
+      sql(
+        env,
+        "INSERT OR IGNORE INTO api_workspace_origins SELECT id,? FROM apps WHERE id=? AND slug=?",
+        s.origin,
+        s.app,
+        s.slug
+      )
+    )
   q.push(
     sql(
       env,

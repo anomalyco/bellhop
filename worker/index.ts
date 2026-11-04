@@ -7,6 +7,8 @@ import { helpdesk, processVerifications } from "./helpdesk"
 import { handoff } from "./identity"
 import { identityKeys } from "./identity-keys"
 import { publicApi } from "./v1"
+import { sweepUploads } from "./v1/uploads"
+import { sweepStreams } from "./v1/realtime"
 import { apiKeys } from "./v1/keys"
 import { hostWorkspace } from "./contact-session"
 import { clientIP, enforce, workspaceLimit } from "./rate-limits"
@@ -300,6 +302,8 @@ export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(pruneAudit(env))
+    ctx.waitUntil(sweepUploads(env))
+    ctx.waitUntil(sweepStreams(env))
     ctx.waitUntil(processVerifications(env))
     ctx.waitUntil(sql(env, "DELETE FROM identity_uses WHERE expires<=unixepoch()").run())
     ctx.waitUntil(

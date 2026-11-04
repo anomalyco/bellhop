@@ -11,7 +11,8 @@ import { attachment } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { reportLog } from "./report-data"
 import type { Ctx } from "./core"
-import { authorize, checkHost, cors } from "./v1/access"
+import { authorize, checkHost, cors, preflightAllowed } from "./v1/access"
+import { signedFile } from "./v1/signed-media"
 import { clientIP, enforce } from "./rate-limits"
 
 const MiB = 1024 * 1024
@@ -20,7 +21,14 @@ function tooLarge(): never {
 }
 
 // R2 put needs a fixed-length stream. For chunked requests, bound memory to one multipart part.
-async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8Array>, mime: string, limit: number) {
+export async function chunked(
+  bucket: R2Bucket,
+  key: string,
+  body: ReadableStream<Uint8Array>,
+  mime: string,
+  limit: number,
+  digest?: WritableStreamDefaultWriter<ArrayBuffer | ArrayBufferView>
+) {
   const options = { httpMetadata: { contentType: mime } },
     reader = body.getReader(),
     buffer = new Uint8Array(5 * MiB),
@@ -34,6 +42,7 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
       if (done) break
       size += value.byteLength
       if (size > limit) tooLarge()
+      if (digest) await digest.write(value)
       for (let i = 0; i < value.length; ) {
         const n = Math.min(buffer.length - used, value.length - i)
         buffer.set(value.subarray(i, i + n), used)
@@ -51,9 +60,11 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
       if (used) parts.push(await upload.uploadPart(parts.length + 1, buffer.subarray(0, used)))
       await upload.complete(parts)
     } else await bucket.put(key, buffer.subarray(0, used), options)
+    if (digest) await digest.close()
     return size
   } catch (e) {
     await reader.cancel().catch(() => {})
+    if (digest) await digest.abort().catch(() => {})
     if (upload) await upload.abort()
     throw e
   } finally {
@@ -61,14 +72,17 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
   }
 }
 export const media = new Hono<Bindings>()
-media.post("/api/apps/:slug/uploads", async (c) => {
-  await allowWrite(c)
-  const name = str(c.req.query("name"), "file name", 255).trim()
+export function uploadSpec(filename: unknown, contentType: string) {
+  const name = str(filename, "file name", 255).trim()
   if (/[\/\\\x00-\x1f\x7f]/.test(name) || name === "." || name === "..") bad("Invalid file name")
-  const raw = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
+  const raw = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
   const mime = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(raw) ? raw : "application/octet-stream"
   const kind: Attachment["kind"] = mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : "file"
-  const limit = (kind === "image" ? 10 : kind === "video" ? 100 : 25) * MiB,
+  return { name, mime, kind, limit: (kind === "image" ? 10 : kind === "video" ? 100 : 25) * MiB }
+}
+media.post("/api/apps/:slug/uploads", async (c) => {
+  await allowWrite(c)
+  const { name, mime, kind, limit } = uploadSpec(c.req.query("name"), c.req.header("Content-Type") ?? ""),
     len = c.req.header("content-length"),
     body = c.req.raw.body
   if (!body) bad("Empty upload")
@@ -121,10 +135,23 @@ media.post("/api/apps/:slug/uploads", async (c) => {
 // URL with their bearer (never a credential in an <img> URL or query string).
 export const endUserMedia:MiddlewareHandler<Bindings>=async(c,next)=>{
   const id=c.req.param('id')!,name=c.req.param('name')!
+  if ((c.req.method === "GET" || c.req.method === "HEAD") && c.req.query("sig") !== undefined) {
+    c.header("Referrer-Policy", "no-referrer")
+    c.header("Cache-Control", "private, max-age=0, must-revalidate")
+    await enforce(c, "RL_IP", "v1:media:" + clientIP(c))
+    const r = await serveFile(c, await signedFile(c, id, name), true)
+    r.headers.set("Referrer-Policy", "no-referrer")
+    r.headers.set("Cache-Control", "private, max-age=0, must-revalidate")
+    return r
+  }
   if(c.req.method==='OPTIONS'){
     checkHost(c);await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const origin=c.req.header('Origin')
     if(!origin||c.req.header('Access-Control-Request-Method')!=='GET')missing()
-    const row=await sql(c.env,`SELECT a.slug FROM attachments f JOIN apps a ON a.id=f.app_id JOIN api_keys k ON k.app_id=a.id JOIN api_origins o ON o.key_id=k.id WHERE f.id=? AND a.mode='helpdesk' AND o.origin=? LIMIT 1`,id,origin).first<{slug:string}>();if(!row)missing();checkHost(c,row.slug);cors(c,origin);c.header('Access-Control-Allow-Headers','Authorization, Range, If-None-Match');c.header('Access-Control-Allow-Methods','GET');return c.body(null,204)
+    if (!(await preflightAllowed(c, origin))) missing()
+    cors(c, origin)
+    c.header("Access-Control-Allow-Headers", "Authorization, Range, If-None-Match")
+    c.header("Access-Control-Allow-Methods", "GET")
+    return c.body(null, 204)
   }
   if(!/^Bearer bh_us_/i.test(c.req.header('Authorization')??''))return next()
   await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const s=await authorize(c,'session')

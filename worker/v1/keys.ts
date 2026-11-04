@@ -26,7 +26,7 @@ export function normalizeOrigin(x: unknown) {
   return u.origin
 }
 function origins(kind: ApiKey["kind"], x: unknown) {
-  if (!Array.isArray(x) || x.length > 50 || (kind === "secret" ? x.length !== 0 : x.length === 0))
+  if (!Array.isArray(x) || x.length > 50 || (kind === "secret" && x.length !== 0))
     bad("Invalid allowed_origins for key kind")
   return [...new Set(x.map(normalizeOrigin))]
 }

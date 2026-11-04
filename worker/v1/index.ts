@@ -2,7 +2,9 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { bad, denied, fail, input, missing, sql, type Bindings, type Ctx } from "../core"
 import { enforce, clientIP } from "../rate-limits"
-import { authorize, checkHost, cors, type Auth, type Scope } from "./access"
+import { authorize, checkHost, cors, preflightAllowed, type Auth, type Scope } from "./access"
+import { mintTicket, upgrade, revokeStream } from "./realtime"
+import { upload } from "./uploads"
 import { startEmail, mint, patchMe } from "./sessions"
 import { conversations, items, mark, open, postMessage, typing, confirm, target } from "./conversations"
 import { replay } from "./replay"
@@ -12,7 +14,8 @@ type Action = (c: Ctx, s: Scope, b: Record<string, unknown>, id: string, number:
 type Route = {
   method: "GET" | "PATCH" | "POST" | "DELETE"
   path: string
-  auth: Auth
+  auth: Auth | "ticket"
+  transport?: "multipart" | "socket"
   request?: keyof typeof schemas
   response: keyof typeof schemas
   run: Action
@@ -22,6 +25,31 @@ type Route = {
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  upload: {
+    method: "POST",
+    path: "/uploads",
+    auth: "session",
+    transport: "multipart",
+    request: "MultipartFile",
+    response: "Upload",
+    status: 201,
+    run: upload
+  },
+  realtime: {
+    method: "POST",
+    path: "/realtime",
+    auth: "session",
+    response: "RealtimeTicket",
+    run: (c, s, _b, _id, _n, seed) => mintTicket(c, s, seed)
+  },
+  connectRealtime: {
+    method: "GET",
+    path: "/realtime",
+    auth: "ticket",
+    transport: "socket",
+    response: "RealtimeEvent",
+    run: upgrade
+  },
   openapi: { method: "GET", path: "/openapi.json", auth: "public", response: "OpenAPI", run: () => document() },
   createSession: {
     method: "POST",
@@ -54,10 +82,7 @@ export const routes: Record<string, Route> = {
     path: "/session",
     auth: "session",
     response: "OK",
-    run: async (c, s) => {
-      await sql(c.env, "DELETE FROM api_sessions WHERE hash=?", s.hash).run()
-      return { ok: true }
-    }
+    run: revokeStream
   },
   getMe: { method: "GET", path: "/me", auth: "session", response: "EndUser", run: (_c, s) => s.user },
   updateMe: { method: "PATCH", path: "/me", auth: "session", request: "Profile", response: "EndUser", run: patchMe },
@@ -130,7 +155,8 @@ const security = {
     public: [],
     key: [{ publishable: [] }, { secret: [] }],
     publishable: [{ publishable: [] }],
-    session: [{ session: [] }]
+    session: [{ session: [] }],
+    ticket: [{ socketTicket: [] }]
   },
   media = (name: string) => ({ "application/json": { schema: ref(name) } })
 function document() {
@@ -151,9 +177,9 @@ function document() {
     if (name === "verifyEmail" || name === "startEmail")
       parameters.push({ in: "header", name: "Challenge-Token", required: name === "verifyEmail", schema: string })
     const responses: Record<string, unknown> = {
-      [r.status ?? 200]: {
+      [r.transport === "socket" ? 101 : (r.status ?? 200)]: {
         description: "Success",
-        content: media(r.response),
+        ...(r.transport === "socket" ? { "x-websocket-frame": ref(r.response) } : { content: media(r.response) }),
         ...(name === "startEmail"
           ? {
               headers: {
@@ -167,6 +193,7 @@ function document() {
       404: "not_found: unknown host, resource not found or not owned",
       429: "rate_limited or code_limit; retry after the indicated delay",
       500: "internal_error",
+      ...(r.transport === "socket" ? { 426: "upgrade_required" } : {}),
       ...(r.auth !== "public"
         ? {
             401: "invalid_credential, invalid_identity or contact_required",
@@ -179,9 +206,11 @@ function document() {
       ...(r.method === "POST"
         ? { 409: "conflict or request_pending", 422: "idempotency_mismatch: key reused with different input" }
         : {}),
-      ...(r.request || r.method === "POST"
-        ? { 413: "too_large", 415: "expected_json", 503: "misconfigured, mail_unavailable or conversation_upgrading" }
-        : {}),
+      ...(r.transport === "multipart"
+        ? { 413: "too_large", 415: "expected_multipart", 503: "misconfigured" }
+        : r.request || r.method === "POST"
+          ? { 413: "too_large", 415: "expected_json", 503: "misconfigured, mail_unavailable or conversation_upgrading" }
+          : {}),
       ...(name === "createConversation" ? { 410: "expired: report metadata is no longer available" } : {}),
       ...(name === "createSession" || name === "startEmail" ? { 428: "human_required", 502: "siteverify_failed" } : {})
     }))
@@ -194,7 +223,15 @@ function document() {
       operationId: name,
       security: security[r.auth],
       parameters,
-      ...(r.request ? { requestBody: { required: true, content: media(r.request) } } : {}),
+      ...(r.request
+        ? {
+            requestBody: {
+              required: true,
+              content:
+                r.transport === "multipart" ? { "multipart/form-data": { schema: ref(r.request) } } : media(r.request)
+            }
+          }
+        : {}),
       responses
     }
   }
@@ -204,21 +241,29 @@ function document() {
     servers: [{ url: "https://api.blhp.app/v1" }],
     paths,
     components: {
-      securitySchemes: Object.fromEntries(
-        ["secret", "publishable", "session"].map((kind, i) => [
-          kind,
-          {
-            type: "http",
-            scheme: "bearer",
-            bearerFormat: ["bh_sk_…", "bh_pk_…", "bh_us_…"][i],
-            description: [
-              "Server only; Origin must be absent.",
-              "Requires an exactly allowed Origin.",
-              "24-hour end-user bearer. Browser origins must be allowed."
-            ][i]
-          }
-        ])
-      ),
+      securitySchemes: {
+        socketTicket: {
+          type: "apiKey",
+          in: "query",
+          name: "ticket",
+          description: "Single-use WebSocket ticket, valid 60 seconds."
+        },
+        ...Object.fromEntries(
+          ["secret", "publishable", "session"].map((kind, i) => [
+            kind,
+            {
+              type: "http",
+              scheme: "bearer",
+              bearerFormat: ["bh_sk_…", "bh_pk_…", "bh_us_…"][i],
+              description: [
+                "Server only; Origin must be absent.",
+                "Requires an exactly allowed Origin.",
+                "24-hour end-user bearer. Browser origins must be allowed."
+              ][i]
+            }
+          ])
+        )
+      },
       schemas
     }
   }
@@ -232,32 +277,24 @@ export function publicApi() {
     await enforce(c, "RL_IP", "v1:ip:" + clientIP(c))
     await next()
   })
-  api.use(
-    "*",
-    bodyLimit({
-      maxSize: 512 * 1024,
-      onError: (c) => c.json({ error: { code: "too_large", message: "JSON payload too large" } }, 413)
-    })
+  api.use("*", (c, next) =>
+    c.req.path === "/v1/uploads" && c.req.method === "POST"
+      ? next()
+      : bodyLimit({
+          maxSize: 512 * 1024,
+          onError: (c) => c.json({ error: { code: "too_large", message: "JSON payload too large" } }, 413)
+        })(c, next)
   )
   for (const path of new Set(Object.values(routes).map((r) => r.path))) {
     const methods = Object.values(routes)
       .filter((r) => r.path === path)
       .map((r) => r.method)
     api.options(path, async (c) => {
-      const origin = c.req.header("Origin"),
-        domain = c.env.APP_DOMAIN,
-        h = new URL(c.req.url).hostname,
-        slug = domain && h !== `api.${domain}` ? h.slice(0, -domain.length - 1) : null
+      const origin = c.req.header("Origin")
       if (
         !origin ||
         !methods.some((m) => m === c.req.header("Access-Control-Request-Method")) ||
-        !(await sql(
-          c.env,
-          `SELECT 1 FROM api_origins o JOIN api_keys k ON k.id=o.key_id JOIN apps a ON a.id=k.app_id WHERE origin=? AND mode='helpdesk' AND (? IS NULL OR slug=?) LIMIT 1`,
-          origin,
-          slug,
-          slug
-        ).first())
+        !(await preflightAllowed(c, origin))
       )
         denied()
       cors(c, origin)
@@ -270,9 +307,11 @@ export function publicApi() {
   for (const r of Object.values(routes))
     api.on(r.method, r.path, async (c) => {
       if (r.auth === "public") return c.json(document())
+      if (r.auth === "ticket") return upgrade(c)
       const s = await authorize(c, r.auth),
         id = c.req.param("id") ?? "",
         n = id ? await target(c, s, id) : 0
+      if (r.transport === "multipart") return upload(c, s)
       const raw = r.method === "POST" || r.method === "PATCH" ? await c.req.text() : ""
       const run = async (seed?: string) => {
         let b: Record<string, unknown> = {}

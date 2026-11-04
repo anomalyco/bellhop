@@ -11,6 +11,7 @@
 // Keys (created by workspace admins in Settings → API keys; shown once):
 //   publishable  bh_pk_…  safe to ship in browsers. Names the workspace. Only accepted from the key's allowed origins
 //                         (exact origins; requests without a matching Origin are refused). Starts end-user sessions:
+//                         https://<slug>.blhp.app (the dev path-mode origin locally) is implicitly allowed for its workspace.
 //                         from a host identity token, by email code, or anonymously when the workspace allows it.
 //   secret       bh_sk_…  server only: a request carrying an Origin header is refused (so a leaked key in a page
 //                         doesn't work from browsers). Mints sessions for the host's own users and uses the server API.
@@ -39,9 +40,13 @@
 //   POST   /v1/conversations/:id/read { item_id }         -> { ok: true }
 //   POST   /v1/conversations/:id/typing                   -> { ok: true }      shown to the team for 5 s
 //   POST   /v1/conversations/:id/verifications/:vid/confirm { code } -> Verification (api.ts)
-//   POST   /v1/uploads         multipart file             -> Upload            attach by id in MessageInput
+//   POST   /v1/uploads         multipart/form-data, one part named file -> Upload; attach once within 24 h
 //   POST   /v1/realtime        -> { url, expires_at }     a single-use wss:// URL valid 60 s; the socket sends
 //                                                         RealtimeEvent JSON frames for all of this user's conversations
+//          Open the returned URL unchanged. Send the text ping every 25 s; pong is a heartbeat, not a JSON event.
+//          On reconnect mint a fresh ticket, open the socket and buffer frames, then page items?after=<last item id>
+//          per conversation and merge by item id. Refresh the conversation list for new requests or changed state.
+//          If the anchor was deleted/hidden, reload that timeline. Close 4401 means the session is no longer authorized.
 //
 // Server API (secret key), next phase, outline only: contacts (list, get, upsert by external id), conversations
 // (list and search all, get, reply as the workspace or a named team member, internal notes, status, assignee,
@@ -117,6 +122,7 @@ export interface Upload {
   name: string
   type: string
   size: number
+  /** Signed for one object/contact for 1 hour; anyone holding the whole URL can read it while access remains valid. */
   url: string
 }
 

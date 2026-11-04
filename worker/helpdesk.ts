@@ -29,6 +29,7 @@ import { authenticate } from "./mcp"
 import { enqueueWebhooks } from "./webhooks"
 import { esc, mailOrigin, sendMail } from "./mail-provider"
 import { accountCopy } from "./mail-copy"
+import { signalContact } from "./v1/signals"
 
 export const helpdesk = new Hono<Bindings>(),
   base = "/api/apps/:slug"
@@ -236,6 +237,7 @@ export async function requestVerification(
     actorIds(v),
     v.team
   )
+  c.executionCtx.waitUntil(signalContact(c.env, app.id, i.reporter, { issue: i.id, created: ["request:" + id] }))
   return verification(
     (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
   )
@@ -315,6 +317,10 @@ export async function dispatchProof(env: Env, id: string) {
     }
   >()
   if (!row) return
+  await signalContact(env, row.app_id, (JSON.parse(row.author) as Actor).id, {
+    issue: row.issue_id,
+    created: row.state === "verified" ? ["verified:" + id] : []
+  })
   if (!row.destination_hash) {
     const app = { id: row.app_id, name: row.name, slug: row.slug },
       actor: Actor = row.state === "verified" ? JSON.parse(row.author) : { type: "agent", id: "system", name: row.name }

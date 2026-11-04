@@ -140,9 +140,12 @@ function record(
   )
   items.push({ kind: "event", event })
 }
-function attach(env: Env, id: string, commentId: string | null, value: unknown) {
+function attach(env: Env, id: string, commentId: string | null, value: unknown, endUser = false) {
+  const upload = endUser
+    ? "(SELECT id FROM attachments WHERE id=? AND created_at>strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours'))"
+    : "?"
   return ids(value, "attachment_ids").map((key) =>
-    sql(env, "INSERT INTO attachment_links VALUES(?,?,?)", key, id, commentId)
+    sql(env, `INSERT INTO attachment_links VALUES(${upload},?,?)`, key, id, commentId)
   )
 }
 function systemInfo(value: unknown): SystemInfo | null {
@@ -199,7 +202,7 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
       actor.id,
       app.id
     ),
-    ...attach(env, id, null, b.attachment_ids),
+    ...attach(env, id, null, b.attachment_ids, !!a.credentialGuard),
     ...attachReport(env, app.id, b.metadata_id, id, null),
     ...guestNameGuard(a)
   ]
@@ -305,7 +308,7 @@ export async function addComment(
     at = now(),
     id = uid(),
     text = str(b.body, "body", 65536, true)
-  const links = attach(env, s.id, id, b.attachment_ids)
+  const links = attach(env, s.id, id, b.attachment_ids, !!a.credentialGuard)
   const v = who(a)
   const internal = b.internal === true
   const via = inbound ? "email" : actor.type === "agent" ? "mcp" : "web"
@@ -1213,6 +1216,13 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
   return teamProjection(env, app, { id, actor, by: a.actor, created_at: at })
 }
 export const issues = new Hono<Bindings>()
+issues.post("/api/apps/:slug/issues/:number/typing", async (c) => {
+  if (!c.var.desk || !c.var.user || !can(c.var.app.role, "respond")) denied()
+  const a = access(c),
+    s = await summary(a, issueNumber(c.req.param("number")))
+  await setActivity(c.env, a.app.id, s.id, a.actor, null, false, 5)
+  return c.json({ ok: true })
+})
 issues.on(["POST", "DELETE"], `${path}/vote`, async (c) => {
   await allowWrite(c)
   return c.json(await react(access(c), issueNumber(c.req.param("number")), null, c.req.method === "POST"))

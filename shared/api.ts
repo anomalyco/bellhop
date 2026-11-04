@@ -242,6 +242,7 @@
 // asks to verify an address, e.g. "the email on your billing account". Bellhop emails it a code that only the
 // requester can enter; the request then shows the address as verified to the team and agents. Agents never see codes.
 //   POST   /api/apps/:slug/issues/:number/verifications { email }        -> Verification
+//   POST   /api/apps/:slug/issues/:number/typing                         -> { ok: true }   help desk team; visible for 5 s
 //   POST   /api/apps/:slug/issues/:number/verifications/:id/confirm { code } -> Verification   the requester
 //
 // Email (OpenSend, from mail.blhp.app). People get an email when someone else replies publicly or changes the

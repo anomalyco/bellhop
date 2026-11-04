@@ -1,4 +1,6 @@
 import { DurableObject } from "cloudflare:workers"
+import { acceptStream, deliverStream } from "./v1/realtime"
+import type { Hint } from "./v1/signals"
 import type { Actor, Comment, IssueSummary, LiveEvent, Role, TimelineItem } from "../shared/api"
 import { expireActivity, refreshActivity } from "./events"
 import { publicFeedIssue, readPresence } from "./issues"
@@ -147,6 +149,7 @@ export class Room extends DurableObject<Env> {
     }).length
   }
   async fetch(req: Request) {
+    if (this.ctx.id.name?.startsWith("enduser:")) return this.serialize(() => acceptStream(this.ctx, this.env, req))
     if (req.headers.get("Upgrade")?.toLowerCase() !== "websocket")
       return Response.json(
         { error: { code: "upgrade_required", message: "WebSocket upgrade required" } },
@@ -467,9 +470,20 @@ export class Room extends DurableObject<Env> {
     }
   }
   private pending = Promise.resolve()
-  private serialize(work: () => Promise<void>) {
+  contactChanged(app: string, who: string, hint: Hint) {
+    if (this.ctx.id.name !== `enduser:${app}:${who}`) throw Error("Wrong stream")
+    return this.serialize(() => deliverStream(this.ctx, this.env, hint))
+  }
+  reviewContact() {
+    if (!this.ctx.id.name?.startsWith("enduser:")) throw Error("Wrong stream")
+    return this.serialize(() => deliverStream(this.ctx, this.env))
+  }
+  private serialize<T>(work: () => Promise<T>) {
     const next = this.pending.then(work)
-    this.pending = next.catch(() => {})
+    this.pending = next.then(
+      () => {},
+      () => {}
+    )
     return next
   }
   // A queued write can arrive after an admin unlists its workspace. Never trust that write's
@@ -486,7 +500,7 @@ export class Room extends DurableObject<Env> {
       }
     })
   }
-  refreshConversationPresence(appId: string, issueId: string) {
+  refreshConversationPresence(appId: string, issueId: string, clear?: Actor) {
     return this.serialize(() =>
       refreshActivity(
         this.env,
@@ -494,21 +508,28 @@ export class Room extends DurableObject<Env> {
         appId,
         issueId,
         (e) => this.publishConversation([e], { app: appId }),
-        async (at) => {
+        async (at, actor) => {
           if (at !== null) {
-            await this.ctx.storage.put("scope", { appId, issueId })
+            await this.ctx.storage.put("scope", { appId, issueId, actor })
             await this.ctx.storage.setAlarm(at)
           } else await this.ctx.storage.deleteAlarm()
-        }
+        },
+        clear
       )
     )
   }
   alarm() {
+    if (this.ctx.id.name?.startsWith("enduser:")) return this.reviewContact()
     return this.serialize(async () => {
-      const scope = await this.ctx.storage.get<{ appId: string; issueId: string }>("scope")
+      const scope = await this.ctx.storage.get<{ appId: string; issueId: string; actor?: Actor }>("scope")
       if (scope) {
-        const next = await expireActivity(this.env, this.ctx, scope.appId, scope.issueId, (e) =>
-          this.publishConversation([e], { app: scope.appId })
+        const next = await expireActivity(
+          this.env,
+          this.ctx,
+          scope.appId,
+          scope.issueId,
+          (e) => this.publishConversation([e], { app: scope.appId }),
+          scope.actor
         )
         if (next) await this.ctx.storage.setAlarm(next)
       }
@@ -518,7 +539,14 @@ export class Room extends DurableObject<Env> {
     if (message === "ping") ws.send("pong")
     else ws.close(1008, "Only ping supported")
   }
-  webSocketClose(ws: WebSocket) {
+  webSocketClose(ws: WebSocket, code = 1000, reason = "") {
+    if (this.ctx.id.name?.startsWith("enduser:")) {
+      if (code !== 1005 && code !== 1006 && code !== 1015) ws.close(code, reason)
+      return this.serialize(async () => {
+        if (!this.ctx.getWebSockets().some(other => other !== ws && other.readyState === WebSocket.OPEN))
+          await this.ctx.storage.deleteAlarm()
+      })
+    }
     if (this.ctx.getTags(ws).includes("issue")) {
       const app = ws.deserializeAttachment()?.app
       this.ctx.waitUntil(this.publishConversation([{ type: "viewers", count: this.viewers(ws, app) }], { app }))

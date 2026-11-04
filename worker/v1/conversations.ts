@@ -7,7 +7,9 @@ import { redeemCode } from "../email-codes"
 import { dispatchProof } from "../helpdesk"
 import { proofCols, verification, type ProofRow } from "../helpdesk-data"
 import { clientIP, enforce } from "../rate-limits"
-import { liveGuard, type Scope } from "./access"
+import { liveGuard, apiOrigin, type Scope } from "./access"
+import { signedFiles, type Audience } from "./signed-media"
+import { signalContact } from "./signals"
 
 const owned = `i.app_id=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND EXISTS(SELECT 1 FROM apps a WHERE a.id=i.app_id AND a.mode='helpdesk')`
 const args = (s: Scope) => [s.app, s.user!.id]
@@ -18,7 +20,7 @@ export async function target(c: Ctx, s: Scope, id: string) {
     )) ?? missing()
   )
 }
-function participant(a: Actor): Participant {
+export function participant(a: Actor): Participant {
   if (a.type === "guest") return { type: "user", id: a.id, name: a.name }
   return {
     type: a.type === "member" ? "team" : "agent",
@@ -59,7 +61,8 @@ type ItemRow = {
   } | null
   files: Omit<Upload, "url">[]
 }
-function project(raw: string): ConversationItem {
+const audience = (c: Ctx, s: Scope): Audience => ({ env: c.env, app: s.app, who: s.user!.id, origin: apiOrigin(c) })
+async function project(raw: string, a: Audience): Promise<ConversationItem> {
   const r = JSON.parse(raw) as ItemRow,
     who = participant(r.actor),
     base = { id: r.id, created_at: r.created_at }
@@ -73,10 +76,7 @@ function project(raw: string): ConversationItem {
         author: who,
         body: r.body,
         edited_at: r.edited_at,
-        attachments: r.files.map((a) => ({
-          ...a,
-          url: `/media/${encodeURIComponent(a.id)}/${encodeURIComponent(a.name)}`
-        }))
+        attachments: await signedFiles(a, r.files)
       }
     }
   const d = r.data!,
@@ -125,48 +125,61 @@ function publicProof(row: ProofRow): Verification {
           : { type: a.type, id: a.id, name: a.name, avatar_url: a.avatar_url }
   }
 }
-export async function conversations(c: Ctx, s: Scope, id?: string): Promise<Page<Conversation>> {
-  const status = id ? undefined : c.req.query("status"),
-    pos = id ? null : position(c.req.query("cursor"))
-  if (status !== undefined && !["open", "closed"].includes(status)) bad("Invalid status")
-  type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {
-    assignee: string | null
-    last_item: string
-  }
-  const rs = (
-    await sql(
-      c.env,
-      `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,
+type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {
+  assignee: string | null
+  last_item: string
+}
+function conversationQuery(a: Audience, id?: string, status?: string, pos?: [string, string] | null) {
+  return sql(
+    a.env,
+    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,
     (SELECT ${wire} FROM api_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
     (SELECT max(t.created_at) FROM api_items t WHERE t.issue_id=i.id) updated_at,
     (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id') AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
     FROM issues i LEFT JOIN api_reads m ON m.issue_id=i.id AND m.actor_id=json_extract(i.author,'$.id') WHERE ${owned} ${id ? "AND i.id=?" : ""} ${status ? `AND i.status${status === "open" ? "!=" : "="}'closed'` : ""}) SELECT * FROM page ${pos ? "WHERE (updated_at,id)<(?,?)" : ""} ORDER BY updated_at DESC,id DESC LIMIT 26`,
-      ...args(s),
-      ...(id ? [id] : []),
-      ...(pos ?? [])
-    ).all<Row>()
-  ).results
+    a.app,
+    a.who,
+    ...(id ? [id] : []),
+    ...(pos ?? [])
+  )
+}
+function proofsQuery(a: Audience, ids: string[]) {
+  return sql(
+    a.env,
+    `SELECT ${proofCols} FROM email_codes v JOIN issues i ON i.id=v.issue_id AND i.app_id=v.app_id WHERE ${owned} AND v.kind='verification' AND i.id IN(SELECT value FROM json_each(?)) ORDER BY v.created_at,v.id`,
+    a.app,
+    a.who,
+    JSON.stringify(ids)
+  )
+}
+async function projectRow(a: Audience, r: Row, proofs: ProofRow[]): Promise<Conversation> {
+  return {
+    ...r,
+    assignee: r.assignee ? participant(JSON.parse(r.assignee)) : null,
+    last_item: r.last_item ? await project(r.last_item, a) : null,
+    verifications: proofs.filter((v) => v.issue_id === r.id).map(publicProof)
+  }
+}
+export async function conversations(c: Ctx, s: Scope, id?: string): Promise<Page<Conversation>> {
+  const status = id ? undefined : c.req.query("status"),
+    pos = id ? null : position(c.req.query("cursor")),
+    a = audience(c, s)
+  if (status !== undefined && !["open", "closed"].includes(status)) bad("Invalid status")
+  const rs = (await conversationQuery(a, id, status, pos).all<Row>()).results
   if (id && !rs.length) missing()
   const more = rs.length > pageSize,
     selected = rs.slice(0, pageSize),
     last = selected.at(-1)
   const proofs = selected.length
     ? (
-        await sql(
-          c.env,
-          `SELECT ${proofCols} FROM email_codes v JOIN issues i ON i.id=v.issue_id AND i.app_id=v.app_id WHERE ${owned} AND v.kind='verification' AND i.id IN(SELECT value FROM json_each(?)) ORDER BY v.created_at,v.id`,
-          ...args(s),
-          JSON.stringify(selected.map((x) => x.id))
+        await proofsQuery(
+          a,
+          selected.map((x) => x.id)
         ).all<ProofRow>()
       ).results
     : []
   return {
-    data: selected.map((r) => ({
-      ...r,
-      assignee: r.assignee ? participant(JSON.parse(r.assignee)) : null,
-      last_item: r.last_item ? project(r.last_item) : null,
-      verifications: proofs.filter((v) => v.issue_id === r.id).map(publicProof)
-    })),
+    data: await Promise.all(selected.map((r) => projectRow(a, r, proofs))),
     next_cursor: more ? cursor(last!.updated_at, last!.id) : null
   }
 }
@@ -194,7 +207,7 @@ export async function items(c: Ctx, s: Scope, id: string): Promise<Page<Conversa
       ...(pos ?? [])
     ).all<{ item: string }>()
   ).results
-  const data = rs.slice(0, pageSize).map((r) => project(r.item)),
+  const data = await Promise.all(rs.slice(0, pageSize).map((r) => project(r.item, audience(c, s)))),
     last = data.at(-1)
   return { data, next_cursor: rs.length > pageSize ? cursor(last!.created_at, last!.id) : null }
 }
@@ -226,7 +239,10 @@ export async function postMessage(
     edited_at: m.edited_at,
     body: m.body,
     author: participant(m.author),
-    attachments: m.attachments.map((a) => ({ id: a.id, name: a.name, type: a.mime, size: a.size, url: a.url }))
+    attachments: await signedFiles(
+      audience(c, s),
+      m.attachments.map((a) => ({ id: a.id, name: a.name, type: a.mime, size: a.size }))
+    )
   }
 }
 export async function mark(c: Ctx, s: Scope, id: string, b: Record<string, unknown>) {
@@ -242,7 +258,30 @@ export async function mark(c: Ctx, s: Scope, id: string, b: Record<string, unkno
     )
   ])
   if (!r!.results.length) bad("Unknown visible item")
+  c.executionCtx.waitUntil(signalContact(c.env, s.app, s.user!.id, { issue: id }))
   return { ok: true }
+}
+// One D1 snapshot for the visible conversation, items, proofs and all socket credentials.
+export async function streamSnapshot(a: Audience, id: string, ids: string[], auth: D1PreparedStatement) {
+  const [conv, proof, items, access] = await a.env.DB.batch<Record<string, unknown>>([
+    conversationQuery(a, id),
+    proofsQuery(a, [id]),
+    sql(
+      a.env,
+      `SELECT ${wire} item FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=? AND t.id IN(SELECT value FROM json_each(?)) ORDER BY t.created_at,t.id`,
+      a.app,
+      a.who,
+      id,
+      JSON.stringify(ids)
+    ),
+    auth
+  ])
+  const row = conv!.results[0] as Row | undefined
+  return {
+    access: access!.results,
+    conversation: row ? await projectRow(a, row, proof!.results as ProofRow[]) : null,
+    items: await Promise.all(items!.results.map((r) => project(r.item as string, a)))
+  }
 }
 export async function typing(c: Ctx, s: Scope, id: string) {
   const activity = { actor: access(c, s).actor, text: null, expires_at: new Date(Date.now() + 5000).toISOString() }

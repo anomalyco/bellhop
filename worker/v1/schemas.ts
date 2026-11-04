@@ -62,6 +62,15 @@ export const schemas = {
     verified_at: nullable(date)
   }),
   Upload: obj({ id: string, name: string, type: string, size: integer, url: string }),
+  MultipartFile: obj({ file: { type: "string", format: "binary" } }),
+  RealtimeTicket: obj({ url: { type: "string", format: "uri" }, expires_at: date }),
+  RealtimeEvent: one(
+    variant("item.created", { conversation_id: string, item: ref("Item") }),
+    variant("message.updated", { conversation_id: string, message: ref("Message") }),
+    variant("conversation.updated", { conversation: ref("Conversation") }),
+    variant("typing", { conversation_id: string, participant: ref("Participant") }),
+    variant("activity", { conversation_id: string, participant: ref("Participant"), text: ns })
+  ),
   MessageInput: obj({ body: { type: "string", maxLength: 65536 }, attachments: arr(string) }, ["body"]),
   ConversationInput: obj(
     { subject: { type: "string", maxLength: 256 }, message: ref("MessageInput"), metadata_id: string },

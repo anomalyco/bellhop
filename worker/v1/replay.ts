@@ -66,10 +66,15 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
         aes,
         bytes.subarray(12)
       )
-    const [body, ticket, session, challenge] = JSON.parse(dec.decode(plain))
+    const [body, ticket, session, challenge, wsTicket] = JSON.parse(dec.decode(plain))
     const seed = await deriveSeed(ticket)
     if (challenge) c.header("Challenge-Token", c.req.header("Challenge-Token") ?? seed)
     if (session) body.token = "bh_us_" + seed
+    if (wsTicket) {
+      const u = new URL(body.url)
+      u.searchParams.set("ticket", seed)
+      body.url = u.href
+    }
     if (r.status === 429) c.header("Retry-After", "60")
     return c.json(body, r.status as 200)
   }
@@ -88,12 +93,18 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
   const body = await response.clone().json<Record<string, unknown>>(),
     session = body.token === "bh_us_" + seed
   if (session) body.token = null
+  const wsTicket = route === "/v1/realtime" && typeof body.url === "string"
+  if (wsTicket) {
+    const u = new URL(body.url as string)
+    u.searchParams.delete("ticket")
+    body.url = u.href
+  }
   const iv = crypto.getRandomValues(new Uint8Array(12)),
     cipher = new Uint8Array(
       await crypto.subtle.encrypt(
         { name: "AES-GCM", iv, additionalData },
         aes,
-        enc.encode(JSON.stringify([body, ticket, session, response.headers.has("Challenge-Token")]))
+        enc.encode(JSON.stringify([body, ticket, session, response.headers.has("Challenge-Token"), wsTicket]))
       )
     ),
     sealed = new Uint8Array(12 + cipher.length)
