@@ -22,6 +22,7 @@ import { RequesterSection } from "../../ui/helpdesk/Requester"
 import { isDesk } from "../../lib/helpdesk"
 import { isContactActor } from "../../ui/Actor"
 import { deskOutsider } from "../../lib/helpdesk"
+import { RequestTypeSection } from "../../ui/helpdesk/RequestDetails"
 
 
 /** The desktop sidebar: the editable properties, then who reported it, when, who's involved, files, system info and a link. */
@@ -33,6 +34,7 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
     <aside ref={ref} className="issue-side" data-sticky={sticky || undefined}>
       {model.member && isDesk(model.app) && <RequesterSection app={model.app} issue={model.issue} />}
       <StatusSection model={model} />
+      {model.member && isDesk(model.app) && <RequestTypeSection app={model.app} issue={model.issue} place="side" />}
       {/* A requester sees where their request stands, not the team's triage fields */}
       {!deskOutsider(model.app) && (
         <>
@@ -135,6 +137,7 @@ export function MobileDetails({ model }: { model: IssueModel }) {
       {open && (
         <div className="mobile-details-body">
           {model.member && <RequesterSection app={model.app} issue={model.issue} />}
+          {model.member && isDesk(model.app) && <RequestTypeSection app={model.app} issue={model.issue} place="mobile" />}
           <NotificationsSection model={model} />
           <RelationsSection model={model} />
           <InfoSections model={model} />

@@ -31,10 +31,13 @@ export function WidgetSettings({ app }: { app: AppDetail }) {
   const [theme, setTheme] = useState<Theme>("light")
   const [side, setSide] = useState<Side>("right")
   const publishable = list?.filter((k) => k.kind === "publishable") ?? []
-  // A key made in this tab can go in for real; otherwise the snippet says which key to paste
-  const made = publishable.find((k) => revealedKeys.has(k.id))
+  // The key itself when the server returns it (publishable keys, for admins) or it was made in this tab; otherwise
+  // the snippet says which key to paste
+  const full = (k: ApiKey) => (k as ApiKey & { key?: string }).key ?? revealedKeys.get(k.id)
+  const made = publishable.find((k) => full(k))
   const chosen = made ?? publishable[0] ?? null
-  const value = made ? revealedKeys.get(made.id)! : placeholder
+  const value = made ? full(made)! : placeholder
+  const fresh = !!made && revealedKeys.has(made.id) && !(made as ApiKey & { key?: string }).key
   const attrs = [`src="${absolute("/widget/v1.js")}"`, `data-key="${value}"`, theme !== "light" && `data-theme="${theme}"`, side === "left" && `data-position="left"`]
   // Short lines: the snippets stay readable beside their Copy button, on phones too
   const install = `<script\n  src="${absolute("/widget/v1.js")}"\n  ${attrs.slice(1).filter(Boolean).join("\n  ")}\n  async\n></script>`
@@ -85,11 +88,14 @@ Bellhop.init({
               <Choice label={t("widget.position")} value={side} onChange={setSide} options={[["right", t("widget.right")], ["left", t("widget.left")]]} />
             </div>
             <Snippet code={install} label="HTML" />
-            <p className="api-hint">
-              {made
-                ? t("widget.keyFilled", { name: made.name })
-                : tr("widget.keyNote", { placeholder: <code>{placeholder}</code>, name: <strong>{chosen.name}</strong>, preview: <span className="mono">{chosen.preview}</span> })}
-            </p>
+            {/* A key the server returns needs no note; one made in this tab says so; otherwise which key to paste */}
+            {(fresh || !made) && (
+              <p className="api-hint">
+                {fresh
+                  ? t("widget.keyFilled", { name: made!.name })
+                  : tr("widget.keyNote", { placeholder: <code>{placeholder}</code>, name: <strong>{chosen.name}</strong>, preview: <span className="mono">{chosen.preview}</span> })}
+              </p>
+            )}
             <p className="api-hint">{t("widget.preview", { side: side === "left" ? t("widget.sideLeft") : t("widget.sideRight") })}</p>
             <p className="api-hint">
               {tr("widget.calls", {

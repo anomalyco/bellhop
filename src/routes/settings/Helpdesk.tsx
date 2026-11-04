@@ -8,6 +8,7 @@ import { isDesk } from "../../lib/helpdesk"
 import { CheckIcon } from "../../ui/icons"
 import { Button } from "../../ui/primitives"
 import "../../styles/helpdesk.css"
+import { AutonomyChoice } from "../../ui/helpdesk/Autonomy"
 
 /**
  * Settings → Help desk (admins): the workspace's mode, switched only after an inline confirm that spells out what
@@ -25,10 +26,14 @@ export function HelpdeskSettings({ app }: { app: AppDetail }) {
   const patch = async (input: Parameters<typeof api.patchApp>[1]) => {
     setBusy(true)
     setError(null)
+    // Help desk options show their new value at once; the server's answer replaces it, or the old one comes back
+    const before = app
+    if (input.helpdesk) setData<AppDetail>(keys.app(app.slug), (a) => a && { ...a, helpdesk: { ...a.helpdesk, ...input.helpdesk } })
     try {
       setData<AppDetail>(keys.app(app.slug), await api.patchApp(app.slug, input))
       setConfirming(null)
     } catch (e) {
+      if (input.helpdesk) setData<AppDetail>(keys.app(app.slug), before)
       setError(errorMessage(e))
     } finally {
       setBusy(false)
@@ -128,6 +133,17 @@ export function HelpdeskSettings({ app }: { app: AppDetail }) {
               <span className="visibility-hint">{t("settings.anonymousText")}</span>
             </span>
           </label>
+          <div className="field desk-default-autonomy">
+            <span className="field-label">{t("settings.defaultAutonomy")}</span>
+            <p className="desk-trust-note">{t("settings.defaultAutonomyText")}</p>
+            <AutonomyChoice
+              name="desk-default-autonomy"
+              label={t("settings.defaultAutonomy")}
+              value={app.helpdesk.default_autonomy ?? "suggest"}
+              disabled={!admin || busy}
+              onChange={(next) => void patch({ helpdesk: { default_autonomy: next } })}
+            />
+          </div>
           {admin && app.trusted === false && <p className="desk-trust-note">{t("settings.trustedNote", { workspace: app.name })}</p>}
         </section>
       )}

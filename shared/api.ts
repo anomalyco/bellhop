@@ -457,8 +457,8 @@ export interface RequestField {
  */
 export type Autonomy = "suggest" | "approve_actions" | "autonomous"
 
-/** Who new requests of a type go to. Groups with round-robin come later. */
-export type RouteTarget = { agent: string } | { member: string } | null
+/** Who new requests of a type go to: an agent, a member, or a group (which picks a member, see Group). */
+export type RouteTarget = { agent: string } | { member: string } | { group: string } | null
 
 export interface RequestType {
   id: string
