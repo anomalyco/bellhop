@@ -386,10 +386,10 @@ img.avatar[data-photo] {
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
 .avatar[data-agent] svg {
-  width: 72%;
-  height: 72%;
+  width: 100%;
+  height: 100%;
 }
-/* The brand mark is the bell on the primary white */
+/* The brand mark is the jacket in off-black on the primary white */
 .logo .avatar[data-agent] {
   color: var(--primary-fg);
   background: var(--primary-bg);

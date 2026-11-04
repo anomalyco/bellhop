@@ -1,4 +1,5 @@
 import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react"
+import { jacketPath, jacketTransform } from "./mark"
 import { StatusIcon } from "./icons"
 
 /** primary: OpenCode's "contrast" button. default: "neutral". invisible: ghost. */
@@ -122,24 +123,17 @@ export function Avatar({ seed, name, size = 20 }: { seed: string; name: string; 
   )
 }
 
-/** The service bell: a filled dome on a base plate with the striker on top. Drawn on a 24-unit grid. */
-function BellMark() {
-  return (
-    <>
-      <circle cx="12" cy="7.1" r="1.6" fill="currentColor" />
-      <rect x="11.3" y="8" width="1.4" height="2" fill="currentColor" />
-      <path d="M5.6 15.6a6.4 6.4 0 0 1 12.8 0z" fill="currentColor" />
-      <rect x="4.2" y="16.4" width="15.6" height="2.2" rx="1.1" fill="currentColor" />
-    </>
-  )
+/** The jacket mark, edge to edge on a 1024 grid; the tile around it comes from the avatar's own background. */
+function JacketMark() {
+  return <path transform={jacketTransform} fill="currentColor" d={jacketPath} />
 }
 
-/** Agents get a square avatar with the bell mark in OpenCode's grey contrast style. */
+/** Agents get a square avatar with the jacket mark, white on a dark tile. */
 export function AgentAvatar({ size = 20 }: { size?: number }) {
   return (
     <span className="avatar" data-agent style={{ width: size, height: size, borderRadius: Math.round(size * 0.26) }} aria-hidden="true">
-      <svg width={size} height={size} viewBox="0 0 24 24">
-        <BellMark />
+      <svg width={size} height={size} viewBox="0 0 1024 1024">
+        <JacketMark />
       </svg>
     </span>
   )
