@@ -1,4 +1,4 @@
-import type { Activity, Actor, AppDetail, Issue, IssueList, IssueRef, IssueSummary, TimelineItem } from "../../shared/api"
+import type { Activity, Actor, AppDetail, Comment, Issue, IssueList, IssueRef, IssueSummary, TimelineItem } from "../../shared/api"
 import type { VisibleState } from "../ui/primitives"
 import { api, keys } from "./api"
 import { entries, load, peek, prefetch, setData, updateAll } from "./cache"
@@ -136,6 +136,65 @@ export function appendTimeline(slug: string, number: number, item: TimelineItem)
   })
   const issue = peek<Issue>(keys.issue(slug, number))
   if (issue && item.kind === "comment") applySummary(slug, summaryOf(issue))
+}
+
+/** A comment changed (edited, hidden, unhidden): swap it in place. */
+export function replaceComment(slug: string, issueId: string, comment: Comment) {
+  updateAll<Issue>(`issue:${slug}:`, (issue) =>
+    issue.id === issueId && issue.timeline.some((t) => t.kind === "comment" && t.comment.id === comment.id)
+      ? { ...issue, timeline: issue.timeline.map((t) => (t.kind === "comment" && t.comment.id === comment.id ? { kind: "comment", comment } : t)) }
+      : undefined,
+  )
+}
+
+/** A comment was deleted: drop it, and one from the count. */
+export function removeComment(slug: string, issueId: string, commentId: string) {
+  let changed: Issue | null = null
+  updateAll<Issue>(`issue:${slug}:`, (issue) => {
+    if (issue.id !== issueId || !issue.timeline.some((t) => t.kind === "comment" && t.comment.id === commentId)) return undefined
+    changed = {
+      ...issue,
+      timeline: issue.timeline.filter((t) => !(t.kind === "comment" && t.comment.id === commentId)),
+      comment_count: Math.max(0, issue.comment_count - 1),
+    }
+    return changed
+  })
+  if (changed) applySummary(slug, summaryOf(changed))
+  else
+    updateAll<IssueList>(keys.lists(slug), (list) =>
+      list.issues.some((i) => i.id === issueId)
+        ? { ...list, issues: list.issues.map((i) => (i.id === issueId ? { ...i, comment_count: Math.max(0, i.comment_count - 1) } : i)) }
+        : undefined,
+    )
+}
+
+/** An issue was deleted: out of every list, one less in its tab's count, and its page says so. */
+export function removeIssue(slug: string, issueId: string, number: number) {
+  const known = peek<Issue>(keys.issue(slug, number)) ?? findSummary(slug, number)
+  updateAll<IssueList>(keys.lists(slug), (list) => {
+    const hit = list.issues.find((i) => i.id === issueId)
+    if (!hit) return undefined
+    const side = hit.status === "closed" ? "closed" : "open"
+    return { ...list, issues: list.issues.filter((i) => i.id !== issueId), counts: { ...list.counts, [side]: Math.max(0, list.counts[side] - 1) } }
+  })
+  if (known) {
+    const side = known.status === "closed" ? "closed" : "open"
+    setData<AppDetail>(keys.app(slug), (app) => (app ? { ...app, counts: { ...app.counts, [side]: Math.max(0, app.counts[side] - 1) } } : app))
+  }
+  markDeleted(slug, number)
+}
+
+const deleted = new Set<string>()
+const deletedListeners = new Set<() => void>()
+/** Issues known to be deleted this session (a live event or our own delete), so their page can say so at once. */
+export function markDeleted(slug: string, number: number) {
+  deleted.add(`${slug}:${number}`)
+  deletedListeners.forEach((l) => l())
+}
+export const isDeleted = (slug: string, number: number) => deleted.has(`${slug}:${number}`)
+export function onDeleted(listener: () => void) {
+  deletedListeners.add(listener)
+  return () => void deletedListeners.delete(listener)
 }
 
 /** Replaces the cached issue with a server response and spreads its summary to the lists. */

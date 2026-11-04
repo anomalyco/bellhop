@@ -1616,7 +1616,11 @@ button.prop:hover,
 }
 .msg-edit {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
+}
+.msg-edit .editor-foot {
+  flex-wrap: wrap;
 }
 .typing .group-head {
   gap: 8px;
@@ -2362,6 +2366,8 @@ button.prop:hover,
       .prop:not([data-static]),
       .report-edit-body,
       .guest-bar-link,
+      .field-label-aside,
+      .burst-toggle,
       .issue-row-comments,
       .input-clear,
       .label-toggle,
@@ -2384,6 +2390,8 @@ button.prop:hover,
       .prop:not([data-static]),
       .report-edit-body,
       .guest-bar-link,
+      .field-label-aside,
+      .burst-toggle,
       .issue-row-comments,
       .input-clear,
       .label-toggle,

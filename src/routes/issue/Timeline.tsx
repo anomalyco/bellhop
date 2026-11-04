@@ -1,18 +1,31 @@
 import { useState, type ReactNode } from "react"
-import type { Activity, Actor, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, Relation } from "../../../shared/api"
+import type { Activity, Actor, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, ModerationReason, Relation } from "../../../shared/api"
 import { visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 import { Time, useUntil } from "../../lib/time"
 import { formatSize } from "../../lib/upload"
 import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
-import { ChevronDownIcon, ImageIcon, LinkIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon } from "../../ui/icons"
+import { ChevronDownIcon, EyeOffIcon, ImageIcon, LinkIcon, LockIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon } from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Dots, Label } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
 import type { MessageEntry } from "./model"
+import { CommentBody, reasonText, type CommentContext } from "./Moderation"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
-export function MessageGroup({ slug, author, byAuthor, messages }: { slug: string; author: Actor; byAuthor: boolean; messages: MessageEntry[] }) {
+export function MessageGroup({
+  slug,
+  author,
+  byAuthor,
+  messages,
+  ctx,
+}: {
+  slug: string
+  author: Actor
+  byAuthor: boolean
+  messages: MessageEntry[]
+  ctx: CommentContext
+}) {
   return (
     <section className="group">
       <header className="group-head">
@@ -26,10 +39,21 @@ export function MessageGroup({ slug, author, byAuthor, messages }: { slug: strin
       </header>
       {messages.map((m) => {
         const loose = m.attachments.filter((a) => !m.body.includes(a.url))
-        return (
-          <div key={m.key} className="group-msg" data-pending={m.note ? "" : undefined}>
+        const content = (
+          <>
             <Markdown source={m.body} slug={slug} />
             {loose.length > 0 && <AttachmentList attachments={loose} />}
+          </>
+        )
+        return (
+          <div key={m.key} className="group-msg" data-pending={m.note ? "" : undefined}>
+            {m.comment ? (
+              <CommentBody ctx={ctx} comment={m.comment}>
+                {content}
+              </CommentBody>
+            ) : (
+              content
+            )}
             {m.note && <div className="group-note">{m.note}</div>}
           </div>
         )
@@ -159,6 +183,22 @@ export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode
           changed the title <del>{String(d.from ?? "")}</del> <span className="event-strong">{String(d.to ?? "")}</span>
         </>
       )
+      break
+    case "hidden":
+      icon = <EyeOffIcon size={14} />
+      body = `hid ${d.comment_id ? "a comment" : "this"} as ${reasonText[d.reason as ModerationReason] ?? "spam"}`
+      break
+    case "unhidden":
+      icon = <EyeOffIcon size={14} />
+      body = d.comment_id ? "unhid a comment" : "unhid this"
+      break
+    case "made_private":
+      icon = <LockIcon size={14} />
+      body = "made this private"
+      break
+    case "made_public":
+      icon = <LockIcon size={14} />
+      body = "made this public"
       break
     default:
       body = "updated this"

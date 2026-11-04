@@ -4,6 +4,8 @@ import type {
   AppAgent,
   AppDetail,
   AppSettings,
+  AppVisibility,
+  Block,
   Comment,
   Config,
   ConnectedAgent,
@@ -15,6 +17,7 @@ import type {
   LabelInput,
   Label,
   Me,
+  ModerationReason,
   NewApp,
   NewComment,
   NewAgentToken,
@@ -23,6 +26,7 @@ import type {
   OAuthRequest,
   Role,
   RelationType,
+  Revision,
   Template,
   TemplateInput,
 } from "../../shared/api"
@@ -133,7 +137,7 @@ export const api = {
   feedApps: () => get<FeedApp[]>("/api/feed/apps"),
   createApp: (input: NewApp) => request<AppDetail>("POST", "/api/apps", input),
   app: (slug: string) => get<AppDetail>(app(slug)),
-  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean }) => request<AppDetail>("PATCH", app(slug), input),
+  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility }) => request<AppDetail>("PATCH", app(slug), input),
   settings: (slug: string) => get<AppSettings>(`${app(slug)}/settings`),
   putWebhook: (slug: string, url: string | null) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url }),
   rotateWebhook: (slug: string) => request<AppSettings>("POST", `${app(slug)}/webhook/rotate`),
@@ -162,6 +166,20 @@ export const api = {
   createIssue: (slug: string, input: NewIssue) => request<Issue>("POST", `${app(slug)}/issues`, input),
   issue: (slug: string, number: number) => get<Issue>(`${app(slug)}/issues/${number}`),
   patchIssue: (slug: string, number: number, patch: IssuePatch) => request<Issue>("PATCH", `${app(slug)}/issues/${number}`, patch),
+  deleteIssue: (slug: string, number: number) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}`),
+  hideIssue: (slug: string, number: number, reason: ModerationReason) => request<Issue>("POST", `${app(slug)}/issues/${number}/hide`, { reason }),
+  unhideIssue: (slug: string, number: number) => request<Issue>("DELETE", `${app(slug)}/issues/${number}/hide`),
+  issueHistory: (slug: string, number: number) => get<Revision[]>(`${app(slug)}/issues/${number}/history`),
+  patchComment: (slug: string, number: number, id: string, body: string) =>
+    request<Comment>("PATCH", `${app(slug)}/issues/${number}/comments/${enc(id)}`, { body }),
+  deleteComment: (slug: string, number: number, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}`),
+  hideComment: (slug: string, number: number, id: string, reason: ModerationReason) =>
+    request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`, { reason }),
+  unhideComment: (slug: string, number: number, id: string) => request<Comment>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`),
+  commentHistory: (slug: string, number: number, id: string) => get<Revision[]>(`${app(slug)}/issues/${number}/comments/${enc(id)}/history`),
+  blocks: (slug: string) => get<Block[]>(`${app(slug)}/blocks`),
+  block: (slug: string, actorId: string, hideContent: boolean) => request<Block>("POST", `${app(slug)}/blocks`, { actor_id: actorId, hide_content: hideContent }),
+  unblock: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/blocks/${enc(id)}`),
   comment: (slug: string, number: number, input: NewComment) =>
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments`, input),
   addRelation: (slug: string, number: number, type: RelationType, other: number) =>
@@ -201,6 +219,9 @@ export const keys = {
   settings: (slug: string) => `settings:${slug}`,
   appAgents: (slug: string) => `app-agents:${slug}`,
   issue: (slug: string, number: number) => `issue:${slug}:${number}`,
+  /** Earlier versions of an issue (commentId omitted) or of one comment. */
+  history: (slug: string, number: number, commentId?: string) => `history:${slug}:${number}:${commentId ?? "issue"}`,
+  blocks: (slug: string) => `blocks:${slug}`,
   /** All list pages of one app share this prefix; the rest of the key is the filter. */
   lists: (slug: string) => `issues:${slug}:`,
 }

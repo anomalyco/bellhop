@@ -142,6 +142,28 @@ export const ArrowUpIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const LockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="3.25" y="7.25" width="9.5" height="6.5" rx="1.5" />
+    <path d="M5.5 7.25V5.5a2.5 2.5 0 0 1 5 0v1.75" />
+  </Icon>
+)
+
+export const EyeOffIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.75 2.75 13.25 13.25" />
+    <path d="M6.6 4.1A6.6 6.6 0 0 1 8 4c3.4 0 5.5 4 5.5 4s-.6 1.15-1.75 2.3M10.4 11.4A5.6 5.6 0 0 1 8 12c-3.4 0-5.5-4-5.5-4s.75-1.45 2.2-2.6" />
+    <path d="M6.75 6.9a1.75 1.75 0 0 0 2.35 2.35" />
+  </Icon>
+)
+
+export const BlockIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <circle cx="8" cy="8" r="5.25" />
+    <path d="M4.3 11.7 11.7 4.3" />
+  </Icon>
+)
+
 export const XIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="m4 4 8 8M12 4l-8 8" />

@@ -150,7 +150,9 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
   const reopenLabel = hasText ? "Reopen with comment" : "Reopen issue"
   const duplicating = member && reason === "duplicate" && issue.status !== "closed"
 
-  const splitControl = !member ? null : issue.status === "closed" ? (
+  // The team, and the reporter (completed or not planned; duplicates need the team).
+  const options = member ? closeOptions : closeOptions.filter((o) => o.reason !== "duplicate")
+  const splitControl = !member && !issue.viewer_is_author ? null : issue.status === "closed" ? (
     <Button icon={<StateIcon state="open" size={14} />} onClick={reopen} disabled={busy} aria-label={reopenLabel} title={reopenLabel}>
       <span className="close-label">{reopenLabel}</span>
     </Button>
@@ -167,7 +169,7 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
       </Button>
       <Menu align="end" width={300} trigger={(p) => <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon size={14} />} {...p} />}>
         {(dismiss) =>
-          closeOptions.map((o) => (
+          options.map((o) => (
             <MenuItem
               key={o.reason}
               checked={reason === o.reason}

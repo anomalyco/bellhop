@@ -1,14 +1,28 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useLocation } from "wouter"
 import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Me, Relation } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { load, peek, setData, useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
-import { appendTimeline, applyActivity, applyActorUpdate, applySummary, findSummary, storeIssue } from "../lib/issues"
+import {
+  appendTimeline,
+  applyActivity,
+  applyActorUpdate,
+  applySummary,
+  findSummary,
+  isDeleted,
+  onDeleted,
+  removeComment,
+  removeIssue,
+  replaceComment,
+  storeIssue,
+} from "../lib/issues"
 import { useLive } from "../lib/live"
 import { appPath } from "../lib/site"
 import { loadMarkdown } from "../ui/Markdown"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
 import { IssueView } from "./issue/IssueView"
+import { DeletedIssue } from "./issue/Moderation"
 import type { IssueModel } from "./issue/model"
 import { relationRequest, type IssueActions, type RelationKind } from "./issue/Properties"
 
@@ -52,6 +66,10 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   // The room's hello can beat the first fetch; hold its activity until the issue is known.
   const helloActivity = useRef<Activity | null | undefined>(undefined)
   const issueId = issue?.id
+  const [, navigate] = useLocation()
+  // Deleted while open (live) or by us: say so in place of the issue.
+  const [gone, setGone] = useState(() => isDeleted(slug, number))
+  useEffect(() => onDeleted(() => setGone(isDeleted(slug, number))), [slug, number])
 
   useEffect(() => {
     if (issueId && helloActivity.current !== undefined) {
@@ -84,6 +102,15 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
         case "actor.updated":
           applyActorUpdate(slug, event.previous_id, event.actor)
           break
+        case "comment.updated":
+          replaceComment(slug, event.issue_id, event.comment)
+          break
+        case "comment.deleted":
+          removeComment(slug, event.issue_id, event.comment_id)
+          break
+        case "issue.deleted":
+          removeIssue(slug, event.issue_id, event.number)
+          break
       }
     },
     (reconnected) => {
@@ -91,6 +118,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     },
   )
 
+  if (gone || (error instanceof ApiFailure && (error.status === 410 || error.code === "deleted"))) return <DeletedIssue slug={slug} number={number} />
   if (!issue) {
     if (error) return <ErrorPage error={error} />
     return <IssueLoading slug={slug} number={number} />
@@ -229,6 +257,19 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       setActionError(null)
       await addRelation("duplicate_of", other)
       await setStatus("closed", "duplicate")
+    },
+    onPrivacy: (next) => run({ private: next }, () => api.patchIssue(slug, number, { private: next })),
+    onHide: (reason) => run(null, () => (reason ? api.hideIssue(slug, number, reason) : api.unhideIssue(slug, number))),
+    onDelete: async () => {
+      setActionError(null)
+      try {
+        await api.deleteIssue(slug, number)
+      } catch (e) {
+        setActionError(errorMessage(e))
+        throw e
+      }
+      removeIssue(slug, issue.id, number)
+      navigate(appPath(slug))
     },
   }
 

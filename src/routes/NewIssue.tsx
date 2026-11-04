@@ -8,7 +8,9 @@ import { storeIssue } from "../lib/issues"
 import { appPath, signInHref } from "../lib/site"
 import { collectSystemInfo } from "../lib/sysinfo"
 import { Editor } from "../ui/Editor"
-import { XIcon } from "../ui/icons"
+import { LockIcon, XIcon } from "../ui/icons"
+import "../styles/onboarding.css"
+import "../styles/moderation.css"
 import { loadMarkdown } from "../ui/Markdown"
 import { Button, Label } from "../ui/primitives"
 import { AppLayout, Page, useMe } from "../ui/Shell"
@@ -89,6 +91,10 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
   const [sendInfo, setSendInfo] = useState(askInfo)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [showInfo, setShowInfo] = useState(false)
+  // Whether it's private: the workspace's default, and the reporter's choice when it lets them (the team always may).
+  const visibility = app.visibility ?? { default: "public", reporter_can_choose: false }
+  const canChoose = member || visibility.reporter_can_choose
+  const [isPrivate, setPrivate] = useState(visibility.default === "private")
 
   useEffect(() => {
     if (askInfo) collectSystemInfo().then(setInfo)
@@ -117,6 +123,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         attachment_ids: used.length ? used.map((a) => a.id) : undefined,
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
         guest_name: guest ? name.trim() : undefined,
+        private: canChoose ? isPrivate : undefined,
       })
       if (guest) setData<Me>(keys.me, (m) => (m ? { ...m, guest: { ...m.guest, name: name.trim() } } : m))
       storeIssue(app.slug, issue)
@@ -248,6 +255,24 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
             )}
             {showInfo && !sendInfo && <div className="muted-text">System info won't be attached.</div>}
           </div>
+        )}
+
+        {canChoose ? (
+          <label className="visibility issue-private" htmlFor="issue-private">
+            <input id="issue-private" type="checkbox" checked={isPrivate} onChange={(e) => setPrivate(e.target.checked)} />
+            <span className="visibility-text">
+              <span className="visibility-title">
+                <LockIcon size={12} /> Private
+              </span>
+              <span className="visibility-hint">Only the team and {member ? "the reporter" : "you"} can see it. Otherwise anyone with the link can.</span>
+            </span>
+          </label>
+        ) : (
+          visibility.default === "private" && (
+            <p className="issue-private-note">
+              <LockIcon size={12} /> Issues here are private: only the team and you can see them.
+            </p>
+          )
         )}
 
         {error && <p className="flash" data-tone="danger">{error}</p>}

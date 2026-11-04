@@ -3,12 +3,12 @@ import { useLocation, useSearch } from "wouter"
 import type { AppDetail, IssueList, IssueSummary, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, useResource } from "../lib/cache"
-import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, visibleState, type Filter } from "../lib/issues"
+import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, removeIssue, visibleState, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
 import { appPath } from "../lib/site"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
-import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
+import { ChevronDownIcon, CommentIcon, EyeOffIcon, LockIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppIcon, Button, Dots, Label, StateIcon } from "../ui/primitives"
 import { AppLayout, Page } from "../ui/Shell"
@@ -152,6 +152,7 @@ function IssuesList({ app }: { app: AppDetail }) {
       else if (event.type === "issue.updated") applySummary(slug, event.issue)
       else if (event.type === "activity") applyActivity(slug, event.issue_id, event.activity)
       else if (event.type === "actor.updated") applyActorUpdate(slug, event.previous_id, event.actor)
+      else if (event.type === "issue.deleted") removeIssue(slug, event.issue_id, event.number)
     },
     (reconnected) => {
       // Events sent while we were away are gone; refetch what's on screen.
@@ -361,6 +362,18 @@ export const IssueRow = memo(function IssueRow({
         </div>
         <div className="issue-meta">
           <span className="mono">#{issue.number}</span> · {actorName(issue.author)} opened <Time iso={issue.created_at} />
+          {issue.private && (
+            <span className="row-flag" title="Only the team and the reporter can see it">
+              <LockIcon size={12} />
+              Private
+            </span>
+          )}
+          {issue.hidden && (
+            <span className="row-flag" title="Hidden by a moderator; only the team can see it">
+              <EyeOffIcon size={12} />
+              Hidden
+            </span>
+          )}
         </div>
       </div>
       <div className="issue-row-side">

@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
 import { Link } from "wouter"
-import type { AgentRole, App, AppAgent, AppDetail, AppSettings, Label as LabelType, Member, Role, Template, TemplateInput } from "../../shared/api"
+import type { AgentRole, App, AppAgent, AppDetail, AppSettings, AppVisibility, Block, Label as LabelType, Member, Role, Template, TemplateInput } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { invalidate, setData, useResource } from "../lib/cache"
 import { Time } from "../lib/time"
-import { UserAvatar } from "../ui/Actor"
-import { KebabIcon, PlusIcon } from "../ui/icons"
+import { ActorAvatar, UserAvatar, actorName } from "../ui/Actor"
+import { KebabIcon, LockIcon, PlusIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppLayout, Page, useMe } from "../ui/Shell"
 import { AgentAvatar, AppIcon, Button, Label } from "../ui/primitives"
@@ -17,8 +17,9 @@ import { PublicToggle, VisibilityValue } from "../ui/workspace/Visibility"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
+import "../styles/moderation.css"
 
-type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members"
+type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members" | "blocked"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 const sections: { id: Section; label: string; min: Role }[] = [
@@ -28,6 +29,7 @@ const sections: { id: Section; label: string; min: Role }[] = [
   { id: "members", label: "Members", min: "member" },
   { id: "agents", label: "Agents", min: "admin" },
   { id: "webhook", label: "Webhook", min: "admin" },
+  { id: "blocked", label: "Blocked", min: "member" },
 ]
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
@@ -98,6 +100,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "agents" && <Agents app={app} />}
           {active === "webhook" && <Webhook app={app} />}
           {active === "members" && <Members app={app} />}
+          {active === "blocked" && <Blocked app={app} />}
         </div>
       </div>
     </Page>
@@ -132,6 +135,7 @@ function General({ app }: { app: AppDetail }) {
   const [name, setName] = useState(app.name)
   const [description, setDescription] = useState(app.description)
   const [isPublic, setPublic] = useState(!!app.public)
+  const [issues, setIssues] = useState<AppVisibility>(app.visibility ?? { default: "public", reporter_can_choose: false })
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -142,7 +146,7 @@ function General({ app }: { app: AppDetail }) {
     setError(null)
     setSaved(false)
     try {
-      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim(), public: isPublic })
+      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim(), public: isPublic, visibility: issues })
       setData(keys.app(app.slug), next)
       setData<App[]>(keys.apps, (apps) =>
         apps?.map((a) => (a.id === next.id ? { ...a, name: next.name, description: next.description, public: next.public } : a)),
@@ -182,6 +186,12 @@ function General({ app }: { app: AppDetail }) {
             <span className="field-label">Visibility</span>
             <PublicToggle value={isPublic} onChange={setPublic} id="set-public" />
           </div>
+          <div className="field">
+            <span className="field-label" id="set-issues-label">
+              New issues
+            </span>
+            <IssueVisibilityControl value={issues} onChange={setIssues} />
+          </div>
         </>
       ) : (
         <>
@@ -196,6 +206,13 @@ function General({ app }: { app: AppDetail }) {
           <div className="field">
             <span className="field-label">Visibility</span>
             <VisibilityValue value={!!app.public} />
+          </div>
+          <div className="field">
+            <span className="field-label">New issues</span>
+            <p className="settings-value visibility-value">
+              {app.visibility?.default === "private" ? "Private" : "Public"}
+              <span className="visibility-hint">{issueVisibilityText(app.visibility ?? { default: "public", reporter_can_choose: false })}</span>
+            </p>
           </div>
         </>
       )}
@@ -217,6 +234,44 @@ function General({ app }: { app: AppDetail }) {
         <p className="muted-text">Only admins and owners can change these. You're {app.role === "member" ? "a member" : "a viewer"} here.</p>
       )}
     </form>
+  )
+}
+
+const issueVisibilityText = (v: AppVisibility) =>
+  `${v.default === "private" ? "Only the team and each issue's reporter can read them." : "Anyone with the link can read them."} ${
+    v.reporter_can_choose ? "Reporters can choose when they open one." : "Reporters can't change that."
+  } The team can change any issue.`
+
+/** "New issues are public / private", and whether reporters may choose. */
+function IssueVisibilityControl({ value, onChange }: { value: AppVisibility; onChange: (next: AppVisibility) => void }) {
+  return (
+    <div className="issue-visibility">
+      <div className="segmented" role="radiogroup" aria-labelledby="set-issues-label">
+        {(["public", "private"] as const).map((d) => (
+          <button
+            key={d}
+            type="button"
+            role="radio"
+            aria-checked={value.default === d}
+            aria-pressed={value.default === d}
+            onClick={() => onChange({ ...value, default: d })}
+          >
+            {d === "private" && <LockIcon size={12} />}
+            {d === "public" ? "Public" : "Private"}
+          </button>
+        ))}
+      </div>
+      <label className="checkbox" htmlFor="set-reporter-choose">
+        <input
+          id="set-reporter-choose"
+          type="checkbox"
+          checked={value.reporter_can_choose}
+          onChange={(e) => onChange({ ...value, reporter_can_choose: e.target.checked })}
+        />
+        Reporters can choose
+      </label>
+      <p className="visibility-hint">{issueVisibilityText(value)}</p>
+    </div>
   )
 }
 
@@ -1214,6 +1269,60 @@ function MemberRow({
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+/* Blocked */
+
+/** Guests and accounts blocked from posting here, with who blocked them and when. Unblocking doesn't unhide. */
+function Blocked({ app }: { app: AppDetail }) {
+  const { data: blocks, error } = useResource<Block[]>(keys.blocks(app.slug), () => api.blocks(app.slug), 5_000)
+  return (
+    <div>
+      <Heading title="Blocked" />
+      <p className="settings-lede">Blocked people can still read, but can't post, edit or upload here. Block someone from the "…" on one of their comments.</p>
+      <section className="box">
+        {!blocks && !error && <div className="box-row skeleton-row" />}
+        {!!error && !blocks && <div className="box-row muted-text">{errorMessage(error)}</div>}
+        {blocks?.length === 0 && <div className="box-empty">No one is blocked.</div>}
+        {blocks?.map((b) => <BlockRow key={b.id} slug={app.slug} block={b} />)}
+      </section>
+    </div>
+  )
+}
+
+function BlockRow({ slug, block }: { slug: string; block: Block }) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const unblock = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.unblock(slug, block.id)
+      setData<Block[]>(keys.blocks(slug), (list) => list?.filter((x) => x.id !== block.id))
+    } catch (e) {
+      setError(errorMessage(e))
+      setBusy(false)
+    }
+  }
+  return (
+    <div className="box-row settings-row block-row">
+      <ActorAvatar actor={block.actor} size={28} />
+      <div className="settings-row-main">
+        <div className="template-row-name">
+          {actorName(block.actor)} <span className="agent-kind">{block.actor.type === "guest" ? "Guest" : "Account"}</span>
+        </div>
+        <div className="issue-meta">
+          Blocked by {actorName(block.by)} <Time iso={block.created_at} />
+        </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+      <div className="settings-row-actions">
+        <Button size="small" onClick={unblock} disabled={busy}>
+          {busy ? "Unblocking…" : "Unblock"}
+        </Button>
+      </div>
     </div>
   )
 }

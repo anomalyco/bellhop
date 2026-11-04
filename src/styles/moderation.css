@@ -1,0 +1,273 @@
+/* Moderation, private issues, edits and their history: quiet markers, a "…" per comment, inline confirms. */
+
+/* "edited" beside a time, opening the earlier versions */
+.edited-marker {
+  padding: 0;
+  font: inherit;
+  color: var(--fg-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.edited-marker:hover,
+.edited-marker[aria-expanded="true"] {
+  color: var(--fg-muted);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.history {
+  display: grid;
+  min-width: 0;
+}
+.history-scroll {
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.menu[data-sheet] .history-scroll {
+  max-height: 70vh;
+}
+.history-empty {
+  padding: 12px;
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+}
+.history-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding: 12px;
+}
+.history-item + .history-item {
+  border-top: 1px solid var(--border-muted);
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.history-time {
+  color: var(--fg-faint);
+}
+.history-title {
+  margin: 0;
+  font-weight: var(--weight-semibold);
+  overflow-wrap: anywhere;
+}
+.history-body {
+  min-width: 0;
+  font-size: var(--text-ui);
+  overflow-wrap: anywhere;
+}
+.history-body > :first-child {
+  margin-top: 0;
+}
+.history-body > :last-child {
+  margin-bottom: 0;
+}
+
+/* Private and hidden markers under the issue title */
+.report-flags {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+}
+.flag-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin: 0;
+}
+.flag {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 0.5px var(--border-strong);
+}
+.flag .icon {
+  color: var(--icon-muted);
+}
+.flag-text {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+
+/* List rows */
+.row-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: -1px;
+}
+.row-flag .icon {
+  color: var(--icon-muted);
+}
+
+/* A comment: room on the right for its "…", shown on hover (always on touch) */
+.msg {
+  position: relative;
+  min-width: 0;
+}
+.msg[data-menu] {
+  padding-right: 32px;
+}
+.msg-menu {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  opacity: 0;
+  transition: opacity 85ms ease-out;
+}
+.group-msg:hover .msg-menu,
+.msg-menu:focus-within,
+.msg-menu:has([aria-expanded="true"]) {
+  opacity: 1;
+}
+@media (hover: none) {
+  .msg-menu {
+    opacity: 1;
+  }
+}
+.msg-meta {
+  margin-top: 2px;
+  font-size: var(--text-small);
+}
+.msg-edit {
+  margin: 4px 0;
+}
+.msg-hidden {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+}
+.msg-hidden .icon {
+  color: var(--icon-muted);
+}
+.msg-hidden-toggle {
+  font-size: var(--text-ui);
+}
+.msg-hidden-body {
+  margin-top: 4px;
+  padding-left: 10px;
+  color: var(--fg-muted);
+  border-left: 2px solid var(--border);
+}
+.msg-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  margin-top: 8px;
+  padding: 8px 0 0;
+  border-top: 1px solid var(--border-muted);
+}
+.msg-confirm-text {
+  flex: 1 1 220px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.msg-confirm-block {
+  display: grid;
+  justify-items: start;
+}
+.msg-confirm-block .msg-confirm-text {
+  flex: none;
+}
+.msg-confirm-check {
+  font-weight: var(--weight-regular);
+}
+.msg-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+.msg-note {
+  margin: 6px 0 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.hidden-line .event-text {
+  color: var(--fg-faint);
+}
+
+/* Deleting an issue: a calm inline confirm under its title */
+.report-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--border-muted);
+  border-bottom: 1px solid var(--border-muted);
+}
+.report-confirm-text {
+  flex: 1 1 320px;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.report-confirm-text strong {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.report-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* New issue: the Private choice, or a note when the workspace keeps issues private */
+.issue-private .visibility-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.issue-private-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+
+/* Settings: whether new issues are public, and whether reporters choose */
+.issue-visibility {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.issue-visibility .segmented > button .icon {
+  color: inherit;
+}
+
+@media (pointer: coarse) {
+  .edited-marker,
+  .msg-hidden-toggle {
+    position: relative;
+  }
+  .edited-marker::after,
+  .msg-hidden-toggle::after {
+    content: "";
+    position: absolute;
+    inset: -12px -6px;
+  }
+  .issue-visibility label.checkbox {
+    min-height: 40px;
+  }
+}
