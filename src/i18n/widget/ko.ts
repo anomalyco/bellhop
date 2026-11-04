@@ -102,6 +102,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "문제가 발생했어요. 다시 시도해 주세요.",
   "error.rateLimited": "요청이 너무 많아요. 잠시 후 다시 시도해 주세요.",
   "error.unavailable": "지금은 채팅을 이용할 수 없어요.",
+
+  // 로그인한 고객만 채팅할 수 있는 사이트의 방문자 ({host}는 사이트 주소, 예: app.example.com)
+  "signin.title": "고객 지원에 문의하려면 {host}에 로그인해 주세요",
+  "signin.text": "채팅은 로그인한 고객만 이용할 수 있어요. 로그인하면 여기에서 대화를 시작할 수 있어요.",
+
+  // 이전 메시지와 첨부 파일
+  "conversation.older": "이전 메시지를 불러오는 중…",
+  "composer.attach": "파일 첨부",
+  "composer.removeFile": "{name} 삭제",
+  "upload.uploading": "{name} 업로드 중…",
+  "upload.tooLarge": "{name} 파일이 너무 커요. 이미지는 10MB, 동영상은 100MB, 그 밖의 파일은 25MB까지 보낼 수 있어요.",
+  "upload.quota": "오늘 업로드 한도에 도달했어요. 메시지로 설명해 주시거나 내일 다시 시도해 주세요.",
+  "upload.type": "{name} 파일은 여기에서 보낼 수 없어요. 다른 파일을 사용해 주세요.",
+  "upload.rateLimited": "최근 1시간 동안 업로드가 너무 많았어요. 잠시 후 다시 시도해 주세요.",
+  "upload.failed": "{name} 업로드에 실패했어요. 다시 시도해 주세요.",
 }
 
 export default messages

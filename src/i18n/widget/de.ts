@@ -102,6 +102,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "Etwas ist schiefgelaufen. Versuch es noch mal.",
   "error.rateLimited": "Zu viele Anfragen. Versuch es gleich noch mal.",
   "error.unavailable": "Der Chat ist gerade nicht verfügbar.",
+
+  // Besucher einer Website, auf der nur angemeldete Kunden chatten können ({host} ist die Website, z. B. app.example.com)
+  "signin.title": "Melde dich bei {host} an, um den Support zu kontaktieren",
+  "signin.text": "Der Chat steht angemeldeten Kunden zur Verfügung. Sobald du angemeldet bist, kannst du hier einen Chat starten.",
+
+  // Ältere Nachrichten und Anhänge
+  "conversation.older": "Ältere Nachrichten werden geladen…",
+  "composer.attach": "Datei anhängen",
+  "composer.removeFile": "{name} entfernen",
+  "upload.uploading": "{name} wird hochgeladen…",
+  "upload.tooLarge": "{name} ist zu groß. Bilder dürfen bis zu 10 MB groß sein, Videos 100 MB und andere Dateien 25 MB.",
+  "upload.quota": "Du hast dein Upload-Limit für heute erreicht. Beschreib es stattdessen in einer Nachricht oder versuch es morgen noch mal.",
+  "upload.type": "{name} kann hier nicht gesendet werden. Versuch es mit einer anderen Datei.",
+  "upload.rateLimited": "Zu viele Uploads in der letzten Stunde. Versuch es etwas später noch mal.",
+  "upload.failed": "{name} konnte nicht hochgeladen werden. Versuch es noch mal.",
 }
 
 export default messages

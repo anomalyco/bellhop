@@ -106,6 +106,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "Algo salió mal. Inténtalo de nuevo.",
   "error.rateLimited": "Demasiadas solicitudes. Inténtalo de nuevo en un momento.",
   "error.unavailable": "El chat no está disponible en este momento.",
+
+  // Visitantes de un sitio donde solo los clientes con sesión iniciada pueden chatear ({host} es el sitio, p. ej. app.example.com)
+  "signin.title": "Inicia sesión en {host} para contactar con soporte",
+  "signin.text": "El chat está disponible para clientes con sesión iniciada. Cuando hayas iniciado sesión, podrás empezar una conversación aquí.",
+
+  // Mensajes anteriores y archivos adjuntos
+  "conversation.older": "Cargando mensajes anteriores…",
+  "composer.attach": "Adjuntar un archivo",
+  "composer.removeFile": "Quitar {name}",
+  "upload.uploading": "Subiendo {name}…",
+  "upload.tooLarge": "{name} es demasiado grande. Las imágenes pueden ocupar hasta 10 MB, los vídeos 100 MB y otros archivos 25 MB.",
+  "upload.quota": "Has alcanzado el límite de subidas de hoy. Descríbelo en un mensaje o inténtalo de nuevo mañana.",
+  "upload.type": "No se puede enviar {name} aquí. Prueba con otro archivo.",
+  "upload.rateLimited": "Demasiadas subidas en la última hora. Inténtalo de nuevo un poco más tarde.",
+  "upload.failed": "No se pudo subir {name}. Inténtalo de nuevo.",
 }
 
 export default messages

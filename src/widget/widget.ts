@@ -1,6 +1,6 @@
-import type { Conversation, ConversationItem, Participant, RealtimeEvent } from "../../shared/v1"
+import type { Conversation, ConversationItem, Participant, RealtimeEvent, Upload, Workspace as ApiWorkspace } from "../../shared/v1"
 import type { Locale } from "../../shared/api"
-import { BellhopError, createClient, type Client, type ConnectionState, type EmailChallenge, type SessionClient, type Subscription } from "../sdk"
+import { BellhopError, createClient, uploadErrorKind, type Client, type ConnectionState, type EmailChallenge, type SessionClient, type Subscription } from "../sdk"
 import { h, icons } from "./dom"
 import { markdown } from "./markdown"
 import { css } from "./styles"
@@ -24,8 +24,9 @@ export interface WidgetOptions {
 }
 export type WidgetEvent = "unread" | "open" | "close"
 type View = { name: "home" } | { name: "conversation"; id: string | null } | { name: "email"; step: "email" | "code"; then: () => Promise<void> }
-type Pending = { local: string; conversationId: string | null; body: string; state: "sending" | "failed"; key: string; retry?: () => Promise<void> }
-type Workspace = { name?: string; icon_url?: string | null }
+type Pending = { local: string; conversationId: string | null; body: string; files: Upload[]; state: "sending" | "failed"; key: string; retry?: () => Promise<void> }
+type Attachment = { local: string; name: string; state: "uploading" | "done"; upload?: Upload }
+type Workspace = Partial<ApiWorkspace>
 
 const storageKey = (key: string) => `bellhop.session.${key.slice(6, 22)}`
 const jwtSub = (token: string) => {
@@ -146,7 +147,8 @@ export class Widget {
   newConversation(input: { subject?: string; message?: string; metadataId?: string } = {}) {
     this.draft = { subject: input.subject, body: input.message ?? "", metadataId: input.metadataId }
     this.open()
-    this.go({ name: "conversation", id: null })
+    // Where visitors can't sign in, home explains how to reach support instead.
+    this.go(this.canSignIn() ? { name: "conversation", id: null } : { name: "home" })
   }
   async logout() {
     const s = this.session
@@ -166,7 +168,13 @@ export class Widget {
     void this.loadWorkspace()
     const o = this.options
     try {
-      if (o.sessionToken) return await this.useSession(this.client.fromSessionToken(o.sessionToken), true)
+      if (o.sessionToken) {
+        // A token the host's server minted: resume a stored rotation of it if this page already refreshed it.
+        const stored = this.stored() as (SessionClient & { origin?: string }) | null
+        const resumed = stored && stored.user && stored.origin === o.sessionToken ? stored : this.client.fromSessionToken(o.sessionToken, undefined, this.sessionOptions())
+        ;(resumed as SessionClient & { origin?: string }).origin = o.sessionToken
+        return await this.useSession(resumed, true)
+      }
       const stored = this.stored()
       if (o.identityToken) {
         const sub = jwtSub(o.identityToken)
@@ -184,9 +192,10 @@ export class Widget {
     try {
       const raw = localStorage.getItem(storageKey(this.options.key))
       if (!raw) return null
-      const v = JSON.parse(raw) as { token: string; user?: SessionClient["user"]; expires_at?: string | null }
+      const v = JSON.parse(raw) as { token: string; user?: SessionClient["user"]; expires_at?: string | null; origin?: string }
       if (v.expires_at && Date.parse(v.expires_at) < Date.now()) return this.forget(), null
-      return this.client.fromSessionToken(v.token, v.user ?? undefined)
+      const s = this.client.fromSessionToken(v.token, v.user ?? undefined, { ...this.sessionOptions(), expiresAt: v.expires_at ?? undefined })
+      return Object.assign(s, { origin: v.origin })
     } catch {
       return null
     }
@@ -198,16 +207,39 @@ export class Widget {
       /* storage blocked */
     }
   }
-  /** Adopts a session: validates resumed ones, stores it, subscribes and loads conversations. */
-  private async useSession(s: SessionClient, validate: boolean) {
-    if (validate) await s.me()
-    this.sub?.close()
-    this.session = s
+  /** Session hooks: store rotated tokens; on a 401, pick up a token another tab rotated into storage. */
+  private sessionOptions() {
+    return {
+      onRefresh: () => this.persist(),
+      onUnauthorized: (rejected: string) => {
+        try {
+          const v = JSON.parse(localStorage.getItem(storageKey(this.options.key)) ?? "null") as { token?: string } | null
+          return v?.token && v.token !== rejected ? v.token : null
+        } catch {
+          return null
+        }
+      },
+    }
+  }
+  private persist() {
+    const s = this.session as (SessionClient & { origin?: string }) | null
+    if (!s) return
     try {
-      localStorage.setItem(storageKey(this.options.key), JSON.stringify({ token: s.token, user: s.user, expires_at: s.expiresAt }))
+      localStorage.setItem(storageKey(this.options.key), JSON.stringify({ token: s.token, user: s.user, expires_at: s.expiresAt, origin: s.origin }))
     } catch {
       /* storage blocked: the session lasts as long as the page */
     }
+  }
+  /** Adopts a session: validates resumed ones, stores it, keeps it alive, subscribes and loads conversations. */
+  private async useSession(s: SessionClient, validate: boolean) {
+    if (validate) await s.me()
+    this.sub?.close()
+    this.session?.stop()
+    this.session = s
+    this.persist()
+    // Long-lived pages: rotate the session before it expires (verified sessions only; up to 30 days).
+    if (!s.expiresAt && !s.user?.anonymous) await s.refresh().catch(() => {})
+    s.keepAlive()
     if (s.user?.locale && !this.options.locale && s.user.locale !== this.locale) this.setLocale(s.user.locale)
     this.conversations.clear()
     this.items.clear()
@@ -219,6 +251,7 @@ export class Widget {
     await this.refreshList()
   }
   private clearSession() {
+    this.session?.stop()
     this.sub?.close()
     this.sub = null
     this.session = null
@@ -237,14 +270,22 @@ export class Widget {
     this.render()
   }
   private async loadWorkspace() {
-    // Not in API v1 yet (GET /v1/workspace); used when it appears, otherwise the panel uses a generic title.
     try {
-      this.workspace = await this.client.request<Workspace>({ method: "GET", path: "/workspace" })
-      this.renderHead()
-      if (this.view.name === "home") this.render()
-    } catch {
-      /* not available */
+      this.workspace = await this.client.workspace()
+    } catch (e) {
+      return console.warn("[chat] couldn't load the workspace:", e)
     }
+    if (!this.workspace.turnstile_site_key && !this.options.sessionToken && !this.options.identityToken)
+      console.info(
+        `[chat] Email and anonymous sign-in aren't available on ${location.origin} (they need a human check that only runs on the workspace's own site). ` +
+          "Identify signed-in users with Bellhop.init({ key, sessionToken }) or { identityToken }: https://blhp.app/docs/widget#identifying-users",
+      )
+    this.renderHead()
+    this.render()
+  }
+  /** Visitors without a session can only start one where the workspace's human check runs. */
+  private canSignIn() {
+    return !!this.session || !this.workspace.name || !!this.workspace.turnstile_site_key
   }
   /**
    * Runs an action that needs a verified contact. Without a session it tries an anonymous one (if the workspace
@@ -253,8 +294,9 @@ export class Widget {
   private async withContact(action: () => Promise<void>) {
     try {
       if (!this.session) {
+        if (this.workspace.name && !this.workspace.allow_anonymous) return this.go({ name: "email", step: "email", then: action })
         try {
-          await this.useSession(await this.client.anonymous({ turnstileToken: await this.human() }), false)
+          await this.useSession(await this.client.anonymous({ turnstileToken: await this.human(), ...this.sessionOptions() }), false)
         } catch (e) {
           if (e instanceof BellhopError && (e.code === "anonymous_disabled" || e.code === "forbidden" || e.status === 403)) return this.go({ name: "email", step: "email", then: action })
           throw e
@@ -268,7 +310,7 @@ export class Widget {
   }
   private human() {
     const slot = this.body?.querySelector<HTMLElement>(".human") ?? null
-    return turnstileToken(this.options.turnstileSiteKey, slot)
+    return turnstileToken(this.workspace.turnstile_site_key ?? undefined, slot)
   }
 
   // Data
@@ -295,12 +337,97 @@ export class Widget {
     this.listShape = shape
   }
   private listShape = ""
+  private older = new Map<string, string | null>()
+  private loadingOlder = false
+  private attachments: Attachment[] = []
+  private uploadError: string | null = null
+  private attachRow: HTMLElement | null = null
+  /** Prepends the page before the oldest loaded item, keeping what's on screen where it is. */
+  private async loadOlder(id: string) {
+    const cursor = this.older.get(id)
+    if (!cursor || this.loadingOlder || !this.session) return
+    this.loadingOlder = true
+    this.renderThread(false, true)
+    try {
+      const page = await this.session.older(id, { cursor })
+      const list = this.items.get(id) ?? []
+      const known = new Set(list.map((i) => i.id))
+      this.items.set(id, [...page.data.filter((i) => !known.has(i.id)), ...list])
+      this.older.set(id, page.next_cursor)
+    } catch (e) {
+      this.handle(e)
+    } finally {
+      this.loadingOlder = false
+    }
+    if (this.view.name === "conversation" && this.view.id === id) this.renderThread(false, true)
+  }
+  private async attach(file: File) {
+    if (!this.session) return
+    const a: Attachment = { local: randomId(), name: file.name, state: "uploading" }
+    this.attachments.push(a)
+    this.uploadError = null
+    this.renderAttachments()
+    try {
+      a.upload = await this.session.upload(file)
+      a.state = "done"
+    } catch (e) {
+      this.attachments = this.attachments.filter((x) => x !== a)
+      const t = this.t,
+        kind = uploadErrorKind(e)
+      this.uploadError =
+        kind === "too_large"
+          ? t("upload.tooLarge", { name: file.name })
+          : kind === "quota"
+            ? t("upload.quota")
+            : kind === "type"
+              ? t("upload.type", { name: file.name })
+              : kind === "rate_limited"
+                ? t("upload.rateLimited")
+                : t("upload.failed", { name: file.name })
+      if (!kind) this.handle(e)
+    }
+    this.renderAttachments()
+  }
+  private renderAttachments() {
+    const row = this.attachRow
+    if (!row) return
+    const t = this.t
+    const chips = this.attachments.map((a) =>
+      h(
+        "span",
+        { class: "chip" },
+        h("span", { class: "chip-name" }, a.state === "uploading" ? t("upload.uploading", { name: a.name }) : a.name),
+        a.state === "done"
+          ? h(
+              "button",
+              {
+                class: "icon-btn",
+                type: "button",
+                "aria-label": t("composer.removeFile", { name: a.name }),
+                onclick: () => {
+                  this.attachments = this.attachments.filter((x) => x !== a)
+                  this.renderAttachments()
+                },
+              },
+              icons.close(),
+            )
+          : null,
+      ),
+    )
+    row.replaceChildren(...chips, this.uploadError ? h("p", { class: "err", role: "alert" }, this.uploadError) : "")
+    row.hidden = !chips.length && !this.uploadError
+    const send = this.panel?.querySelector<HTMLButtonElement>(".send")
+    if (send) send.disabled = this.attachments.some((x) => x.state === "uploading") || (!this.textarea?.value.trim() && !this.attachments.length)
+  }
   private confirmed = new Set<string>()
+  /** Opens a thread at its newest items; older ones load as the person scrolls up. */
   private async loadItems(id: string) {
     if (!this.session) return
-    const all: ConversationItem[] = []
+    let all: ConversationItem[]
     try {
-      for await (const item of this.session.items(id)) all.push(item)
+      const page = await this.session.latest(id, 30)
+      all = page.data
+      this.older.set(id, page.next_cursor)
     } catch (e) {
       return this.handle(e)
     }
@@ -424,10 +551,13 @@ export class Widget {
 
   private async send(text: string) {
     const body = text.trim()
-    if (!body) return
+    const files = this.attachments.filter((a) => a.state === "done").map((a) => a.upload!)
+    if (!body && !files.length) return
     const view = this.view
     if (view.name !== "conversation") return
-    const p: Pending = { local: randomId(), conversationId: view.id, body, state: "sending", key: randomId() }
+    this.attachments = []
+    this.renderAttachments()
+    const p: Pending = { local: randomId(), conversationId: view.id, body, files, state: "sending", key: randomId() }
     this.pending.push(p)
     this.renderThread(true)
     const run = async () => {
@@ -436,7 +566,11 @@ export class Widget {
       const s = this.session!
       if (!p.conversationId) {
         const c = await s.createConversation(
-          { subject: this.draft.subject ?? (snippet(body.split("\n")[0]!).slice(0, 80) || undefined), message: { body }, metadata_id: this.draft.metadataId },
+          {
+            subject: this.draft.subject ?? (snippet(body.split("\n")[0]!).slice(0, 80) || undefined),
+            message: { body, attachments: files.map((f) => f.id) },
+            metadata_id: this.draft.metadataId,
+          },
           { idempotencyKey: p.key },
         )
         this.draft = { body: "" }
@@ -447,7 +581,7 @@ export class Widget {
         if (this.view.name === "conversation" && this.view.id === null) this.go({ name: "conversation", id: c.id })
         return
       }
-      const m = await s.sendMessage(p.conversationId, { body }, { idempotencyKey: p.key })
+      const m = await s.sendMessage(p.conversationId, { body, attachments: files.map((f) => f.id) }, { idempotencyKey: p.key })
       const list = this.items.get(p.conversationId)
       if (list && !list.some((i) => i.id === m.id)) list.push({ kind: "message", id: m.id, created_at: m.created_at, message: m })
       this.pending = this.pending.filter((x) => x !== p)
@@ -455,12 +589,21 @@ export class Widget {
       if (this.view.name === "conversation" && this.view.id === p.conversationId) this.renderThread(true)
       void this.sub?.refresh()
     }
-    p.retry = () =>
-      this.withContact(run).catch((e) => {
-        p.state = "failed"
-        this.handle(e)
-        this.renderThread(false)
+    const failed = (e: unknown) => {
+      p.state = "failed"
+      this.handle(e)
+      this.renderThread(false)
+    }
+    // A request refused for a precondition (contact_required) never ran, but the API replays its stored 4xx for that
+    // Idempotency-Key for a while: once the person has verified, retry under a new key. Failures after the email
+    // step (which resumes this) mark the message failed here, since that view is gone by then.
+    const attempt = () =>
+      run().catch((e) => {
+        if (!(e instanceof BellhopError && e.code === "contact_required")) return failed(e)
+        p.key = randomId()
+        throw e
       })
+    p.retry = () => this.withContact(attempt).catch(failed)
     await p.retry()
   }
 
@@ -558,8 +701,10 @@ export class Widget {
       h(
         "div",
         { class: "home" },
-        h("div", { class: "hello" }, h("h2", {}, name ? `${t("home.greeting", { name })}` : t("home.title")), h("p", {}, name ? t("home.title") : t("home.text"))),
-        h("button", { class: "btn primary block", type: "button", "data-k": "new", onclick: () => this.newConversation() }, icons.plus(), t("home.new")),
+        h("div", { class: "hello" }, h("h2", {}, name ? `${t("home.greeting", { name })}` : t("home.title")), name ? h("p", {}, t("home.title")) : this.canSignIn() ? h("p", {}, t("home.text")) : null),
+        this.canSignIn()
+          ? h("button", { class: "btn primary block", type: "button", "data-k": "new", onclick: () => this.newConversation() }, icons.plus(), t("home.new"))
+          : h("div", { class: "card signin", role: "note" }, h("h3", {}, t("signin.title", { host: location.hostname })), h("p", {}, t("signin.text"))),
         this.session && (list.length || this.loadingList || this.listError)
           ? h(
               "div",
@@ -586,11 +731,11 @@ export class Widget {
     return h(
       "button",
       { class: "row", type: "button", "data-k": "c:" + c.id, onclick: () => this.go({ name: "conversation", id: c.id }) },
-      h("span", { class: "row-top" }, h("span", { class: "row-subject" }, c.subject), h("span", { class: "row-time" }, this.relative(c.updated_at))),
+      h("span", { class: "row-top" }, h("span", { class: "row-subject", dir: "auto" }, c.subject), h("span", { class: "row-time" }, this.relative(c.updated_at))),
       h(
         "span",
         { class: "row-bottom" },
-        h("span", { class: "row-text" }, text),
+        h("span", { class: "row-text", dir: "auto" }, text),
         c.unread ? h("span", { class: "pill unread" }, t("row.unread", { count: c.unread })) : null,
         c.status === "closed" || c.status === "waiting" ? h("span", { class: "pill" }, t(`status.${c.status}`)) : null,
       ),
@@ -609,10 +754,20 @@ export class Widget {
       enterkeyhint: "send",
     })
     textarea.value = id ? "" : this.draft.body
-    const sendBtn = h("button", { class: "send", type: "button", "aria-label": t("composer.send"), disabled: !textarea.value.trim() }, icons.send())
+    const sendBtn = h("button", { class: "send", type: "button", "aria-label": t("composer.send"), disabled: !textarea.value.trim() && !this.attachments.length }, icons.send())
+    const file = h("input", { type: "file", class: "sr", tabindex: "-1", "aria-hidden": "true" })
+    file.addEventListener("change", () => {
+      for (const f of file.files ?? []) void this.attach(f)
+      file.value = ""
+    })
+    const attachBtn = this.session
+      ? h("button", { class: "icon-btn attach", type: "button", "aria-label": t("composer.attach"), onclick: () => file.click() }, icons.clip())
+      : null
+    this.attachRow = h("div", { class: "attachments", hidden: true })
     const submit = () => {
       const value = textarea.value
-      if (!value.trim()) return
+      if (!value.trim() && !this.attachments.some((a) => a.state === "done")) return
+      if (this.attachments.some((a) => a.state === "uploading")) return
       textarea.value = ""
       if (!id) this.draft.body = ""
       grow()
@@ -621,7 +776,7 @@ export class Widget {
     const grow = () => {
       textarea.style.height = "auto"
       textarea.style.height = Math.min(140, textarea.scrollHeight) + "px"
-      sendBtn.disabled = !textarea.value.trim()
+      sendBtn.disabled = (!textarea.value.trim() && !this.attachments.some((a) => a.state === "done")) || this.attachments.some((a) => a.state === "uploading")
     }
     textarea.addEventListener("input", () => {
       grow()
@@ -642,21 +797,35 @@ export class Widget {
     requestAnimationFrame(grow)
     this.typingTimer = setInterval(() => this.renderLive(), 1000)
     const scroll = h("div", { class: "scroll" }, this.thread)
-    const out = [scroll, this.live, this.card, h("div", { class: "human" }), h("div", { class: "composer" }, textarea, sendBtn), h("span", { id: "bw-hint", class: "sr" }, t("composer.hint"))]
+    // Near the top, load the page before the oldest message.
+    scroll.addEventListener("scroll", () => id && scroll.scrollTop < 160 && this.items.has(id) && void this.loadOlder(id), { passive: true })
+    const out = [
+      scroll,
+      this.live,
+      this.card,
+      h("div", { class: "human" }),
+      this.attachRow,
+      h("div", { class: "composer" }, attachBtn, textarea, sendBtn, file),
+      h("span", { id: "bw-hint", class: "sr" }, t("composer.hint")),
+    ]
+    this.renderAttachments()
     this.renderThread(true)
     this.renderLive()
     this.renderCard()
     return out
   }
-  private renderThread(stick: boolean) {
+  /** stick: scroll to the newest. anchor: keep the content on screen in place (older messages prepended above). */
+  private renderThread(stick: boolean, anchor = false) {
     const thread = this.thread,
       v = this.view
     if (!thread || v.name !== "conversation") return
     const t = this.t
     const scroller = thread.parentElement
     const atBottom = !scroller || scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 80
+    const fromBottom = scroller ? scroller.scrollHeight - scroller.scrollTop : 0
     const items = v.id ? this.items.get(v.id) : []
     const nodes: Node[] = []
+    if (v.id && this.older.get(v.id)) nodes.push(h("p", { class: "event older", "aria-hidden": "true" }, this.loadingOlder ? t("conversation.older") : "\u00a0"))
     if (!items) nodes.push(h("p", { class: "event" }, t("conversation.loading")))
     else if (!items.length && !this.pending.some((p) => p.conversationId === v.id)) nodes.push(h("p", { class: "event" }, t("conversation.empty")))
     let prev: { author: string; at: number } | null = null
@@ -671,10 +840,12 @@ export class Widget {
         at = Date.parse(m.created_at),
         cont = !!prev && prev.author === m.author.id && at - prev.at < 5 * 60_000
       prev = { author: m.author.id, at }
-      const bubble = h("div", { class: "bubble" }, markdown(m.body))
+      // dir=auto + unicode-bidi: isolate (CSS): bidi override characters can't reorder text outside the bubble.
+      const bubble = h("div", { class: "bubble", dir: "auto" }, markdown(m.body))
       for (const a of m.attachments) {
-        const label = t("conversation.attachment", { name: a.name })
-        bubble.append(h("p", {}, /^https?:\/\//.test(a.url) ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer" }, label) : label))
+        // File names with bidi controls ("invoice\u202Efdp.exe") could pose as another type: drop them.
+        const label = t("conversation.attachment", { name: a.name.replace(/[\u202a-\u202e\u2066-\u2069]/g, "") })
+        bubble.append(h("p", {}, /^https?:\/\//.test(a.url) ? h("a", { href: a.url, target: "_blank", rel: "noopener noreferrer", dir: "auto" }, label) : label))
       }
       nodes.push(
         h(
@@ -699,7 +870,7 @@ export class Widget {
         h(
           "div",
           { class: "msg mine" },
-          h("div", { class: "bubble" }, markdown(p.body)),
+          h("div", { class: "bubble", dir: "auto" }, markdown(p.body), ...p.files.map((f) => h("p", {}, t("conversation.attachment", { name: f.name })))),
           p.state === "sending"
             ? h("div", { class: "meta" }, t("composer.sending"))
             : h("div", { class: "meta err" }, t("composer.failed"), " ", h("button", { type: "button", onclick: () => p.retry?.() }, t("composer.retry"))),
@@ -709,7 +880,8 @@ export class Widget {
     const c = v.id ? this.conversations.get(v.id) : null
     if (c?.status === "closed") nodes.push(h("p", { class: "event" }, t("conversation.closedNote")))
     thread.replaceChildren(...nodes)
-    if (scroller && (stick || atBottom)) {
+    if (scroller && anchor && !stick) scroller.scrollTop = scroller.scrollHeight - fromBottom
+    else if (scroller && (stick || atBottom)) {
       scroller.scrollTop = scroller.scrollHeight
       requestAnimationFrame(() => (scroller.scrollTop = scroller.scrollHeight))
     }
@@ -810,7 +982,11 @@ export class Widget {
             button.disabled = true
             button.textContent = t("email.sending")
             try {
-              ;(this as { challenge?: EmailChallenge }).challenge = await this.client.startEmail(email, { turnstileToken: await turnstileToken(this.options.turnstileSiteKey, human) })
+              const turnstile = await turnstileToken(this.workspace.turnstile_site_key ?? undefined, human)
+              // An anonymous session starts the sign-in itself, so its conversations move to the verified contact.
+              ;(this as { challenge?: EmailChallenge }).challenge = this.session?.user?.anonymous
+                ? await this.session.startEmail(email, { turnstileToken: turnstile })
+                : await this.client.startEmail(email, { turnstileToken: turnstile })
               this.go({ ...v, step: "code" })
             } catch (err) {
               fail(this.errorText(err))
@@ -845,7 +1021,8 @@ export class Widget {
           button.disabled = true
           button.textContent = t("email.verifying")
           try {
-            await this.useSession(await this.client.verifyEmail(challenge!, code), false)
+            const anonymous = this.session?.user?.anonymous ? this.session : null
+            await this.useSession(anonymous ? await anonymous.verifyEmail(challenge!, code) : await this.client.verifyEmail(challenge!, code, this.sessionOptions()), false)
             ;(this as { challenge?: EmailChallenge }).challenge = undefined
             this.go({ name: "conversation", id: null })
             await v.then()
@@ -875,7 +1052,9 @@ export class Widget {
             type: "button",
             onclick: async () => {
               try {
-                await this.client.startEmail(challenge!.email, { turnstileToken: await turnstileToken(this.options.turnstileSiteKey, human), challenge: challenge!.challenge })
+                const again = { turnstileToken: await turnstileToken(this.workspace.turnstile_site_key ?? undefined, human), challenge: challenge!.challenge }
+                if (this.session?.user?.anonymous) await this.session.startEmail(challenge!.email, again)
+                else await this.client.startEmail(challenge!.email, again)
                 note.hidden = false
               } catch (err) {
                 fail(this.errorText(err))

@@ -4,8 +4,10 @@ import type { Bindings, Ctx } from "./core"
 // Stable URLs for the embeddable chat widget and the public SDK:
 //   /widget/v1.js  a tiny loader: installs the `Bellhop` call queue, then loads the content-hashed widget bundle
 //   /sdk/v1.js     the SDK as one ES module (import { createClient } from "https://blhp.app/sdk/v1.js")
-// The loaders change with each deploy, so they cache for 5 minutes (stale while revalidating); the hashed bundle
-// under /assets/ is immutable. Both are readable cross-origin. vite.config.ts records the hashed names in index.html.
+// The loaders change with each deploy and only the current build's hashed bundles exist, so they cache briefly
+// (60 s, then 5 minutes stale while revalidating) and the widget loader recovers if its bundle is gone: it fetches
+// itself again once with a cache-buster. The hashed bundles under /assets/ are immutable. Both are readable
+// cross-origin. vite.config.ts records the hashed names in index.html.
 export const widget = new Hono<Bindings>()
 
 const vite = (c: Ctx) => c.env.DEV_LOGIN === "1" && !c.env.APP_DOMAIN
@@ -29,7 +31,7 @@ function bundles(c: Ctx): Promise<Record<string, string>> {
 
 function headers(c: Ctx, dev = false) {
   c.header("Content-Type", "text/javascript; charset=utf-8")
-  c.header("Cache-Control", dev ? "no-store" : "public, max-age=300, stale-while-revalidate=86400")
+  c.header("Cache-Control", dev ? "no-store" : "public, max-age=60, stale-while-revalidate=300")
   c.header("Access-Control-Allow-Origin", "*")
   c.header("Cross-Origin-Resource-Policy", "cross-origin")
   c.header("X-Content-Type-Options", "nosniff")
@@ -59,6 +61,20 @@ widget.get("/widget/v1.js", async (c) => {
   e.src = ${JSON.stringify(src.startsWith("http") ? src : origin(c) + src)}
   e.async = true
   ${dev ? 'e.type = "module"' : ""}
+  // A cached loader can outlive its bundle after a deploy: fetch a fresh loader once, which loads the current one.
+  // Also when the "bundle" loaded but didn't start (a fallback page served in its place).
+  e.onload = function () {
+    if (!(w.Bellhop && w.Bellhop.version)) e.onerror()
+  }
+  e.onerror = function () {
+    if (b._retried) return
+    b._retried = 1
+    b._loading = 0
+    var r = d.createElement("script")
+    r.src = ${JSON.stringify(origin(c) + "/widget/v1.js")} + "?r=" + Date.now()
+    r.async = true
+    ;(d.head || d.documentElement).appendChild(r)
+  }
   ;(d.head || d.documentElement).appendChild(e)
 })()
 `)

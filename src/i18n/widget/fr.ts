@@ -106,6 +106,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "Une erreur est survenue. Réessayez.",
   "error.rateLimited": "Trop de requêtes. Réessayez dans un instant.",
   "error.unavailable": "Le chat est indisponible pour le moment.",
+
+  // Visiteurs d’un site où seuls les clients connectés peuvent discuter ({host} est le site, p. ex. app.example.com)
+  "signin.title": "Connectez-vous à {host} pour contacter l’assistance",
+  "signin.text": "Le chat est réservé aux clients connectés. Une fois connecté, vous pourrez démarrer une conversation ici.",
+
+  // Messages plus anciens et pièces jointes
+  "conversation.older": "Chargement des messages précédents…",
+  "composer.attach": "Joindre un fichier",
+  "composer.removeFile": "Retirer {name}",
+  "upload.uploading": "Envoi de {name}…",
+  "upload.tooLarge": "{name} est trop volumineux. Taille maximale : 10 MB pour les images, 100 MB pour les vidéos et 25 MB pour les autres fichiers.",
+  "upload.quota": "Vous avez atteint la limite d’envoi de fichiers pour aujourd’hui. Décrivez-le plutôt dans un message, ou réessayez demain.",
+  "upload.type": "{name} ne peut pas être envoyé ici. Essayez un autre fichier.",
+  "upload.rateLimited": "Trop d’envois au cours de la dernière heure. Réessayez un peu plus tard.",
+  "upload.failed": "Impossible d’envoyer {name}. Réessayez.",
 }
 
 export default messages

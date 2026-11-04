@@ -3,11 +3,22 @@ import { DEFAULT_WEBHOOK_EVENTS, LOCALES } from "../shared/api"
 import { toolRoles, tools } from "./mcp"
 import { reportLimits } from "./reports"
 import { webhookEvents } from "./webhooks"
+import { routes } from "./v1"
+import { uploadSpec } from "./media"
+import { contactTTL } from "./contact-session"
+import uploadsSource from "./v1/uploads.ts?raw"
+import sessionsSource from "./v1/sessions.ts?raw"
+import replaySource from "./v1/replay.ts?raw"
+import signedMediaSource from "./v1/signed-media.ts?raw"
+import realtimeSource from "./v1/realtime.ts?raw"
 import index from "../docs/index.md?raw"
 import reports from "../docs/reports.md?raw"
 import mcp from "../docs/mcp.md?raw"
 import webhooks from "../docs/webhooks.md?raw"
 import feeds from "../docs/feeds.md?raw"
+import publicApi from "../docs/api.md?raw"
+import widget from "../docs/widget.md?raw"
+import identity from "../docs/identity.md?raw"
 import production from "virtual:bellhop-production-config"
 
 // The public developer docs. Pages are Markdown in docs/; anything that can drift from the code
@@ -37,6 +48,7 @@ function rate(name: string) {
   return `${limit} per ${per}`
 }
 function bytes(n: number) {
+  if (n % (1024 * 1024 * 1024) === 0) return `${n / (1024 * 1024 * 1024)}\u00a0GiB`
   if (n % (1024 * 1024) === 0) return `${n / (1024 * 1024)}\u00a0MiB`
   if (n % 1024 === 0) return `${n / 1024}\u00a0KiB`
   return `${n} bytes`
@@ -56,6 +68,21 @@ const webhookRetries =
   production.queues.consumers.find((q) => q.queue === "bellhop-webhooks")?.max_retries ?? fail("no webhook queue")
 // worker/webhooks.ts retries with delaySeconds 2 ** (attempts - 1).
 const backoff = Array.from({ length: webhookRetries }, (_, i) => String(2 ** i))
+// Public API v1 limits, read from the code that enforces them.
+const sourceMatch = (source: string, pattern: RegExp, what: string) => pattern.exec(source) ?? fail(`no ${what}`)
+const sessionLife = sourceMatch(sessionsSource, /min\(unixepoch\(\)\+(\d+),born\+(\d+)\)/, "session lifetime")
+const uploadDaily = fromMigrations(
+  /NEW\.scope!='workspace' THEN (\d+) WHEN \(SELECT trusted FROM apps WHERE id=NEW\.app_id\) THEN (\d+) ELSE (\d+) END/,
+  "upload byte quota"
+)
+const replayTtl = sourceMatch(replaySource, /response\.status < 500 \? (\d+) : (\d+)/, "replay lifetimes")
+const duration = (seconds: number) => {
+  const unit = (n: number, word: string) => `${n}\u00a0${word}${n === 1 ? "" : "s"}`
+  if (seconds % 86400 === 0 && seconds > 86400) return unit(seconds / 86400, "day")
+  if (seconds % 3600 === 0) return unit(seconds / 3600, "hour")
+  if (seconds % 60 === 0) return unit(seconds / 60, "minute")
+  return unit(seconds, "second")
+}
 const list = (items: string[]) =>
   items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`
 
@@ -71,7 +98,24 @@ const values: Record<string, string> = {
   "mcp.commentsPerHour": commentsTrigger[1]!,
   "webhook.retries": String(webhookRetries),
   "webhook.backoff": `${list(backoff)} seconds`,
-  locales: LOCALES.map((l) => `\`${l}\``).join(", ")
+  locales: LOCALES.map((l) => `\`${l}\``).join(", "),
+  "v1.session": duration(Number(sessionLife[1])),
+  "v1.sessionCap": duration(Number(sessionLife[2])),
+  "v1.uploadImage": bytes(uploadSpec("a.png", "image/png").limit),
+  "v1.uploadVideo": bytes(uploadSpec("a.mp4", "video/mp4").limit),
+  "v1.uploadFile": bytes(uploadSpec("a.pdf", "application/pdf").limit),
+  "v1.uploadsPerHour": String(
+    Number(sourceMatch(uploadsSource, /-1 hour'\)[^`]*LIMIT 1 OFFSET (\d+)/, "hourly uploads")[1]) + 1
+  ),
+  "v1.uploadContactDaily": bytes(Number(uploadDaily[1])),
+  "v1.uploadWorkspaceDaily": bytes(Number(uploadDaily[3])),
+  "v1.replaySuccess": duration(Number(replayTtl[2])),
+  "v1.replayClientError": duration(Number(replayTtl[1])),
+  "v1.mediaTtl": duration(Number(sourceMatch(signedMediaSource, /ttl = (\d+)/, "signed media lifetime")[1])),
+  "identity.session": duration(contactTTL),
+  "v1.ticketTtl": duration(
+    Number(sourceMatch(realtimeSource, /Date\.now\(\) \/ 1000\) \+ (\d+)/, "ticket lifetime")[1])
+  )
 }
 
 // What each tool returns. Kept next to the generated table, and checked for completeness.
@@ -131,7 +175,9 @@ const roleGroups = [
 type Schema = { type?: string | string[]; enum?: unknown[]; items?: { enum?: unknown[] } }
 function argument(name: string, schema: Schema, required: boolean) {
   const options = schema.enum ?? schema.items?.enum
-  const types = [schema.type ?? []].flat().filter((t) => t !== "string")
+  const all = [schema.type ?? []].flat()
+  // Strings are the default and go unsaid, unless the argument can also be something else ("string or null").
+  const types = all.length > 1 ? all : all.filter((t) => t !== "string")
   const detail = options
     ? `${schema.type === "array" ? "array of " : ""}${options.map((o) => `\`${String(o)}\``).join(", ")}`
     : types.join(" or ")
@@ -187,13 +233,188 @@ function eventTable() {
   )
   return `| Event | Default | When |\n| --- | --- | --- |\n${rows.join("\n")}`
 }
-const tables: Record<string, () => string> = { "mcp-tools": toolTable, "webhook-events": eventTable }
+// The public API v1 reference, from the OpenAPI document GET /v1/openapi.json serves (built from the same route
+// table the API dispatches with). Only the one-line summaries are written here; a route without one still renders.
+type Api = {
+  paths: Record<string, Record<string, Operation>>
+  components: { schemas: Record<string, JsonSchema>; securitySchemes: Record<string, { bearerFormat?: string }> }
+}
+type Operation = {
+  operationId: string
+  description?: string
+  security: Record<string, string[]>[]
+  parameters: { in: string; name: string; required: boolean; schema: JsonSchema }[]
+  requestBody?: { content: Record<string, { schema: JsonSchema }> }
+  responses: Record<string, { description: string; content?: Record<string, { schema: JsonSchema }>; "x-websocket-frame"?: JsonSchema }>
+}
+type JsonSchema = {
+  $ref?: string
+  type?: string
+  format?: string
+  enum?: unknown[]
+  const?: unknown
+  items?: JsonSchema
+  properties?: Record<string, JsonSchema>
+  required?: string[]
+  anyOf?: JsonSchema[]
+  oneOf?: JsonSchema[]
+  allOf?: JsonSchema[]
+  additionalProperties?: JsonSchema
+  description?: string
+  maxLength?: number
+  minimum?: number
+  maximum?: number
+  pattern?: string
+}
+const api = () => ((routes.openapi ?? fail("no openapi route")).run as unknown as () => Api)()
+const operations: Record<string, [group: string, title: string, summary: string]> = {
+  createSession: ["Sessions", "Start a session", "With a secret key, for a user your server vouches for. With a publishable key, from an identity token or anonymously (where the workspace allows it)."],
+  startEmail: ["Sessions", "Send an email sign-in code", "Needs a Turnstile token, so it works only where the workspace's human check runs. Returns `Challenge-Token`; keep it in this browser."],
+  verifyEmail: ["Sessions", "Sign in with the email code", "Send the code with the same `Challenge-Token`. With an anonymous session's bearer, its conversations move to the verified contact and that session ends."],
+  refreshSession: ["Sessions", "Refresh a session", "A new token for up to {{v1.session}} more, at most {{v1.sessionCap}} after the first sign-in. The old token and its sockets stop working."],
+  revokeSession: ["Sessions", "Sign out", "Ends the session and closes its sockets."],
+  workspace: ["Sessions", "Get the workspace", "The name and icon to show, and which sign-ins this origin offers."],
+  getMe: ["Sessions", "Get the user", "The person this session belongs to."],
+  updateMe: ["Sessions", "Update the user", "Their display name and language."],
+  listConversations: ["Conversations", "List conversations", "A session gets the user's own, newest activity first. A secret key gets the workspace's, filtered by `status`, `contact_id` or `q`."],
+  createConversation: ["Conversations", "Start a conversation", "With its first message. A secret key opens it for a `contact`."],
+  getConversation: ["Conversations", "Get a conversation", ""],
+  listItems: ["Conversations", "List messages and events", "Oldest first by default; `after` catches up. `last` opens at the newest items and `before` pages back from an item."],
+  postMessage: ["Conversations", "Send a message", "Markdown, with upload ids in `attachments`. A secret key replies `as` a team member."],
+  markRead: ["Conversations", "Mark as read", "Everything up to `item_id`."],
+  typing: ["Conversations", "Show typing", "The team sees the user typing for a few seconds."],
+  confirmVerification: ["Conversations", "Confirm an email verification", "The code the team's verification request sent to an address."],
+  upload: ["Uploads and realtime", "Upload a file", "`multipart/form-data` with one part named `file`. Attach the returned id to a message within 24 hours."],
+  realtime: ["Uploads and realtime", "Get a realtime URL", "A single-use WebSocket URL, valid for {{v1.ticketTtl}}."],
+  connectRealtime: ["Uploads and realtime", "Connect to realtime", "Open the URL from the call above unchanged. Frames are `RealtimeEvent` JSON."],
+  listContacts: ["Server API", "List contacts", "Persistent contacts, not anonymous visitors. Search them with `q`."],
+  getContact: ["Server API", "Get a contact", ""],
+  getContactBySubject: ["Server API", "Get a contact by your user id", "The contact whose `external_id` is your user id."],
+  upsertContact: ["Server API", "Create or update a contact", "Keyed by your user id. The same email-linking rules as starting a session."],
+  eraseContact: ["Server API", "Erase a contact", "Removes their identity, sessions and verification records. Their requests stay, written by a deleted user."],
+  updateConversation: ["Server API", "Update a conversation", "Status and close reason, assignee and labels."],
+  requestVerification: ["Server API", "Ask to verify an email", "Emails a code to the address; the requester enters it in the conversation."],
+  openapi: ["Discovery", "Get the OpenAPI document", "This reference as OpenAPI 3.1."]
+}
+const groups = ["Sessions", "Conversations", "Uploads and realtime", "Server API", "Discovery"]
+const credentials: Record<string, string> = {
+  secret: "secret key",
+  publishable: "publishable key",
+  session: "session",
+  socketTicket: "realtime ticket"
+}
+const schemaName = (ref: string) => ref.slice(ref.lastIndexOf("/") + 1)
+const schemaLink = (name: string) => `[\`${name}\`](#${slugify(`${name} object`)})`
+function typeText(s: JsonSchema): string {
+  if (s.$ref) return schemaLink(schemaName(s.$ref))
+  if (s.const !== undefined) return `\`${JSON.stringify(s.const)}\``
+  if (s.enum) return s.enum.map((v) => `\`${JSON.stringify(v)}\``).join(" or ")
+  if (s.anyOf) return s.anyOf.map(typeText).join(" or ")
+  if (s.oneOf) return s.oneOf.map(typeText).join(" or ")
+  if (s.allOf) return s.allOf.map(typeText).join(" and ")
+  if (s.type === "array") return `array of ${s.items ? typeText(s.items) : "values"}`
+  if (s.type === "object" && s.properties)
+    return `{ ${Object.keys(s.properties).map((k) => `\`${k}\``).join(", ")} }`
+  if (s.type === "object") return s.additionalProperties ? `object of ${typeText(s.additionalProperties)}` : "object"
+  const limits = [
+    s.format,
+    s.maxLength !== undefined && `up to ${s.maxLength} characters`,
+    s.minimum !== undefined && s.maximum !== undefined && `${s.minimum}–${s.maximum}`
+  ].filter(Boolean)
+  return `${s.type ?? "any"}${limits.length ? ` (${limits.join(", ")})` : ""}`
+}
+const cell = (text: string) => text.replace(/\|/g, "\\|").replace(/\n/g, " ")
+function operationEntry(method: string, path: string, op: Operation) {
+  const known = operations[op.operationId]
+  const [, title, summary] = known ?? ["", op.operationId, ""]
+  const auth = op.security.length
+    ? op.security.map((s) => credentials[Object.keys(s)[0]!] ?? Object.keys(s)[0]).join(" or ")
+    : "none"
+  const params = op.parameters.map(
+    (p) => `| \`${p.name}\` | ${p.in} | ${cell(typeText(p.schema))} | ${p.required ? "yes" : ""} |`
+  )
+  const body = op.requestBody && Object.entries(op.requestBody.content)[0]
+  const [status, ok] = Object.entries(op.responses).find(([code]) => Number(code) < 400)!
+  const result = ok.content?.["application/json"]?.schema ?? ok["x-websocket-frame"]
+  // The per-route descriptions in the document are the generic codes for each status; the page's Errors table
+  // explains them once.
+  const errors = Object.keys(op.responses)
+    .filter((code) => Number(code) >= 400)
+    .map((code) => `\`${code}\``)
+  return [
+    `#### ${title}`,
+    "",
+    `\`${method.toUpperCase()} /v1${path}\` · ${auth}`,
+    "",
+    ...(summary ? [expand(summary), ""] : []),
+    ...(op.description ? [op.description, ""] : []),
+    ...(params.length ? ["| Parameter | In | Type | Required |", "| --- | --- | --- | --- |", ...params, ""] : []),
+    ...(body ? [`Body: ${body[0] === "multipart/form-data" ? "`multipart/form-data`, " : ""}${typeText(body[1].schema)}`, ""] : []),
+    `Returns \`${status}\`${result ? ` with ${typeText(result)}` : ""}. [Errors](#errors): ${list(errors)}.`,
+    ""
+  ].join("\n")
+}
+function apiReference() {
+  const doc = api()
+  const entries = Object.entries(doc.paths).flatMap(([path, methods]) =>
+    Object.entries(methods).map(([method, op]) => ({ method, path, op, group: operations[op.operationId]?.[0] ?? "Other" }))
+  )
+  const undescribed = entries.filter((e) => !operations[e.op.operationId]).map((e) => e.op.operationId)
+  if (undescribed.length) console.error("bellhop.docs_operation_undescribed", { operations: undescribed })
+  return [...groups, "Other"]
+    .map((group) => {
+      const inGroup = entries.filter((e) => e.group === group)
+      if (!inGroup.length) return ""
+      inGroup.sort((a, b) => Object.keys(operations).indexOf(a.op.operationId) - Object.keys(operations).indexOf(b.op.operationId))
+      return `### ${group}\n\n${inGroup.map((e) => operationEntry(e.method, e.path, e.op)).join("\n")}`
+    })
+    .filter(Boolean)
+    .join("\n")
+}
+function fields(s: JsonSchema, schemas: Record<string, JsonSchema>): [string, JsonSchema, boolean][] {
+  if (s.$ref) return fields(schemas[schemaName(s.$ref)]!, schemas)
+  if (s.allOf) return s.allOf.flatMap((x) => fields(x, schemas))
+  return Object.entries(s.properties ?? {}).map(([k, v]) => [k, v, (s.required ?? []).includes(k)])
+}
+function schemaReference() {
+  const { schemas } = api().components
+  return Object.entries(schemas)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([name, s]) => {
+      const variants = s.oneOf
+      const body = variants
+        ? variants
+            .map((v) => {
+              const f = fields(v, schemas)
+              return `- ${v.$ref ? typeText(v) : f.map(([k, t, required]) => `\`${k}\`${required ? "" : "?"}: ${typeText(t)}`).join(", ")}`
+            })
+            .join("\n")
+        : (() => {
+            const f = fields(s, schemas)
+            if (!f.length) return typeText(s)
+            const optional = f.some(([, , required]) => !required)
+            return [
+              `| Field | Type${optional ? " | Required" : ""} |`,
+              `| --- | ---${optional ? " | ---" : ""} |`,
+              ...f.map(([k, t, required]) => `| \`${k}\` | ${cell(typeText(t) + (t.description ? `. ${t.description}` : ""))}${optional ? ` | ${required ? "yes" : ""}` : ""} |`)
+            ].join("\n")
+          })()
+      return `#### \`${name}\` object\n\n${variants ? "One of:\n\n" : ""}${body}\n`
+    })
+    .join("\n")
+}
+const tables: Record<string, () => string> = {
+  "mcp-tools": toolTable,
+  "webhook-events": eventTable,
+  "api-reference": apiReference,
+  "api-schemas": schemaReference
+}
 
 function expand(source: string) {
   const out = source
     .replace(/^\{\{table:([a-z-]+)\}\}$/gm, (_, name: string) => (tables[name] ?? fail(`unknown table ${name}`))())
-    .replace(/\{\{rate:([A-Z_]+)\}\}/g, (_, name: string) => rate(name))
-    .replace(/\{\{([a-zA-Z.]+)\}\}/g, (_, key: string) => values[key] ?? fail(`unknown placeholder ${key}`))
+    .replace(/\{\{rate:([A-Z0-9_]+)\}\}/g, (_, name: string) => rate(name))
+    .replace(/\{\{([a-zA-Z0-9.]+)\}\}/g, (_, key: string) => values[key] ?? fail(`unknown placeholder ${key}`))
   if (out.includes("{{")) fail(`unexpanded placeholder near ${out.slice(out.indexOf("{{"), out.indexOf("{{") + 40)}`)
   return out
 }
@@ -251,7 +472,10 @@ const sources: [string, string][] = [
   ["reports", reports],
   ["mcp", mcp],
   ["webhooks", webhooks],
-  ["feeds", feeds]
+  ["feeds", feeds],
+  ["api", publicApi],
+  ["widget", widget],
+  ["identity", identity]
 ]
 
 let built: DocPage[] | null = null

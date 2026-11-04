@@ -62,6 +62,8 @@ Every delivery is one JSON object:
 | `mentioned` | `mention.created` | Who was mentioned: a team member or an agent. |
 | `moved_to` | `issue.moved` | Where it went: `slug`, `number`, `url`. |
 | `metadata` | `issue.opened`, `comment.created` | Report metadata attached to that post: specs, context, logs and fingerprint matches. |
+| `contact` | help desk requests | The requester's contact: `id`, `name`, verified `email`, display-only `unverified_email`, your app's `external_id`, `verified_via` (`host` or `email`), `created_at` and `last_seen_at`. |
+| `verification` | `verification.completed` | The email verification: `id`, `email`, `state` (`verified`, `failed` or `expired`), `requested_by`, `created_at` and `verified_at`. The code is never included. |
 | `redelivery_of` | redeliveries | The id of the delivery this repeats. |
 
 Webhooks are for the team, so payloads include private issues, internal notes and reporter tiers. Keep them out of anything public.

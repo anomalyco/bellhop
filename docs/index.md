@@ -1,7 +1,7 @@
 ---
 title: Bellhop developer docs
 nav: Overview
-description: Build on Bellhop. Attach diagnostics to reports from your app, let agents work issues over MCP, receive webhooks, and read feeds and embeds.
+description: Build on Bellhop: an embeddable support chat, user sign-in, the help desk API, report diagnostics, agents over MCP, webhooks, Atom feeds and embeds.
 ---
 
 # Bellhop developer docs
@@ -29,6 +29,9 @@ curl -X POST https://blhp.app/api/apps/acme/metadata \
 
 | You want to | Use | Page |
 | --- | --- | --- |
+| Add a support chat to your site or app | The chat widget and a publishable key | [Chat widget](/docs/widget) |
+| Sign your app's users in to your help desk | Identity keys and tokens, or a secret key | [Identity](/docs/identity) |
+| Build your own chat, or sync help desk requests with your backend | The help desk API v1 and its JS SDK | [Public API](/docs/api) |
 | Attach logs and system specs to bug reports from your app | The report metadata API and a report key | [Report metadata](/docs/reports) |
 | Have an agent triage, answer and close issues | MCP, with OAuth or a token agent | [Agents over MCP](/docs/mcp) |
 | React to new issues, comments and status changes | Webhooks | [Webhooks](/docs/webhooks) |
@@ -39,7 +42,8 @@ curl -X POST https://blhp.app/api/apps/acme/metadata \
 | Host | What it serves |
 | --- | --- |
 | `https://<slug>.blhp.app` | A workspace: its issue pages, its Atom feeds and its preview images. |
-| `https://blhp.app` | The home site, MCP and OAuth, oEmbed, `/llms.txt` and these docs. |
+| `https://blhp.app` | The home site, MCP and OAuth, oEmbed, the chat widget and SDK scripts, `/llms.txt` and these docs. |
+| `https://api.blhp.app` | The help desk API, under `/v1`. Workspace hosts answer on `/v1` too. |
 
 The report upload endpoint answers on both hosts; the examples use `https://blhp.app`.
 
@@ -50,9 +54,13 @@ The report upload endpoint answers on both hosts; the examples use `https://blhp
 | Report key | `bh_pub_…` | Uploading report metadata to one workspace | Settings → Report keys (workspace admins) |
 | Agent OAuth token | `bh_a_…` | MCP | An MCP client signing in with OAuth |
 | Token agent | `bh_…` | MCP | [Agents](https://blhp.app/agents) on your account |
+| Publishable API key | `bh_pk_…` | The chat widget and the API from browsers, on the origins you allow | Settings → API keys (help desk admins) |
+| Secret API key | `bh_sk_…` | Starting sessions and the server API, from your server | Settings → API keys (help desk admins) |
+| Session | `bh_us_…` | The API as one end user | Started with an API key ([Public API](/docs/api#end-user-sessions)) |
+| Identity key | `bh_id_…` | Signing identity tokens on your server (never sent as a bearer) | Settings → Identity keys (help desk admins) |
 | None | | Atom feeds, oEmbed, preview images | Public workspaces only |
 
-Send keys and tokens in the `Authorization` header as `Bearer <token>`. Report keys are publishable: they can only upload metadata, so they're safe to ship inside an app. Agent tokens act for your account, so keep them secret.
+Send keys and tokens in the `Authorization` header as `Bearer <token>`. Report keys and publishable API keys are safe to ship inside an app or a page: report keys can only upload metadata, and publishable keys work only from their allowed origins and can only start end-user sessions. Agent tokens, secret API keys and identity keys act for your workspace or account, so keep them on your server.
 
 ## Errors
 
@@ -73,7 +81,7 @@ Every HTTP error has a JSON body with a stable `code` and a readable `message`:
 | 429 | `rate_limited`, `report_daily_limit` | Too many requests. Wait for `Retry-After` seconds. |
 | 500 | `internal_error` | Something failed on our side. Retry later. |
 
-MCP answers with JSON-RPC errors instead, and the OAuth endpoints use the standard OAuth `error` field. Both are covered in [Agents over MCP](/docs/mcp).
+MCP answers with JSON-RPC errors instead, and the OAuth endpoints use the standard OAuth `error` field. Both are covered in [Agents over MCP](/docs/mcp). The help desk API has a few more codes, listed in [Public API](/docs/api#errors).
 
 ## Rate limits
 
@@ -85,9 +93,13 @@ Limits are counted per minute, per IP address, per key or per agent. When you go
 | Report uploads per day | {{report.dailyUploads}} uploads and {{report.dailyBytes}} per report key per UTC day |
 | MCP requests | {{rate:RL_AGENT}} per agent |
 | MCP requests with a missing or wrong token | {{rate:RL_IP}} per IP |
+| Help desk API | See [Public API](/docs/api#rate-limits) |
 
 ## Pages
 
+- [Chat widget](/docs/widget): embed it, identify users, control it from your page, or build your own on the SDK.
+- [Identity](/docs/identity): sign your users in with identity keys, the sign-in link, and email verification.
+- [Public API](/docs/api): keys, end-user sessions, conversations, uploads, realtime and the server API, with the full reference.
 - [Report metadata](/docs/reports): upload diagnostics from an app and open the review page.
 - [Agents over MCP](/docs/mcp): connect an agent, roles, and every tool.
 - [Webhooks](/docs/webhooks): events, payloads and signature verification.

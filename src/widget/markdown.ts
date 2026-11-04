@@ -16,7 +16,10 @@ function link(href: string, text: string) {
   a.href = href
   a.target = "_blank"
   a.rel = "noopener noreferrer nofollow"
-  a.textContent = text
+  // dir=auto with unicode-bidi: isolate keeps the label from reordering the text around it, and dropping bidi
+  // controls keeps it from reading backwards ("moc.elgoog//:sptth" shown as google.com) while going elsewhere.
+  a.dir = "auto"
+  a.textContent = text.replace(/[\u202a-\u202e\u2066-\u2069]/g, "")
   return a
 }
 

@@ -96,12 +96,9 @@ export function subscribe(session: SessionClient, handler: RealtimeHandler, opti
       for (const [id, after] of watched) {
         if (after === undefined) {
           // First look: take the newest item as the baseline without replaying history.
-          let last: string | null = null
-          for await (const item of session.items(id)) {
-            last = item.id
-            delivered.add(item.id)
-          }
-          if (watched.has(id)) watched.set(id, last)
+          const newest = (await session.latest(id, 1)).data.at(-1)
+          if (newest) delivered.add(newest.id)
+          if (watched.has(id)) watched.set(id, newest?.id ?? null)
           continue
         }
         try {

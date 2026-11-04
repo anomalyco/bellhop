@@ -102,6 +102,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "出了点问题，请重试。",
   "error.rateLimited": "请求过于频繁，请稍后再试。",
   "error.unavailable": "聊天暂时不可用。",
+
+  // 仅限已登录客户聊天的网站上的访客（{host} 是网站，例如 app.example.com）
+  "signin.title": "登录 {host} 以联系客服",
+  "signin.text": "聊天仅对已登录的客户开放。登录后即可在这里发起对话。",
+
+  // 更早的消息和附件
+  "conversation.older": "正在加载更早的消息…",
+  "composer.attach": "添加附件",
+  "composer.removeFile": "移除 {name}",
+  "upload.uploading": "正在上传 {name}…",
+  "upload.tooLarge": "{name} 太大了。图片最大 10 MB，视频最大 100 MB，其他文件最大 25 MB。",
+  "upload.quota": "你已达到今天的上传上限。可以改用消息描述，或明天再试。",
+  "upload.type": "{name} 无法在此发送，请换一个文件。",
+  "upload.rateLimited": "过去一小时内上传次数过多，请稍后再试。",
+  "upload.failed": "{name} 上传失败，请重试。",
 }
 
 export default messages

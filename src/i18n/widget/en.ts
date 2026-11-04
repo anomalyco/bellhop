@@ -103,6 +103,21 @@ const en = {
   "error.generic": "Something went wrong. Try again.",
   "error.rateLimited": "Too many requests. Try again in a moment.",
   "error.unavailable": "Chat is unavailable right now.",
+
+  // Visitors on a site where only signed-in customers can chat ({host} is the site, e.g. app.example.com)
+  "signin.title": "Sign in to {host} to contact support",
+  "signin.text": "Chat is available to signed-in customers. Once you're signed in, you can start a conversation here.",
+
+  // Older messages and attachments
+  "conversation.older": "Loading earlier messages…",
+  "composer.attach": "Attach a file",
+  "composer.removeFile": "Remove {name}",
+  "upload.uploading": "Uploading {name}…",
+  "upload.tooLarge": "{name} is too big. Images can be up to 10 MB, videos 100 MB and other files 25 MB.",
+  "upload.quota": "You've reached today's upload limit. Describe it in a message instead, or try again tomorrow.",
+  "upload.type": "{name} can't be sent here. Try a different file.",
+  "upload.rateLimited": "Too many uploads in the last hour. Try again a little later.",
+  "upload.failed": "Couldn't upload {name}. Try again.",
 } as const
 
 export default en

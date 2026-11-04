@@ -8,7 +8,7 @@ import { Widget, type WidgetEvent, type WidgetOptions } from "./widget"
 //   Bellhop.on("unread" | "open" | "close", fn) · logout()
 
 type Defaults = { apiBase?: string; turnstileSiteKey?: string; key?: string; locale?: string; theme?: string; position?: string }
-type Stub = { q?: [string, unknown[]][]; _c?: Defaults; version?: string }
+type Stub = { q?: unknown; _c?: Defaults; version?: string }
 const w = window as unknown as { Bellhop?: Stub & Record<string, unknown> }
 const stub: Stub = w.Bellhop ?? {}
 const defaults = stub._c ?? {}
@@ -33,14 +33,20 @@ const api = {
 }
 type Name = Exclude<keyof typeof api, "version">
 
-function call(name: string, args: unknown[]) {
-  if (!(name in api) || name === "version") return console.warn(`[chat] unknown call Bellhop.${name}`)
-  if (name !== "init" && !widget) return void early.push([name, args])
-  return (api[name as Name] as (...a: unknown[]) => unknown)(...args)
+/** Runs one queued or early call. Unknown names and failing calls are reported and skipped, never thrown, so one
+ *  bad entry can't drop the calls queued after it. */
+function call(name: unknown, args: unknown) {
+  if (typeof name !== "string" || !Object.hasOwn(api, name) || typeof (api as Record<string, unknown>)[name] !== "function") return console.warn(`[chat] unknown call Bellhop.${String(name)}`)
+  if (name !== "init" && !widget) return void early.push([name, Array.isArray(args) ? args : []])
+  try {
+    return (api[name as Name] as (...a: unknown[]) => unknown)(...(Array.isArray(args) ? args : []))
+  } catch (e) {
+    console.error(`[chat] Bellhop.${name} failed:`, e)
+  }
 }
 
-const queued = stub.q ?? []
+const queued: unknown[] = Array.isArray(stub.q) ? stub.q : []
 w.Bellhop = Object.assign(api, { q: undefined, _c: defaults }) as unknown as Stub & Record<string, unknown>
-if (defaults.key && !queued.some(([name]) => name === "init"))
-  api.init({ key: defaults.key, locale: defaults.locale, theme: defaults.theme as WidgetOptions["theme"], position: defaults.position as WidgetOptions["position"] })
-for (const [name, args] of queued) call(name, args)
+if (defaults.key && !queued.some((e) => Array.isArray(e) && e[0] === "init"))
+  call("init", [{ key: defaults.key, locale: defaults.locale, theme: defaults.theme as WidgetOptions["theme"], position: defaults.position as WidgetOptions["position"] }])
+for (const entry of queued) call(Array.isArray(entry) ? entry[0] : undefined, Array.isArray(entry) ? entry[1] : undefined)

@@ -72,6 +72,7 @@ input,textarea{cursor:text}
 .msg.mine{align-self:flex-end;align-items:flex-end}
 .who{font-size:12px;color:var(--bw-faint);margin:0 4px 3px;display:flex;align-items:center;gap:6px}
 .ai{font-size:10px;font-weight:700;letter-spacing:.04em;padding:0 5px;border-radius:4px;background:var(--bw-surface);color:var(--bw-muted);line-height:16px}
+.bubble,.bubble a,.row-subject,.row-text,.title span{unicode-bidi:isolate}
 .bubble{padding:8px 12px;border-radius:6px;background:var(--bw-surface);overflow-wrap:anywhere;word-break:break-word}
 .mine .bubble{background:var(--bw-accent);color:var(--bw-accent-fg)}
 .bubble p+p,.bubble p+ul,.bubble p+ol,.bubble ul+p,.bubble ol+p{margin-top:8px}
@@ -110,6 +111,15 @@ input,textarea{cursor:text}
 .composer{flex:none;border-top:1px solid var(--bw-border);padding:8px;display:flex;align-items:flex-end;gap:6px;background:var(--bw-bg)}
 .composer textarea{flex:1;min-height:44px;max-height:140px;padding:11px 10px;border-radius:6px;background:var(--bw-surface);resize:none;font-size:15px;line-height:22px;color:var(--bw-fg);overflow-y:auto}
 .composer textarea::placeholder,.input::placeholder{color:var(--bw-faint)}
+.attachments{flex:none;display:flex;flex-wrap:wrap;gap:6px;padding:8px 8px 0;border-top:1px solid var(--bw-border)}
+.attachments .err{flex-basis:100%;padding:0 4px 2px}
+.chip{display:inline-flex;align-items:center;max-width:100%;min-height:44px;padding-left:12px;border-radius:6px;background:var(--bw-surface);font-size:13px}
+.chip-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-right:12px}
+.chip .icon-btn{margin-left:-8px}
+.attach{align-self:flex-end}
+.home .card{margin:0}
+.signin h3{font-size:15px}
+.older{min-height:16px;margin:4px 0 8px}
 .send{width:44px;height:44px;border-radius:6px;background:var(--bw-accent);color:var(--bw-accent-fg);display:grid;place-items:center;flex:none}
 .send:disabled{opacity:.35;cursor:default}
 .send svg{width:18px;height:18px}

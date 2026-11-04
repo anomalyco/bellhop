@@ -102,6 +102,21 @@ const messages: Translation<typeof en> = {
   "error.generic": "問題が発生しました。もう一度お試しください。",
   "error.rateLimited": "リクエストが多すぎます。しばらくしてからお試しください。",
   "error.unavailable": "現在チャットはご利用いただけません。",
+
+  // ログインした顧客のみチャットできるサイトの訪問者向け（{host} はサイト名。例: app.example.com）
+  "signin.title": "サポートへのお問い合わせは {host} にログインしてください",
+  "signin.text": "チャットはログイン中のお客様のみご利用いただけます。ログインすると、ここからチャットを始められます。",
+
+  // 以前のメッセージと添付ファイル
+  "conversation.older": "以前のメッセージを読み込み中…",
+  "composer.attach": "ファイルを添付",
+  "composer.removeFile": "{name} を削除",
+  "upload.uploading": "{name} をアップロード中…",
+  "upload.tooLarge": "{name} はサイズが大きすぎます。画像は10 MB、動画は100 MB、その他のファイルは25 MBまでです。",
+  "upload.quota": "本日のアップロード上限に達しました。代わりにメッセージで内容をお伝えいただくか、明日もう一度お試しください。",
+  "upload.type": "{name} はここでは送信できません。別のファイルをお試しください。",
+  "upload.rateLimited": "直近1時間のアップロードが多すぎます。しばらくしてからお試しください。",
+  "upload.failed": "{name} をアップロードできませんでした。もう一度お試しください。",
 }
 
 export default messages
