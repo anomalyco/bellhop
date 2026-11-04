@@ -34,7 +34,7 @@ const charge = (env: Env, key: string, period: number, cap: number) =>
     Math.floor(Date.now() / 1000 / period) * period,
     cap
   )
-export async function issueCode(
+export async function prepareCode(
   env: Env,
   x: Challenge,
   ip: string,
@@ -105,32 +105,45 @@ export async function issueCode(
     q.push(keyAudit(env, x.app, serverKey, "api.verification.requested", "issue", x.issue, { verification_id: id }))
   else if (team && x.issue && actor && x.app)
     q.push(entry(env, x.app, actor, "verification.requested", { type: "issue", id: x.issue }, { verification_id: id }))
-  const row = (await env.DB.batch<{ state: string; trusted: number | null }>(q))[index]!.results[0] ?? missing()
-  const googleOnly = x.kind === "account" && row.state === "failed"
-  const copy = deskCopy[locale],
-    name = x.app ? workspaceSender(workspace, !!row.trusted) : cleanSender(workspace),
-    googleLink = mailOrigin(env) + "/auth/google",
-    text = googleOnly ? `${accountCopy[locale].google} ${googleLink}` : formatMail(copy.code, { workspace: name, code })
-  try {
-    await sendMail(
-      env,
-      "code-" + id,
-      {
-        to: x.email,
-        fromName: name,
-        subject: formatMail(x.kind === "verification" ? copy.verify : copy.signin, { workspace: name }),
-        text,
-        html: googleOnly
-          ? `<p><a href="${esc(googleLink)}">${esc(accountCopy[locale].google)}</a></p>`
-          : `<p>${esc(text)}</p>`
-      },
-      code
-    )
-  } catch {
-    await sql(env, "UPDATE email_codes SET state='failed',digest=NULL WHERE id=? AND state='pending'", id).run()
-    fail(503, "mail_unavailable", "Email delivery unavailable")
+  return {
+    id,
+    statements: q,
+    index,
+    async deliver(row: { state: string; trusted: number | null }) {
+      const googleOnly = x.kind === "account" && row.state === "failed"
+      const copy = deskCopy[locale],
+        name = x.app ? workspaceSender(workspace, !!row.trusted) : cleanSender(workspace),
+        googleLink = mailOrigin(env) + "/auth/google",
+        text = googleOnly
+          ? `${accountCopy[locale].google} ${googleLink}`
+          : formatMail(copy.code, { workspace: name, code })
+      try {
+        await sendMail(
+          env,
+          "code-" + id,
+          {
+            to: x.email,
+            fromName: name,
+            subject: formatMail(x.kind === "verification" ? copy.verify : copy.signin, { workspace: name }),
+            text,
+            html: googleOnly
+              ? `<p><a href="${esc(googleLink)}">${esc(accountCopy[locale].google)}</a></p>`
+              : `<p>${esc(text)}</p>`
+          },
+          code
+        )
+      } catch {
+        await sql(env, "UPDATE email_codes SET state='failed',digest=NULL WHERE id=? AND state='pending'", id).run()
+        fail(503, "mail_unavailable", "Email delivery unavailable")
+      }
+    }
   }
-  return id
+}
+export async function issueCode(...args: Parameters<typeof prepareCode>) {
+  const plan = await prepareCode(...args),
+    results = await args[0].DB.batch<{ state: string; trusted: number | null }>(plan.statements)
+  await plan.deliver(results[plan.index]!.results[0] ?? missing())
+  return plan.id
 }
 export async function redeemCode(
   env: Env,

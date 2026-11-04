@@ -11,6 +11,7 @@ import { listIssues } from "../issues"
 import { addComment, createIssue, updateIssue, type Access } from "../mutations"
 import { agentAccessSQL } from "../permissions"
 import { requestVerification } from "../helpdesk"
+import { requestJson, typeInfo } from "../request-types"
 import { proofCols, verification, type ProofRow } from "../helpdesk-data"
 import { cursor, position, message, participant, project, wire } from "./conversations"
 
@@ -126,7 +127,7 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
   const [rs, vs] = await c.env.DB.batch([
     sql(
       c.env,
-      `SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.updated_at,i.assignee,i.hidden IS NOT NULL hidden,
+      `SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.updated_at,i.assignee,i.hidden IS NOT NULL hidden,${requestJson(true)} request_info,
     (SELECT id FROM contacts WHERE app_id=i.app_id AND id=json_extract(i.author,'$.id')) contact_id,EXISTS(SELECT 1 FROM api_created_issues WHERE issue_id=i.id) api,
     (SELECT json_group_array(l.name ORDER BY l.name) FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id) labels,
     (SELECT ${staffWire} FROM api_workspace_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
@@ -155,13 +156,15 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
         assignee: string | null
         hidden: number
         contact_id: string | null
+        request_info: string | null
         api: number
         labels: string
         last_item: string | null
         unread: number
       }[]
-    ).map(async ({ api, labels, assignee, hidden, last_item, ...r }) => ({
+    ).map(async ({ api, labels, assignee, hidden, last_item, request_info, ...r }) => ({
       ...r,
+      ...typeInfo(request_info),
       labels: JSON.parse(labels) as string[],
       assignee: assignee ? participant(JSON.parse(assignee)) : null,
       hidden: !!hidden,
@@ -213,7 +216,11 @@ export async function openFor(c: Ctx, s: Scope, b: Record<string, unknown>) {
     keyAudit(c.env, s.app, s.key, "api.conversation.created", "issue", id, { contact_id: t.id })
   ])
   a.locale = t.locale
-  const issue = await createIssue(a, { ...m, title, private: true, metadata_id: b.metadata_id })
+  const issue = await createIssue(
+    a,
+    { ...m, title, private: true, metadata_id: b.metadata_id, request_type_id: b.request_type, fields: b.fields },
+    { c, operator: operator(s), staff: true, serverKey: s.key }
+  )
   return (await workspaceConversations(c, s, issue.id)).data[0]!
 }
 const memberQuery =

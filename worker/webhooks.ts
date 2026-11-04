@@ -4,6 +4,7 @@ import { teamProjection } from "./tier-actors"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 import { auditActor } from "./audit"
 import { importMessage } from "./github-import"
+import { requestJson, typeInfo, type TypeInfo } from "./request-types"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -128,20 +129,24 @@ export async function enqueueWebhooks(
   app: WebhookPayload["app"],
   actor: NonNullable<WebhookPayload["actor"]>,
   issue: IssueSummary | null,
-  events: Hook[]
+  events: Hook[],
+  form?: TypeInfo
 ) {
   if (!events.length) return []
+  const readForm = issue && !form && events.some((h) => h.type === "issue.opened" || h.type === "issue.assigned")
   const settings = await sql(
     env,
-    `SELECT url,events,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    `SELECT url,events,${readForm ? `(SELECT ${requestJson(true)} FROM issues i WHERE i.id=? AND i.app_id=s.app_id)` : "NULL"} request_info,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    ...(readForm ? [issue!.id] : []),
     issue?.author.id ?? null,
     issue?.id ?? null,
     app.id
-  ).first<{ url: string; events: string; comment_count: number; contact: string | null }>()
+  ).first<{ url: string; events: string; comment_count: number; contact: string | null; request_info: string | null }>()
   if (!settings) return []
   const enabled = new Set<string>(JSON.parse(settings.events)),
     selected = events.filter((e) => e.type === "ping" || enabled.has(e.type))
   if (!selected.length) return []
+  const teamForm = form ?? (settings.request_info ? typeInfo(settings.request_info) : undefined)
   const parents = selected.flatMap((h): (string | null)[] =>
     h.type === "issue.opened" ? [null] : h.type === "comment.created" && h.comment ? [h.comment.id] : []
   )
@@ -161,6 +166,7 @@ export async function enqueueWebhooks(
         ? {
             issue: {
               ...issue,
+              ...teamForm,
               url: appUrl(env, origin, app.slug, `/issues/${issue.number}`),
               comment_count: sourceSnapshot ? issue.comment_count : settings.comment_count,
               viewer_voted: false

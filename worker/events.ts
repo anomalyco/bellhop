@@ -15,6 +15,7 @@ import { readPresence, visibleIssues } from "./issues"
 import { enqueueWebhooks, type Hook } from "./webhooks"
 import { projectTiers } from "./tier-actors"
 import { signalContact } from "./v1/signals"
+import type { TypeInfo } from "./request-types"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
 export interface Change {
@@ -28,6 +29,7 @@ export interface Change {
   deletedComment?: string
   removed?: Comment
   ruleItems?: TimelineItem[]
+  teamForm?: TypeInfo
   internalOnly?: boolean
   liveOnly?: boolean
   mentioned?: Actor[]
@@ -146,7 +148,10 @@ export function emit(env: Env, ctx: Work, change: Change) {
   }
   const edit = change.changes?.includes("comment.edited")
   if (!(change.actor.type === "agent" && (type === "comment.created" || edit))) {
-    if (!comments.length) hooks.push(payload)
+    if (!comments.length) {
+      const route=type==='issue.opened'&&change.teamForm?change.ruleItems?.find(i=>i.kind==='event'&&i.event.type==='routed'):undefined
+      hooks.push(route?.kind==='event'?{...payload,transition:{assignee:route.event.data.assignee as Actor|null}}:payload)
+    }
     else
       for (const c of comments) {
         const comment = { ...c, viewer_is_author: false, viewer_helpful: false }
@@ -178,13 +183,13 @@ export function emit(env: Env, ctx: Work, change: Change) {
       else if (data.from === "closed")
         hooks.push({ type: "issue.reopened", transition: { status: data.to as IssueStatus, close_reason: null } })
     } else if (t === "labeled" || t === "unlabeled") hooks.push({ type: `issue.${t}`, label: data.label as Label })
-    else if (t === "assigned" || t === "claimed")
+    else if (t === "assigned" || t === "claimed" || (t === "routed" && data.assignee))
       hooks.push({
         type: "issue.assigned",
         transition: { assignee: t === "claimed" ? item.event.actor : (data.assignee as Actor | null) }
       })
   }
-  ctx.waitUntil(enqueueWebhooks(env, origin, app, change.actor, issue, hooks))
+  ctx.waitUntil(enqueueWebhooks(env, origin, app, change.actor, issue, hooks, change.teamForm))
 }
 export async function setActivity(
   env: Env,

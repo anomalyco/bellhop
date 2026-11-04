@@ -12,6 +12,7 @@ import { claimAnonymous } from "./anon-claim"
 import { actorUpdated } from "../events"
 import { contactActor } from "../contact-session"
 import { contactRoom, signalContact } from "./signals"
+import { types } from "../request-types"
 
 const language = (c: Ctx) => browserLocale(c.req.header("Accept-Language"))
 function siteKey(c: Ctx, s: Scope) {
@@ -34,6 +35,15 @@ export async function workspace(c: Ctx, s: Scope): Promise<Workspace> {
     allow_anonymous: !!s.allow_anonymous,
     require_verified_email: !!s.require_verified_email,
     turnstile_site_key: siteKey(c, s),
+    request_types: (await types(c.env, s.app, false)).map(
+      ({ id, name, description, fields, require_verification }) => ({
+        id,
+        name,
+        description,
+        fields,
+        require_verification
+      })
+    ),
     brand: { accent: null }
   }
 }

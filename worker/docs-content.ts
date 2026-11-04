@@ -100,6 +100,8 @@ const returns: Record<keyof typeof toolRoles, string> = {
   set_tier: "The reporter's new tier.",
   get_analytics: "Response, resolution and agent metrics for the period.",
   get_contact: "The help desk contact (verified email, external id, how they verified) with their requests.",
+  list_request_types: "The workspace’s request types, field definitions and team routing settings.",
+  set_request_type: "The updated request with its validated answers and effective autonomy.",
   request_verification: "The new verification, `pending` until the requester enters the code.",
   update_app: "The updated workspace.",
   get_webhook: "`url`, `has_secret`, `events` and recent `deliveries`.",

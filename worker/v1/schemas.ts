@@ -21,7 +21,27 @@ export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
+  RequestField: obj(
+    {
+      key: { type: "string", pattern: "^[a-z0-9_]{1,40}$" },
+      label: string,
+      kind: { enum: ["text", "textarea", "email", "url", "number", "select"] },
+      required: bool,
+      options: arr(string),
+      help: string,
+      verify: bool
+    },
+    ["key", "label", "kind", "required"]
+  ),
+  RequestForm: obj({
+    id: string,
+    name: string,
+    description: string,
+    fields: arr(ref("RequestField")),
+    require_verification: bool
+  }),
   Workspace: obj({
+    request_types: arr(ref("RequestForm")),
     name: string,
     icon_url: ns,
     allow_anonymous: bool,
@@ -105,6 +125,8 @@ export const schemas = {
   ),
   ConversationInput: obj(
     {
+      request_type: string,
+      fields: { type: "object", additionalProperties: string },
       subject: { type: "string", maxLength: 256 },
       message: ref("MessageInput"),
       metadata_id: string,
@@ -152,6 +174,9 @@ export const schemas = {
   },
   Conversation: obj(
     {
+      request_type: nullable(obj({ id: string, name: string })),
+      fields: { type: "object", additionalProperties: string },
+      effective_autonomy: { enum: ["suggest", "approve_actions", "autonomous"] },
       labels: arr(string),
       contact_id: ns,
       hidden: bool,
@@ -172,6 +197,8 @@ export const schemas = {
       "id",
       "number",
       "subject",
+      "request_type",
+      "fields",
       "status",
       "close_reason",
       "created_at",

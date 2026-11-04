@@ -36,6 +36,8 @@ import { entry, recorded, auditActor, targetEntry } from "./audit"
 import { attachReport, getReport } from "./report-data"
 import { requestLocale } from "./locale"
 import { contactActor } from "./contact-session"
+import { prepareForm, type FormCaller } from "./request-form"
+import { typeGuard, requestJson, typeInfo, retireFormReplays } from "./request-types"
 
 export interface Access {
   env: Env
@@ -122,6 +124,7 @@ function notify(
     | "mentioned"
     | "removed"
     | "ruleItems"
+    | "teamForm"
   >
 ) {
   emit(a.env, a.ctx, { app: a.app, origin: a.origin, actor: a.actor, ...payload })
@@ -166,13 +169,16 @@ function systemInfo(value: unknown): SystemInfo | null {
     entries.map(([key, v]) => [str(key, "system info key", 120), str(v, "system info value", 2048, true)])
   )
 }
-export async function createIssue(a: Access, b: Record<string, unknown>) {
+export async function createIssue(a: Access, b: Record<string, unknown>, caller: FormCaller) {
   const { env, app, actor } = a,
     id = uid(),
     at = now(),
     title = str(b.title, "title", 256).trim(),
     text = str(b.body, "body", 65536, true),
     info = systemInfo(b.system_info)
+  if (b.request_type_id === undefined && b.fields !== undefined && Object.keys(input(b.fields)).length)
+    bad("fields require a request_type_id")
+  const form = b.request_type_id === undefined ? null : await prepareForm(a, id, b.request_type_id, b.fields, caller)
   const template = b.template_id === undefined ? null : str(b.template_id, "template_id", 64)
   if (b.private !== undefined && typeof b.private !== "boolean") bad("Invalid private flag")
   let labels: Label[] = []
@@ -195,7 +201,7 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
       env,
       `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,reporter_locale,private,mentions,assignee,reply_tier_id)
     SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,?,CASE WHEN a.mode='helpdesk' OR t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
-      (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id),
+      CASE WHEN ? THEN NULL ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id) END,
       CASE WHEN t.agents_reply=0 THEN t.id END FROM apps a LEFT JOIN reporter_tiers t ON t.app_id=a.id AND t.actor_id=? WHERE a.id=? RETURNING number`,
       id,
       title,
@@ -209,6 +215,7 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
       Number(can(a.role, "read")),
       b.private === undefined ? null : Number(b.private),
       JSON.stringify(mentions),
+      Number(!!form),
       actor.id,
       app.id
     ),
@@ -275,9 +282,13 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
       actor.id
     )
   )
+  const formStart = q.length
+  if (form) q.push(...form.statements)
   const results = await env.DB.batch<Record<string, unknown>>(q),
     number = results[1]!.results[0]!.number as number
   const ruleFrames: Extract<LiveEvent, { type: "timeline.added" }>[] = []
+  const routed = form?.committed(results.slice(formStart))
+  if (routed) ruleFrames.push({ type: "timeline.added", issue_id: id, item: { kind: "event", event: routed.event } })
   for (const result of results.slice(ruleStart, ruleStart + 2)) {
     for (const row of result.results as { id: string; type: "labeled" | "assigned"; data: string }[]) {
       const event = { id: row.id, type: row.type, data: JSON.parse(row.data), actor, created_at: at }
@@ -294,7 +305,111 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
     issue: summaryOf(issue),
     items,
     ruleItems: ruleFrames.map((e) => e.item),
+    teamForm: issue.author.id === a.actor.id ? routed?.form : undefined,
     mentioned: addedMentions(mentions, [], actor)
+  })
+  return issue
+}
+export async function setRequestType(a: Access, c: Ctx, n: number, type: unknown, fields: unknown) {
+  const i =
+    (await sql(
+      a.env,
+      `SELECT i.id,i.revision,json_extract(i.author,'$.id') reporter,b.type_id,b.answers,json_extract(${requestJson(false)},'$.fields') public_answers FROM issues i JOIN apps w ON i.app_id=w.id AND w.mode='helpdesk' LEFT JOIN request_answers b ON i.id=b.issue_id AND b.app_id=i.app_id WHERE i.app_id=? AND i.number=?`,
+      a.app.id,
+      n
+    ).first<{
+      id: string
+      revision: number
+      reporter: string
+      type_id: string | null
+      answers: string | null
+      public_answers: string | null
+    }>()) ?? missing()
+  if (!can(a.role, "triage")) denied()
+  const audit = (to: string | null) =>
+    entry(
+      a.env,
+      a.app.id,
+      a.actor,
+      "issue.request_type_set",
+      { type: "issue", id: i.id, number: n },
+      { from: i.type_id, to },
+      "1"
+    )
+  let r: { event: IssueEvent; form: ReturnType<typeof typeInfo> }
+  if (type === null) {
+    if (fields !== undefined && Object.keys(input(fields)).length) bad("Cannot supply fields without a request type")
+    const permission =
+        a.actor.type === "agent"
+          ? `SELECT 1 FROM (${agentAccessSQL}) WHERE app_id=? AND agent_id=? AND role IN ('member','admin')`
+          : "SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin','member')",
+      eid = uid(),
+      at = now()
+    const rows = await a.env.DB.batch<{ data: string; info: string }>([
+      typeGuard(
+        a.env,
+        `EXISTS(${permission}) AND EXISTS(SELECT 1 FROM issues i JOIN apps a ON a.id=i.app_id WHERE a.id=? AND a.mode='helpdesk' AND i.id=? AND i.revision=?)`,
+        a.app.id,
+        a.actor.id,
+        a.app.id,
+        i.id,
+        i.revision
+      ),
+      retireFormReplays(a.env, a.app.id, "issue_id", i.id),
+      sql(a.env, "DELETE FROM request_answers WHERE issue_id=? AND app_id=?", i.id, a.app.id),
+      sql(
+        a.env,
+        `UPDATE issues SET assignee=(SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM reporter_tiers t JOIN members m ON m.app_id=t.app_id AND m.user_id=t.assignee_id JOIN users u ON u.id=m.user_id WHERE t.app_id=issues.app_id AND t.actor_id=json_extract(issues.author,'$.id')),revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
+        at,
+        i.id,
+        a.app.id
+      ),
+      sql(
+        a.env,
+        `INSERT INTO request_route_events SELECT ?,id,app_id,?,json_object('request_type',NULL,'target',NULL,'outcome',CASE WHEN assignee IS NULL THEN 'unassigned' ELSE 'assigned' END,'assignee',json(assignee)),? FROM issues WHERE id=?`,
+        eid,
+        JSON.stringify(a.actor),
+        at,
+        i.id
+      ),
+      sql(
+        a.env,
+        `INSERT INTO mail_signal(issue_id,kind,ref,actor,target) SELECT id,'assigned',?,?,json_extract(assignee,'$.id') FROM issues WHERE id=? AND assignee IS NOT NULL`,
+        eid,
+        a.actor.id,
+        i.id
+      ),
+      audit(null),
+      sql(
+        a.env,
+        `SELECT e.data,${requestJson(true)} info FROM issues i JOIN request_route_events e ON e.issue_id=i.id WHERE e.id=?`,
+        eid
+      )
+    ])
+    const out = rows.at(-1)!.results[0]!
+    r = {
+      event: { id: eid, type: "routed", data: JSON.parse(out.data), actor: a.actor, created_at: at },
+      form: typeInfo(out.info)
+    }
+  } else {
+    const plan = await prepareForm(a, i.id, type, fields, { c, operator: a.actor, staff: true }, i),
+      rs = await a.env.DB.batch<Record<string, unknown>>([...plan.statements, audit(plan.typeId)])
+    r = plan.committed(rs.slice(0, -1))
+  }
+  const item: TimelineItem = { kind: "event", event: r.event },
+    issue = await full(a, n)
+  a.ctx.waitUntil(
+    issueRoom(a.env, i.id).publishConversation([{ type: "timeline.added", issue_id: i.id, item }], {
+      app: a.app.id,
+      internalOnly: true
+    })
+  )
+  notify(a, {
+    type: "issue.updated",
+    issue: summaryOf(issue),
+    changes: ["request_type", "fields", "assignee"],
+    ruleItems: [item],
+    teamForm: issue.author.id === i.reporter ? r.form : undefined
   })
   return issue
 }
@@ -1241,6 +1356,12 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
   return teamProjection(env, app, { id, actor, by: a.actor, created_at: at })
 }
 export const issues = new Hono<Bindings>()
+issues.put("/api/apps/:slug/issues/:number/request-type", async (c) => {
+  requireTeam(c, "triage")
+  if (!c.var.desk) fail(403, "helpdesk_only", "Help desk workspace required")
+  const b = await body(c)
+  return c.json(await setRequestType(access(c), c, issueNumber(c.req.param("number")), b.request_type_id, b.fields))
+})
 issues.post("/api/apps/:slug/issues/:number/typing", async (c) => {
   if (!c.var.desk || !c.var.user || !can(c.var.app.role, "respond")) denied()
   const a = access(c),
@@ -1341,17 +1462,38 @@ issues.delete("/api/apps/:slug/blocks/:id", async (c) => {
 })
 issues.post(base, async (c) => {
   if (c.var.desk && c.var.requireContact && !c.var.contact) fail(401, "contact_required", "Sign in to submit a request")
-  const b = await postBody(c)
+  const submitted = await body(c)
+  if (
+    c.var.desk &&
+    !c.var.contact &&
+    typeof submitted.request_type_id === "string" &&
+    (await sql(
+      c.env,
+      "SELECT 1 FROM request_types WHERE app_id=? AND id=? AND require_verification=1 AND archived=0",
+      c.var.app.id,
+      submitted.request_type_id
+    ).first())
+  )
+    fail(401, "contact_required", "Sign in to submit this request type")
+  await allowWrite(c)
+  const b = await namedPost(c, submitted)
   const a = access(c)
   // Staff keep their team permissions for support work. Submitting through the
   // verified-requester form always uses the contact, not the staff identity.
-  if (c.var.contact && c.var.requireContact) {
+  if (c.var.contact && (c.var.requireContact || b.request_type_id !== undefined)) {
     a.actor = contactActor(c.var.contact)
     a.role = null
     a.aliases = []
     a.guestHash = undefined
   }
-  return c.json(await createIssue(a, b), 201)
+  return c.json(
+    await createIssue(a, b, {
+      c,
+      operator: can(c.var.app.role, "respond") ? c.var.actor : a.actor,
+      staff: can(c.var.app.role, "respond")
+    }),
+    201
+  )
 })
 issues.patch(path, async (c) => {
   await allowWrite(c)

@@ -103,6 +103,8 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("request_type_changed"))
+    return new ApiFailure(409, "request_type_changed", "Request type or permissions changed; reload the form")
   if (message.includes("api_nonce_limit"))
     return new ApiFailure(429, "idempotency_limit", "Too many active idempotency keys")
   if (message.includes("api_upload_quota"))

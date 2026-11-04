@@ -82,8 +82,10 @@
 //   PATCH  /v1/conversations/:id                           ConversationPatch -> Conversation
 //   POST   /v1/conversations/:id/verifications             { email } -> Verification; subject to workspace mail caps
 
-import type { CloseReason, IssueStatus, Locale, Verification as StoredVerification } from "./api"
-export type Verification=Omit<StoredVerification,'requested_by'>&{requested_by:StoredVerification['requested_by']|Extract<Participant,{type:'team'}>}
+import type { CloseReason, IssueStatus, Locale, RequestField, Verification as StoredVerification } from "./api"
+export type Verification = Omit<StoredVerification, "requested_by"> & {
+  requested_by: StoredVerification["requested_by"] | Extract<Participant, { type: "team" }>
+}
 
 export interface Page<T> {
   data: T[]
@@ -96,6 +98,14 @@ export interface Workspace {
   require_verified_email: boolean
   turnstile_site_key: string | null
   brand: { accent: null }
+  /** Active request types for the new-conversation form, in order (no routing or autonomy). */
+  request_types: {
+    id: string
+    name: string
+    description: string
+    fields: RequestField[]
+    require_verification: boolean
+  }[]
 }
 
 export interface Session {
@@ -140,6 +150,11 @@ export type Participant =
 
 /** A conversation is a help desk request (an issue). */
 export interface Conversation {
+  request_type: { id: string; name: string } | null
+  /** Request form answers. Internal answers are included only in the workspace view. */
+  fields: Record<string, string>
+  /** Workspace-only; informational until the approvals phase. */
+  effective_autonomy?: import("./api").Autonomy
   /** Workspace-only fields. created_via is set on requests opened on behalf of a contact by a server key. */
   contact_id?: string | null
   labels?: string[]
@@ -168,6 +183,9 @@ export interface ConversationInput {
   message: MessageInput
   /** Report metadata to attach (see the report metadata API). */
   metadata_id?: string
+  /** A request type id from GET /v1/workspace, and answers to its fields. */
+  request_type?: string
+  fields?: Record<string, string>
 }
 
 export interface MessageInput {
@@ -225,7 +243,7 @@ export type RealtimeEvent =
 /** Settings → API keys (internal API, admin). */
 export interface ApiKey {
   /** Publishable keys only, admins only. Absent for older hash-only publishable keys. */
-  key?:string
+  key?: string
   id: string
   name: string
   kind: "publishable" | "secret"

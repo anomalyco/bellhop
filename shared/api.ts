@@ -234,6 +234,15 @@
 //   GET    /api/apps/:slug/identity-keys                 -> IdentityKey[]      admin
 //   POST   /api/apps/:slug/identity-keys { name }        -> NewIdentityKey     admin; the secret is only returned here
 //   DELETE /api/apps/:slug/identity-keys/:id             -> { ok: true }       admin
+//   Request types (help desk): what someone needs help with ("Billing", "Account access", "Bug"). Each has its own
+//   form fields, may require a verified email, routes new requests to an assignee, and sets how much the assigned
+//   agent may do alone (Autonomy). Requests without a type use the workspace defaults.
+//   GET    /api/apps/:slug/request-types                 -> RequestType[]      anyone who can open requests (archived
+//                                                                             ones for the team only)
+//   POST   /api/apps/:slug/request-types RequestTypeInput -> RequestType      admin
+//   PATCH  /api/apps/:slug/request-types/:id Partial<RequestTypeInput> & { archived?, position? } -> RequestType  admin
+//   PUT    /api/apps/:slug/issues/:number/request-type { request_type_id: string | null, fields? } -> Issue   member;
+//          changes a request's type (validates fields, keeps answers whose keys still exist) and re-applies routing
 //   GET    /api/apps/:slug/api-keys                      -> ApiKey[]           admin; public API v1 keys (shared/v1.ts)
 //   POST   /api/apps/:slug/api-keys { name, kind, allowed_origins? } -> NewApiKey   admin; secret keys are returned only here
 //   PATCH  /api/apps/:slug/api-keys/:id { name?, allowed_origins? } -> ApiKey  admin
@@ -404,11 +413,65 @@ export interface AppDetail extends App {
 /** A public issue tracker (the default), or a private, white-label help desk. */
 export type AppMode = "tracker" | "helpdesk"
 
+/** One field on a request type's form. Answers are stored on the request as `fields[key]` (strings). */
+export interface RequestField {
+  /** Stable machine key: lowercase letters, digits and underscores. */
+  key: string
+  label: string
+  kind: "text" | "textarea" | "email" | "url" | "number" | "select"
+  required: boolean
+  /** For "select". */
+  options?: string[]
+  help?: string
+  /** For requester-visible email fields: ask the requester to verify this address on submission. Never combined with internal. */
+  verify?: boolean
+  /** Team and agents only (e.g. an internal account id the host fills through the API); hidden from the form. */
+  internal?: boolean
+}
+
+/**
+ * How much the agent assigned to a request may do on its own:
+ * - "suggest": its public replies are held as drafts (Comment.held) that a team member sends, edits or discards
+ * - "approve_actions": replies go out; actions with consequences (refunds, cancellations, account changes) need a
+ *   team member's approval first (request_approval -> Approval)
+ * - "autonomous": replies and actions go out without review (approvals stay available when the agent wants one)
+ */
+export type Autonomy = "suggest" | "approve_actions" | "autonomous"
+
+/** Who new requests of a type go to. Groups with round-robin come later. */
+export type RouteTarget = { agent: string } | { member: string } | null
+
+export interface RequestType {
+  id: string
+  name: string
+  description: string
+  fields: RequestField[]
+  /** The requester must be a verified contact to submit this type (on top of the workspace setting). */
+  require_verification: boolean
+  /** Team and agents only (null for requesters). */
+  route: RouteTarget | null
+  /** Team and agents only. */
+  autonomy: Autonomy | null
+  position: number
+  archived: boolean
+}
+
+export interface RequestTypeInput {
+  name: string
+  description?: string
+  fields?: RequestField[]
+  require_verification?: boolean
+  route?: RouteTarget
+  autonomy?: Autonomy
+}
+
 export interface HelpdeskSettings {
   /** Requesters must be a verified contact (email code or host identity) before submitting. Default true. */
   require_verified_email: boolean
   /** Public API v1: publishable keys may start anonymous end-user sessions (Turnstile-checked). Default false. */
   allow_anonymous: boolean
+  /** Autonomy for requests without a type, or whose type doesn't set one. Default "suggest". */
+  default_autonomy: Autonomy
 }
 
 /** How a contact proved who they are: an email code, or the host app's signed identity token. */
@@ -861,6 +924,10 @@ export interface IssueRef {
 }
 
 export interface IssueSummary extends IssueRef {
+  /** Help desk MCP list/search projections; ordinary discovery summaries omit form answers. */
+  request_type?: { id: string; name: string } | null
+  fields?: Record<string, string>
+  effective_autonomy?: Autonomy
   labels: Label[]
   author: Actor
   assignee: Actor | null
@@ -891,6 +958,8 @@ export interface Relation {
 }
 
 export interface Issue extends IssueSummary {
+  /** Help desk team/agent reads only. Informational in H2a, not an approval policy yet. */
+  effective_autonomy?: Autonomy
   body: string
   attachments: Attachment[]
   relations: Relation[]
@@ -909,6 +978,10 @@ export interface Issue extends IssueSummary {
   contact: Contact | null
   /** Email verifications on this request, for the requester, the team and agents (empty for anyone else). */
   verifications: Verification[]
+  /** Help desk: the request's type (null when none), and the answers to its fields (internal fields for the team and
+   *  agents only). */
+  request_type: { id: string; name: string } | null
+  fields: Record<string, string>
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
   /** @mentions in the body. */
@@ -937,6 +1010,9 @@ export interface NewIssue {
   private?: boolean
   /** Uploaded report metadata to attach (its logs and specs stay visible to the team, agents and the reporter only). */
   metadata_id?: string
+  /** Help desk: the request type and the answers to its (non-internal) fields; validated against the type. */
+  request_type_id?: string
+  fields?: Record<string, string>
 }
 
 export interface IssuePatch {
@@ -992,6 +1068,7 @@ export interface Comment {
 }
 
 export type IssueEventType =
+  | "routed" // team-only: request_type, target, outcome and the assignee resolved at write time
   | "verified" // data: { verification_id }; requester/team only, no email or code in the event
   | "nudged" // team-only: the waiting reporter was sent a reminder
   | "status_changed" // data: { from: IssueStatus, to: IssueStatus, close_reason: CloseReason | null }
@@ -1083,7 +1160,13 @@ export interface WebhookPayload {
   app: { id: string; slug: string; name: string }
   /** Absent for ping. */
   /** New webhook snapshots include the reporter's language; stored pre-locale deliveries may omit it. */
-  issue?: IssueSummary & { url: string; reporter_locale?: Locale | null }
+  issue?: IssueSummary & {
+    url: string
+    reporter_locale?: Locale | null
+    request_type?: Issue["request_type"]
+    fields?: Issue["fields"]
+    effective_autonomy?: Autonomy
+  }
   comment?: Comment
   actor?: Actor
   /** For issue.updated: which fields changed. */
@@ -1123,6 +1206,9 @@ export interface WebhookPayload {
 //                                                  list_issues carry the requester's contact and verifications)
 //   request_verification { number, email }       responder; emails that address a code only the requester can
 //                                                  enter; the result arrives on the issue and as verification.completed
+//   list_request_types {}                         the help desk's request types with fields, routing and autonomy
+//                                                  (get_issue carries request_type, fields and the effective autonomy)
+//   set_request_type { number, request_type, fields? }  member; re-route a request (applies the type's routing)
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)

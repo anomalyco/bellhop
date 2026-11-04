@@ -12,6 +12,7 @@ import { contactActor } from "../contact-session"
 import { liveGuard, apiOrigin, type Scope } from "./access"
 import { signedFiles, type Audience } from "./signed-media"
 import { signalContact } from "./signals"
+import { requestJson, typeInfo } from "../request-types"
 
 const owned = `i.app_id=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND EXISTS(SELECT 1 FROM apps a WHERE a.id=i.app_id AND a.mode='helpdesk')`
 const args = (s: Scope) => [s.app, s.user!.id]
@@ -149,13 +150,14 @@ function publicProof(row: ProofRow): Verification {
   }
 }
 type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {
+  request_info: string | null
   assignee: string | null
   last_item: string
 }
 function conversationQuery(a: Audience, id?: string, status?: string, pos?: [string, string] | null) {
   return sql(
     a.env,
-    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,
+    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,${requestJson(false)} request_info,
     (SELECT ${wire} FROM api_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
     (SELECT max(t.created_at) FROM api_items t WHERE t.issue_id=i.id) updated_at,
     (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
@@ -176,8 +178,10 @@ function proofsQuery(a: Audience, ids: string[]) {
   )
 }
 async function projectRow(a: Audience, r: Row, proofs: ProofRow[]): Promise<Conversation> {
+  const { request_info, ...rest } = r
   return {
-    ...r,
+    ...rest,
+    ...typeInfo(request_info),
     assignee: r.assignee ? participant(JSON.parse(r.assignee)) : null,
     last_item: r.last_item ? await project(r.last_item, a) : null,
     verifications: proofs.filter((v) => v.issue_id === r.id).map(publicProof)
@@ -266,7 +270,12 @@ export async function open(c: Ctx, s: Scope, b: Record<string, unknown>) {
   if (s.user!.anonymous && s.require_verified_email) fail(401, "contact_required", "Verified contact required")
   const m = message(input(b.message)),
     title = b.subject === undefined ? m.body.trim().slice(0, 120) || "Attachment" : str(b.subject, "subject", 256)
-  const created = await createIssue(access(c, s), { ...m, title, private: true, metadata_id: b.metadata_id })
+  const a = access(c, s)
+  const created = await createIssue(
+    a,
+    { ...m, title, private: true, metadata_id: b.metadata_id, request_type_id: b.request_type, fields: b.fields },
+    { c, operator: a.actor, staff: false }
+  )
   return (await conversations(c, s, created.id)).data[0]!
 }
 export async function postMessage(
