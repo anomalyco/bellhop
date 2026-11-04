@@ -1,15 +1,19 @@
 import { render } from "@cf-wasm/og/workerd"
 import mono from "./fonts/OpenTUIMono-Bold.ttf"
 import inter from "./fonts/Inter-Latin.ttf"
+import interSemibold from "./fonts/Inter-SemiBold-Latin.ttf"
 import jacket from "../brand/bellhop-mark.svg"
 import type { PreviewCard } from "../worker/previews"
 import type { ReactNode } from "react"
 
 const fonts = [
   { name: "OpenTUI", data: mono, weight: 700 as const },
-  { name: "Inter", data: inter, weight: 400 as const }
+  { name: "Inter", data: inter, weight: 400 as const },
+  { name: "Inter", data: interSemibold, weight: 600 as const }
 ]
+// Titles are Inter SemiBold like the site; mono is only an accent (issue numbers, the AI badge).
 const monoFace = { fontFamily: "OpenTUI", fontWeight: 700 }
+const titleFace = { fontFamily: "Inter", fontWeight: 600 }
 const clamp = (lines: number) => ({
   display: "block",
   lineClamp: lines,
@@ -84,7 +88,7 @@ function design(c: PreviewCard, icon: string) {
     tile(icon, c.kind === "issue" ? 72 : 108),
     box(
       { flexDirection: "column", gap: 5, width: 875 },
-      text(c.name, { ...monoFace, fontSize: 32, ...clamp(1) }),
+      text(c.name, { ...titleFace, fontSize: 32, letterSpacing: -0.4, ...clamp(1) }),
       text(host, { fontSize: 23, color: "#a2a2a2" })
     )
   )
@@ -93,7 +97,7 @@ function design(c: PreviewCard, icon: string) {
   if (c.kind === "issue" && c.status) {
     body = box(
       { flexDirection: "column", gap: 14 },
-      text(c.title, { ...monoFace, fontSize: 58, lineHeight: 1.09, letterSpacing: -1.9, ...clamp(3) }),
+      text(c.title, { ...titleFace, fontSize: 62, lineHeight: 1.1, letterSpacing: -1.6, ...clamp(3) }),
       text(`#${c.number}`, { ...monoFace, fontSize: 29, color: "#a2a2a2" })
     )
     const [status, color] = styles[c.status]
@@ -142,10 +146,10 @@ function design(c: PreviewCard, icon: string) {
       { flexDirection: "column", gap: 16 },
       // The header already says "Bellhop", so the home card leads with what it is.
       text(c.kind === "home" ? "Live support for your product" : `${c.name} support`, {
-        ...monoFace,
+        ...titleFace,
         fontSize: 76,
         lineHeight: 1.05,
-        letterSpacing: -2.8,
+        letterSpacing: -2,
         ...clamp(2)
       }),
       text(c.kind === "home" ? "Your agent answers issues as they come in." : c.description.slice(0, 350), {

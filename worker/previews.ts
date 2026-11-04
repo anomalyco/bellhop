@@ -2,7 +2,7 @@ import MarkdownIt from "markdown-it"
 import type { IssueStatus, CloseReason } from "../shared/api"
 import { sha256, sql } from "./core"
 
-const OG_DESIGN_VERSION = "b5a-2"
+const OG_DESIGN_VERSION = "b5a-3"
 export const homeTitle = "Bellhop: live support for your product"
 const tagline = "Report bugs, ask questions, and get answers from the people who build your product."
 export const statuses = {
