@@ -15,7 +15,7 @@ function cookie(c: Ctx, name: string, value: string, maxAge: number, shared = fa
   setCookie(c, name, value, { path: "/", maxAge, httpOnly: true, sameSite: "Lax", secure: !local, domain })
 }
 const onSite = (site: string, host: string) => host === site || host.endsWith(`.${site}`)
-export function firstContact(c: Ctx) {
+export function browserGuest(c: Ctx) {
   let id = getCookie(c, "bh_guest")
   // An older host-only cookie can shadow the shared cookie on a previously visited app.
   // Both have Path=/; browsers send the older one first. Don't delete a distinct legacy identity.
@@ -24,7 +24,11 @@ export function firstContact(c: Ctx) {
     const ids = [...(c.req.header("Cookie") ?? "").matchAll(/(?:^|;\s*)bh_guest=([0-9a-f]{64})(?=;|$)/g)]
     if (ids.length > 1) id = ids.at(-1)![1]
   }
-  if (!id || !/^[0-9a-f]{64}$/.test(id)) {
+  return id && /^[0-9a-f]{64}$/.test(id) ? id : null
+}
+export function firstContact(c: Ctx) {
+  let id = browserGuest(c)
+  if (!id) {
     c.set("existingGuest", false)
     id = secret()
     cookie(c, "bh_guest", id, 365 * 86400, true)
@@ -32,7 +36,7 @@ export function firstContact(c: Ctx) {
   c.set("guestId", id)
 }
 async function guestName(c: Ctx) {
-  const hash = c.var.guestHash ?? await sha256(c.var.guestId)
+  const hash = c.var.guestHash ?? (await sha256(c.var.guestId))
   c.set("guestHash", hash)
   return sql(c.env, "SELECT name FROM guest_names WHERE guest_hash=?", hash).first<string>("name")
 }
@@ -56,16 +60,20 @@ async function saveGuestName(c: Ctx, value: unknown, previous: string | null) {
   }
   return name
 }
-export async function currentUser(c: Ctx) {
+export async function sessionHash(c: Ctx) {
   const token = getCookie(c, "bh_session")
+  return token && /^[a-f0-9]{64}$/.test(token) ? sha256(token) : null
+}
+export async function currentUser(c: Ctx) {
+  const hash = await sessionHash(c)
   c.set(
     "user",
-    token && /^[a-f0-9]{64}$/.test(token)
+    hash
       ? await sql(
           c.env,
           `SELECT u.id,u.email,u.name,u.avatar_url FROM sessions s JOIN users u ON s.user_id=u.id
     WHERE s.token_hash=? AND s.expires_at>?`,
-          await sha256(token),
+          hash,
           now()
         ).first<User>()
       : null
@@ -92,6 +100,11 @@ async function requireHuman(c: Ctx) {
   if (!(await human(c))) fail(428, "human_required", "Complete the human check to continue")
 }
 export async function allowWrite(c: Ctx) {
+  if (
+    !c.var.app.role &&
+    (await sql(c.env, "SELECT 1 FROM blocks WHERE app_id=? AND actor_id=?", c.var.app.id, c.var.actor.id).first())
+  )
+    fail(403, "blocked", "You are blocked from writing in this workspace")
   if (!c.var.user) await requireHuman(c)
 }
 export async function postBody(c: Ctx) {

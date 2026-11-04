@@ -20,7 +20,12 @@ export async function rotateWebhook(env: Env, app: string) {
   await sql(env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", key, app).run()
   return { secret: key }
 }
-export async function testWebhook(env: Env, origin: string, app: WebhookPayload["app"], actor: NonNullable<WebhookPayload["actor"]>) {
+export async function testWebhook(
+  env: Env,
+  origin: string,
+  app: WebhookPayload["app"],
+  actor: NonNullable<WebhookPayload["actor"]>
+) {
   const id = await enqueueWebhook(env, origin, { type: "ping", app, actor })
   if (!id) bad("Set a webhook URL first")
   return { delivery_id: id }
@@ -47,15 +52,24 @@ export async function enqueueWebhook(
     app: { id: app.id, slug: app.slug, name: app.name },
     mcp_url: new URL("/mcp", origin).href
   }
-  await sql(
+  const inserted = await sql(
     env,
-    `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) VALUES(?,?,?,?,?)`,
+    `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?,?,?,?,?
+     WHERE (? IS NULL OR EXISTS(SELECT 1 FROM issues WHERE id=? AND app_id=?))
+       AND (? IS NULL OR EXISTS(SELECT 1 FROM comments WHERE id=? AND issue_id=?))`,
     id,
     app.id,
     payload.type,
     JSON.stringify(payload),
-    created_at
+    created_at,
+    payload.issue?.id ?? null,
+    payload.issue?.id ?? null,
+    app.id,
+    payload.comment?.id ?? null,
+    payload.comment?.id ?? null,
+    payload.issue?.id ?? null
   ).run()
+  if (!inserted.meta.changes) return null // A deletion won the race with enqueueing this snapshot.
   try {
     // Keep large payloads and credentials out of the queue. Don't replay old events to a new URL.
     await env.WEBHOOKS.send({ id, destinationHash: await sha256(url) } satisfies Job)

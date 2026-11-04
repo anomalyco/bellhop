@@ -1,4 +1,13 @@
-import type { Activity, Actor, App, IssueSummary, LiveEvent, TimelineItem, WebhookEventType } from "../shared/api"
+import type {
+  Activity,
+  Actor,
+  App,
+  Comment,
+  IssueSummary,
+  LiveEvent,
+  TimelineItem,
+  WebhookEventType
+} from "../shared/api"
 import { appUrl, missing, now, rows, sql, str } from "./core"
 import { readPresence, visibleIssues } from "./issues"
 import { enqueueWebhook } from "./webhooks"
@@ -11,6 +20,8 @@ export interface Change {
   issue: IssueSummary
   actor: Actor
   items?: TimelineItem[]
+  comments?: Comment[]
+  deletedComment?: string
   changes?: string[]
 }
 export const appRoom = (env: Env, id: string) => env.ROOMS.getByName(`app:${id}`)
@@ -21,7 +32,7 @@ export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[],
   const event: LiveEvent = { type: "actor.updated", previous_id, actor }
   ctx.waitUntil(
     (async () => {
-      await appRoom(env, app).publish([event])
+      await appRoom(env, app).publish([event], { actorIssues: issues })
       for (let i = 0; i < issues.length; i += 8) {
         await Promise.all(issues.slice(i, i + 8).map((id) => issueRoom(env, id).publish([event])))
       }
@@ -29,15 +40,26 @@ export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[],
   )
   // A guest rename or sign-in can change an issue author without an ordinary issue write.
   // Only refresh summaries that actually show that actor (not every old comment's thread).
-  if (issues.length) ctx.waitUntil((async () => {
-    if (!await sql(env, "SELECT 1 FROM apps WHERE id=? AND public=1", app).first()) return
-    for (let offset=0; offset<issues.length; offset+=64) {
-      const affected=await rows<{id:string}>(sql(env, `SELECT i.id FROM issues i WHERE ${visibleIssues("?")} AND i.id IN (SELECT value FROM json_each(?))
+  if (issues.length)
+    ctx.waitUntil(
+      (async () => {
+        if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND public=1", app).first())) return
+        for (let offset = 0; offset < issues.length; offset += 64) {
+          const affected = await rows<{ id: string }>(
+            sql(
+              env,
+              `SELECT i.id FROM issues i WHERE ${visibleIssues("?")} AND i.id IN (SELECT value FROM json_each(?))
         AND ? IN (json_extract(i.author,'$.id'),json_extract(i.assignee,'$.id'),json_extract(i.activity,'$.actor.id'))`,
-        app,JSON.stringify(issues.slice(offset,offset+64)),actor.id))
-      for (let i=0;i<affected.length;i+=8) await Promise.all(affected.slice(i,i+8).map(r=>feedRoom(env).refreshFeed(r.id,"feed.issue")))
-    }
-  })())
+              app,
+              JSON.stringify(issues.slice(offset, offset + 64)),
+              actor.id
+            )
+          )
+          for (let i = 0; i < affected.length; i += 8)
+            await Promise.all(affected.slice(i, i + 8).map((r) => feedRoom(env).refreshFeed(r.id, "feed.issue")))
+        }
+      })()
+    )
 }
 
 // All issue writes converge here after D1 commits. Only the public summary goes on the wire.
@@ -46,21 +68,33 @@ export function emit(env: Env, ctx: Work, change: Change) {
   const updated: LiveEvent = { type: "issue.updated", issue }
   const list: LiveEvent = type === "issue.opened" ? { type: "issue.created", issue } : updated
   const timeline: LiveEvent[] = items.map((item) => ({ type: "timeline.added", issue_id: issue.id, item }))
+  for (const comment of change.comments ?? []) timeline.push({ type: "comment.updated", issue_id: issue.id, comment })
+  if (change.deletedComment)
+    timeline.push({ type: "comment.deleted", issue_id: issue.id, comment_id: change.deletedComment })
   ctx.waitUntil(
     Promise.all([appRoom(env, app.id).publish([list]), issueRoom(env, issue.id).publish([...timeline, updated])])
   )
-  if (app.public) ctx.waitUntil(feedRoom(env).refreshFeed(issue.id, "feed.issue"))
+  if (app.public && !issue.private && !issue.hidden) ctx.waitUntil(feedRoom(env).refreshFeed(issue.id, "feed.issue"))
   if (type === "comment.created" && change.actor.type === "agent") return
   const origin = env.PUBLIC_ORIGIN || change.origin
+  const payload = {
+    app,
+    type,
+    actor: change.actor,
+    issue: { ...issue, url: appUrl(env, origin, app.slug, `/issues/${issue.number}`) },
+    ...(type === "issue.updated" && { changes: change.changes ?? [] })
+  }
+  // Webhook recipients are team integrations, not one of the connected browser viewers.
+  const comments = change.comments?.length
+    ? change.comments
+    : items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))
   ctx.waitUntil(
-    enqueueWebhook(env, origin, {
-      app,
-      type,
-      actor: change.actor,
-      issue: { ...issue, url: appUrl(env, origin, app.slug, `/issues/${issue.number}`) },
-      ...(type === "issue.updated" && { changes: change.changes ?? [] }),
-      ...(type === "comment.created" && { comment: items.find((i) => i.kind === "comment")?.comment })
-    })
+    (async () => {
+      if (!comments.length) await enqueueWebhook(env, origin, payload)
+      else
+        for (const comment of comments)
+          await enqueueWebhook(env, origin, { ...payload, comment: { ...comment, viewer_is_author: false } })
+    })()
   )
 }
 export async function setActivity(
@@ -97,14 +131,14 @@ export async function refreshActivity(
   ctx: Work,
   appId: string,
   issueId: string,
-  publish: (event: LiveEvent) => void,
+  publish: (event: LiveEvent) => Promise<void>,
   schedule: (at: number | null) => Promise<void>
 ) {
   const presence = await readPresence(env, issueId, appId),
     activity = presence?.activity ?? null
   const event: LiveEvent = { type: "activity", issue_id: issueId, activity }
   await schedule(activity ? Date.parse(activity.expires_at) : null)
-  publish(event)
+  await publish(event)
   if (presence?.public) ctx.waitUntil(feedRoom(env).refreshFeed(issueId, "activity"))
   await appRoom(env, appId).publish([event])
 }
@@ -114,19 +148,19 @@ export async function expireActivity(
   ctx: Work,
   appId: string,
   issueId: string,
-  publish: (event: LiveEvent) => void
+  publish: (event: LiveEvent) => Promise<void>
 ) {
   const cleared = await sql(
     env,
     `UPDATE issues SET activity=NULL WHERE id=? AND app_id=? AND json_extract(activity,'$.expires_at')<=?
-     RETURNING (SELECT public FROM apps WHERE id=issues.app_id) public`,
+     RETURNING ((SELECT public FROM apps WHERE id=issues.app_id) AND private=0 AND hidden IS NULL) public`,
     issueId,
     appId,
     now()
   ).first<{ public: number }>()
   if (cleared) {
     const event: LiveEvent = { type: "activity", issue_id: issueId, activity: null }
-    publish(event)
+    await publish(event)
     if (cleared.public) ctx.waitUntil(feedRoom(env).refreshFeed(issueId, "activity"))
     await appRoom(env, appId).publish([event])
     return null // The guarded write cleared this presence; a later refresh schedules its own alarm.

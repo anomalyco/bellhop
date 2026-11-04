@@ -35,7 +35,7 @@
 //   GET    /api/feed/apps                                -> FeedApp[]          public: the public workspaces
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
-//   PATCH  /api/apps/:slug         { name?, description?, public? } -> AppDetail   admin
+//   PATCH  /api/apps/:slug         { name?, description?, public?, visibility? } -> AppDetail   admin
 //   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
 //   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  admin
 //   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
@@ -58,17 +58,37 @@
 //   POST   /api/apps/:slug/templates TemplateInput       -> Template           admin
 //   PATCH  /api/apps/:slug/templates/:id TemplateInput   -> Template           admin
 //   DELETE /api/apps/:slug/templates/:id                 -> { ok: true }       admin
-//   GET    /api/apps/:slug/issues?state=open|closed&label=<name>&q=<text>&cursor=  -> IssueList   public
+//   GET    /api/apps/:slug/issues?state=open|closed&label=<name>&q=<text>&cursor=  -> IssueList   public; private
+//          issues only for the team and their reporter; hidden issues only for the team (q "is:hidden" lists them)
 //   POST   /api/apps/:slug/issues  NewIssue              -> Issue              guest + human, or member
 //   GET    /api/apps/:slug/issues/:number                -> Issue              public (system_info only for the team)
-//   PATCH  /api/apps/:slug/issues/:number IssuePatch     -> Issue              member; the guest author may edit title/body
+//   PATCH  /api/apps/:slug/issues/:number IssuePatch     -> Issue              member; the author (guest + human, or
+//          account) may edit title/body, close it (completed or not_planned) or reopen it, and set `private` when the
+//          app lets reporters choose
+//   DELETE /api/apps/:slug/issues/:number                -> { ok: true }       admin; permanent (comments, attachments,
+//          events, relations). The number stays taken: GET then answers 410 with code "deleted".
+//   POST   /api/apps/:slug/issues/:number/hide { reason: ModerationReason } -> Issue   member
+//   DELETE /api/apps/:slug/issues/:number/hide           -> Issue              member; unhide
+//   GET    /api/apps/:slug/issues/:number/history        -> Revision[]         whoever can see the issue; title/body
+//   PATCH  /api/apps/:slug/issues/:number/comments/:id { body } -> Comment     the author (guest + human, or account)
+//   DELETE /api/apps/:slug/issues/:number/comments/:id   -> { ok: true }       the author, or member
+//   POST   /api/apps/:slug/issues/:number/comments/:id/hide { reason } -> Comment   member
+//   DELETE /api/apps/:slug/issues/:number/comments/:id/hide -> Comment         member
+//   GET    /api/apps/:slug/issues/:number/comments/:id/history -> Revision[]   whoever can see the comment
+//   GET    /api/apps/:slug/blocks                        -> Block[]            member
+//   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
+//          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
+//          hide_content hides everything they wrote here (reason "spam").
+//   DELETE /api/apps/:slug/blocks/:id                    -> { ok: true }       member; doesn't unhide content
 //   POST   /api/apps/:slug/issues/:number/comments NewComment -> Comment        guest + human, or member
 //   POST   /api/apps/:slug/issues/:number/relations { type, number } -> Issue   member
 //   DELETE /api/apps/:slug/issues/:number/relations/:relation_id   -> Issue     member
 //   POST   /api/apps/:slug/uploads?name=<file name>  body: raw bytes, Content-Type: the file's type -> Attachment
 //                                                                             guest + human, or member. Images ≤ 10 MB,
 //                                                                             video ≤ 100 MB, other files ≤ 25 MB
-//   GET    /media/:attachment_id/:file_name              -> the file, with Range support (video seeking)
+//   GET    /media/:attachment_id/:file_name              -> the file, with Range support (video seeking). Attachments
+//          of public issues are public and edge-cacheable; of private or hidden issues, and of hidden comments, only
+//          for whoever can see them (404 otherwise, never cached publicly).
 //   GET    /api/live/apps/:slug                          WebSocket, list page: LiveEvent
 //   GET    /api/live/apps/:slug/issues/:number           WebSocket, issue page: LiveEvent
 //   GET    /api/live/feed                                WebSocket, home feed: LiveEvent (feed.issue, activity)
@@ -195,7 +215,41 @@ export interface FeedList {
 export interface AppDetail extends App {
   labels: Label[]
   templates: Template[]
+  /** What the viewer can see: includes private issues only for the team. */
   counts: { open: number; closed: number }
+  visibility: AppVisibility
+}
+
+/** Whether new issues are public, and whether reporters may choose. The team can always change an issue's privacy. */
+export interface AppVisibility {
+  default: "public" | "private"
+  reporter_can_choose: boolean
+}
+
+/** Why a moderator hid an issue or comment. */
+export type ModerationReason = "spam" | "abuse" | "off_topic"
+
+export interface Moderation {
+  reason: ModerationReason
+  by: Actor
+  at: string
+}
+
+/** A blocked guest or account in one app. */
+export interface Block {
+  id: string
+  actor: Actor
+  by: Actor
+  created_at: string
+}
+
+/** An earlier version of an issue's title/body or a comment's body (newest first; the current one isn't included). */
+export interface Revision {
+  id: string
+  actor: Actor
+  title: string | null
+  body: string
+  created_at: string
 }
 
 export interface AppSettings {
@@ -322,6 +376,10 @@ export interface IssueSummary extends IssueRef {
   updated_at: string
   /** Set while an agent or member shows activity (typing/status). */
   activity: Activity | null
+  /** Visible only to the team, agents and the reporter. */
+  private: boolean
+  /** Set when a moderator hid it; only the team and agents see hidden issues. */
+  hidden: Moderation | null
 }
 
 export interface Relation {
@@ -341,6 +399,8 @@ export interface Issue extends IssueSummary {
   template_id: string | null
   /** True when the viewer wrote this issue (guest cookie or member). */
   viewer_is_author: boolean
+  /** When the title or body last changed after posting; GET .../history has the earlier versions. */
+  edited_at: string | null
   timeline: TimelineItem[]
 }
 
@@ -359,6 +419,8 @@ export interface NewIssue {
   system_info?: SystemInfo
   /** Guests only: sets the display name (1–40 characters) before posting, same as PUT /api/me/guest. */
   guest_name?: string
+  /** Only honoured when the app lets reporters choose (or for the team); otherwise the app's default applies. */
+  private?: boolean
 }
 
 export interface IssuePatch {
@@ -370,6 +432,7 @@ export interface IssuePatch {
   label_ids?: string[]
   /** Member id, or null to clear. */
   assignee_id?: string | null
+  private?: boolean
 }
 
 export interface NewComment {
@@ -388,6 +451,12 @@ export interface Comment {
   by_issue_author: boolean
   created_at: string
   updated_at: string
+  /** When the body last changed after posting; GET .../history has the earlier versions. */
+  edited_at: string | null
+  /** Set when a moderator hid it. Outside the team, a hidden comment comes with an empty body and no attachments. */
+  hidden: Moderation | null
+  /** True when the viewer wrote it (may edit and delete it). */
+  viewer_is_author: boolean
 }
 
 export type IssueEventType =
@@ -399,6 +468,10 @@ export type IssueEventType =
   | "related" // data: { relation: Relation }
   | "unrelated" // data: { relation: Relation }
   | "renamed" // data: { from: string, to: string }
+  | "hidden" // data: { reason: ModerationReason }   (team-only timeline item)
+  | "unhidden" // data: {}                           (team-only timeline item)
+  | "made_private" // data: {}
+  | "made_public" // data: {}
 
 export interface IssueEvent {
   id: string
@@ -423,6 +496,12 @@ export type LiveEvent =
   // An actor changed identity: a guest renamed, or a guest's posts moved to their account on sign-in. Sent to the
   // app room and every issue room where `previous_id` appears; clients replace that actor everywhere they show it.
   | { type: "actor.updated"; previous_id: string; actor: Actor }
+  // Edited, hidden or unhidden. Each socket gets the view its viewer is allowed (e.g. no body when hidden).
+  | { type: "comment.updated"; issue_id: string; comment: Comment }
+  | { type: "comment.deleted"; issue_id: string; comment_id: string } // issue room
+  | { type: "issue.deleted"; issue_id: string; number: number } // list and issue rooms
+// Rooms filter per socket: private issues and hidden issues/comments only reach sockets whose viewer may see them
+// (the team; for private issues also the reporter). `viewer_*` fields in live payloads describe that socket's viewer.
   | { type: "feed.issue"; issue: FeedIssue } // feed room: an issue in a public workspace was opened or changed
 
 // Webhooks. POST to the application's URL with JSON WebhookPayload and headers:
@@ -459,7 +538,10 @@ export interface WebhookPayload {
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
 //   list_labels    {}
 //   comment        { number, body }              posts with the AI badge; clears the token's activity
-//   update_issue   { number, status?, close_reason?, labels?: string[] (names), title? }
+//   edit_comment   { comment_id, body }          the agent's own comments
+//   moderate       { number, comment_id?, action: "hide"|"unhide", reason? }   member; hides or unhides the issue,
+//                                                  or one comment; reason required for hide
+//   update_issue   { number, status?, close_reason?, labels?: string[] (names), title?, private? }
 //   relate_issues  { number, other_number, type: RelationType }
 //   claim_issue    { number }                    assigns the agent, adds a "claimed" event
 //   set_activity   { number, text?: string|null, clear?: boolean }   typing dots + short status; expires after 60 s

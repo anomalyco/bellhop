@@ -30,7 +30,7 @@ export const reservedSlugs = new Set(
 )
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 410 | 413 | 415 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503
 export class ApiFailure extends Error {
   constructor(
     readonly status: ErrorStatus,
@@ -89,6 +89,12 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("actor blocked") || message.includes("NOT NULL constraint failed: blocks.actor_id"))
+    return new ApiFailure(403, "blocked", "You are blocked from writing in this workspace")
+  if (message.includes("NOT NULL constraint failed: comments.issue_id"))
+    return new ApiFailure(404, "not_found", "Not found")
+  if (message.includes("NOT NULL constraint failed: comments.revision"))
+    return new ApiFailure(409, "conflict", "Comment changed; try again")
   if (message.includes("last workspace owner"))
     return new ApiFailure(409, "last_owner", "The workspace must keep a signed-in owner")
   if (message.includes("NOT NULL constraint failed: agent_apps.app_id"))

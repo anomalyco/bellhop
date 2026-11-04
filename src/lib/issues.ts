@@ -55,7 +55,7 @@ function matches(issue: IssueSummary, key: string, slug: string, anyState = fals
 
 function summaryOf(issue: Issue | IssueSummary): IssueSummary {
   const { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity } = issue
-  return { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity }
+  return { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity, private: issue.private, hidden: issue.hidden }
 }
 
 function bumpCounts(slug: string, from: IssueSummary["status"] | null, issue: IssueSummary) {

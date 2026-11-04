@@ -1,6 +1,8 @@
 import type { Ctx } from "./core"
 import { appUrl, rows, sql } from "./core"
 import { visibleIssues, workspaceActivitySQL } from "./issues"
+import { viewerApp } from "./apps"
+import { outsider, sees } from "./visibility"
 
 // Dev serves workspaces under /<slug>. The apex also understands these old page links;
 // the production sitemap always points to the canonical workspace subdomain instead.
@@ -41,19 +43,38 @@ async function visibility(c: Ctx, slug: string) {
   return sql(c.env, "SELECT public FROM apps WHERE slug=?", slug).first<number>("public")
 }
 export async function page(c: Ctx) {
-  const slug = workspace(c),
-    listed = slug === null ? 1 : await visibility(c, slug)
+  const slug = workspace(c), url = new URL(c.req.url)
+  const subdomain = c.env.APP_DOMAIN && url.hostname.endsWith(`.${c.env.APP_DOMAIN}`)
+  const number = (subdomain ? /^\/issues\/(\d+)\/?$/ : /^\/[^/]+\/issues\/(\d+)\/?$/).exec(url.pathname)?.[1]
+  let listed: number | null = 1, status: 404 | 410 | undefined
+  if (slug !== null && number) {
+    const r = await sql(c.env, `SELECT a.public,i.id,i.private,i.hidden IS NOT NULL hidden,json_extract(i.author,'$.id') reporter,t.number tombstone
+      FROM apps a LEFT JOIN issues i ON i.app_id=a.id AND i.number=?1 LEFT JOIN issue_tombstones t ON t.app_id=a.id AND t.number=?1 WHERE a.slug=?2`,number,slug)
+      .first<{public:number;id:string|null;private:number;hidden:number;reporter:string;tombstone:number|null}>()
+    listed = r?.public ?? null
+    if (!r?.id) status = r?.tombstone ? 410 : 404
+    else {
+      const gate = {private:!!r.private,hidden:!!r.hidden,reporter:r.reporter}
+      if (!sees(outsider,gate)) {
+        listed=0
+        if (!sees((await viewerApp(c,slug)).viewer,gate)) status=404
+      }
+    }
+  } else if (slug !== null) {
+    listed=await visibility(c,slug)
+    if (listed===null) status=404
+  }
   // The assets binding serves the actual index document at /. Requesting /index.html can
   // produce an asset canonicalization redirect. Do not rewrite its HTML or cache visibility.
   const headers = new Headers(c.req.raw.headers)
-  if (listed === null) {
+  if (status) {
     headers.delete("If-None-Match")
     headers.delete("If-Modified-Since")
   }
   const asset = await c.env.ASSETS.fetch(new Request(new URL("/", c.req.url), { headers }))
-  const res = new Response(asset.body, { status: listed === null ? 404 : asset.status, headers: asset.headers })
+  const res = new Response(asset.body, { status: status ?? asset.status, headers: asset.headers })
   res.headers.set("Cache-Control", "no-store")
-  if (!listed) res.headers.set("X-Robots-Tag", "noindex")
+  if (!listed || status) res.headers.set("X-Robots-Tag", "noindex")
   return res
 }
 export async function robots(c: Ctx) {

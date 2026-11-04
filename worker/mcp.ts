@@ -20,7 +20,8 @@ import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
-import { addComment, relate, removeLabel, updateIssue } from "./mutations"
+import { addComment, editComment, moderate, relate, removeLabel, updateIssue } from "./mutations"
+import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
 import { fromAppRow, type AppRow } from "./read-scope"
@@ -42,6 +43,8 @@ const toolRoles = {
   list_labels: "read",
   list_templates: "read",
   comment: "respond",
+  edit_comment: "respond",
+  moderate: "triage",
   set_activity: "respond",
   update_issue: "triage",
   claim_issue: "triage",
@@ -168,6 +171,18 @@ const tools = [
     "number",
     "body"
   ]),
+  tool("edit_comment", "Edit this agent's own comment.", { comment_id: text, body: text }, ["comment_id", "body"]),
+  tool(
+    "moderate",
+    "Hide or unhide an issue or comment (member).",
+    {
+      number,
+      comment_id: text,
+      action: { enum: ["hide", "unhide"] },
+      reason: { enum: ["spam", "abuse", "off_topic"] }
+    },
+    ["number", "action"]
+  ),
   tool(
     "update_issue",
     "Change the title, status, close reason, or complete list of label names.",
@@ -176,6 +191,7 @@ const tools = [
       status: { ...text, enum: ["open", "in_progress", "waiting", "closed"] },
       close_reason: { ...text, enum: ["completed", "not_planned", "duplicate"] },
       labels: { type: "array", items: text },
+      private: { type: "boolean" },
       title: text
     },
     ["number"]
@@ -271,7 +287,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
   const manager = { user: caller.user, agent: caller.actor.id }
   switch (name) {
     case "get_app":
-      return textResult({ ...(await detail(c, { ...chosen, role: null })), role: chosen.role })
+      return textResult({ ...(await detail(c, { ...chosen, role: null }, teamViewer)), role: chosen.role })
     case "update_app":
       return textResult(await detail(c, await updateApp(env, { ...chosen, role: "admin" }, b)))
     case "list_members":
@@ -341,13 +357,18 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     case "list_issues":
     case "search_issues":
       return textResult(
-        await listIssues(env, app.id, {
-          allStates: name === "search_issues",
-          state: b.state === undefined ? undefined : choice(b.state, states, "state"),
-          label: b.label === undefined ? undefined : str(b.label, "label", 60),
-          query: b.query === undefined ? undefined : str(b.query, "query", 512),
-          limit: b.limit === undefined ? undefined : integer(b.limit, "limit", 100)
-        })
+        await listIssues(
+          env,
+          app.id,
+          {
+            allStates: name === "search_issues",
+            state: b.state === undefined ? undefined : choice(b.state, states, "state"),
+            label: b.label === undefined ? undefined : str(b.label, "label", 60),
+            query: b.query === undefined ? undefined : str(b.query, "query", 512),
+            limit: b.limit === undefined ? undefined : integer(b.limit, "limit", 100)
+          },
+          teamViewer
+        )
       )
     case "get_issue":
       return textResult(await getIssue(env, app.id, n(), actor, can(a.role, "read")))
@@ -375,6 +396,27 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     }
     case "comment":
       return textResult(await addComment(a, n(), { body: b.body }))
+    case "edit_comment": {
+      const id = str(b.comment_id, "comment_id", 64),
+        num = await sql(
+          env,
+          "SELECT i.number FROM comments c JOIN issues i ON i.id=c.issue_id WHERE c.id=? AND i.app_id=?",
+          id,
+          app.id
+        ).first<number>("number")
+      if (!num) missing()
+      return textResult(await editComment(a, num, id, b))
+    }
+    case "moderate":
+      return textResult(
+        await moderate(
+          a,
+          n(),
+          b.comment_id === undefined ? null : str(b.comment_id, "comment_id", 64),
+          choice(b.action, ["hide", "unhide"] as const, "action") === "hide",
+          b.reason
+        )
+      )
     case "claim_issue":
       return textResult(await updateIssue(a, n(), {}, true))
     case "update_issue": {
@@ -401,7 +443,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
   }
 }
 
-async function authenticate(c: Ctx): Promise<Caller | null> {
+export async function authenticate(c: Ctx): Promise<Caller | null> {
   const token = /^Bearer (bh_(?:a_)?[a-f0-9]{64})$/i.exec(c.req.header("Authorization") ?? "")?.[1]
   if (!token) return null
   const hash = await sha256(token)

@@ -1,14 +1,51 @@
 import { Hono } from "hono"
 import type { Actor, App, AppDetail, AppSettings, Label, Member, Template, WebhookDelivery } from "../shared/api"
-import { bad, body, fail, ids, memberActor, missing, now, reservedSlugs, rows, secret, sql, str, uid } from "./core"
+import {
+  bad,
+  body,
+  choice,
+  fail,
+  ids,
+  input,
+  memberActor,
+  missing,
+  now,
+  reservedSlugs,
+  rows,
+  scopedGuestId,
+  secret,
+  sql,
+  str,
+  uid
+} from "./core"
 import type { Bindings, Ctx } from "./core"
-import { guestActor } from "./auth"
+import { browserGuest, guestActor, sessionHash } from "./auth"
+import { visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { can, requireTeam, teamRole } from "./permissions"
 import { changeMember, invite, roster } from "./members"
 import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 import { appCols, appIdSQL, appKey, appStatement, bySlug, fromAppRow, readBatch } from "./read-scope"
 import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
+
+// One authenticated scope lookup for reporter-aware counts/lists, restricted media and sockets.
+export async function viewerApp(c: Ctx, slug: string) {
+  const hash = await sessionHash(c),
+    row = await sql(
+      c.env,
+      `SELECT ${appCols},m.role,s.user_id FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
+    LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
+      hash,
+      now(),
+      slug
+    ).first<AppRow & { user_id: string | null }>()
+  if (!row) missing()
+  const { user_id, ...rest } = row,
+    app = fromAppRow(rest),
+    cookie = browserGuest(c)
+  const actorId = user_id ?? (cookie ? await scopedGuestId(cookie, app.id) : null)
+  return { app, viewer: { team: can(app.role, "read"), actorId }, user: user_id, session: user_id ? hash : null }
+}
 
 export async function loadApp(c: Ctx) {
   const app = fromAppRow((await appStatement(c.env, bySlug(c)).first<AppRow>()) ?? missing())
@@ -45,22 +82,36 @@ const template = ({ labels, ask_system_info, ...t }: StoredTemplate): Template =
 export async function templates(env: Env, appId: string) {
   return (await rows<StoredTemplate>(templateQuery(env, appId))).map(template)
 }
-export async function detail(c: Ctx, target: App | ReturnType<typeof bySlug> = c.var.app): Promise<AppDetail> {
-  const scope = "id" in target ? target.id : target
+export async function detail(
+  c: Ctx,
+  target: App = c.var.app,
+  viewer: Viewer = { team: can(target.role, "read"), actorId: c.var.actor?.id ?? null }
+): Promise<AppDetail> {
+  const scope = target.id
   const {
-    app,
-    data: [ls, ts, totals]
-  } = await readBatch<[Label, StoredTemplate, AppDetail["counts"]]>(c.env, scope, [
+    data: [ls, ts, totals, settings]
+  } = await readBatch<
+    [Label, StoredTemplate, AppDetail["counts"], { default_private: number; reporter_can_choose: number }]
+  >(c.env, scope, [
     labelQuery(c.env, scope),
     templateQuery(c.env, scope),
     sql(
       c.env,
       `SELECT count(*) FILTER (WHERE status!='closed') AS open,
-      count(*) FILTER (WHERE status='closed') AS closed FROM issues WHERE app_id=${appIdSQL(scope)}`,
-      appKey(scope)
-    )
+       count(*) FILTER (WHERE status='closed') AS closed FROM issues i WHERE i.app_id=? AND ${visibleSQL(viewer)}`,
+      scope,
+      ...actorBindings(viewer)
+    ),
+    sql(c.env, "SELECT default_private,reporter_can_choose FROM apps WHERE id=?", scope)
   ])
-  return { ...("id" in target ? target : app!), labels: ls, templates: ts.map(template), counts: totals[0]! }
+  const v = settings[0] ?? missing()
+  return {
+    ...target,
+    labels: ls,
+    templates: ts.map(template),
+    counts: totals[0]!,
+    visibility: { default: v.default_private ? "private" : "public", reporter_can_choose: !!v.reporter_can_choose }
+  }
 }
 export function webhookDeliveries(env: Env, id: string) {
   return rows<WebhookDelivery>(
@@ -209,11 +260,16 @@ function publicFlag(v: unknown) {
   return v
 }
 export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
+  const v = b.visibility === undefined ? null : input(b.visibility)
+  const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
+  if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const changed = await sql(
     env,
-    `UPDATE apps SET name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
+    `UPDATE apps SET default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
     WHERE id=? RETURNING name,description,public`,
+    def === null ? null : Number(def === "private"),
+    v ? Number(v.reporter_can_choose) : null,
     b.name === undefined ? null : str(b.name, "name", 120).trim(),
     b.description === undefined ? null : str(b.description, "description", 4000, true),
     b.public === undefined ? null : Number(publicFlag(b.public)),

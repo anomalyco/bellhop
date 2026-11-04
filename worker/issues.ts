@@ -12,19 +12,23 @@ import type {
   IssueRef,
   IssueSummary,
   Member,
+  Moderation,
   Relation,
   TimelineItem
 } from "../shared/api"
-import { bad, choice, missing, now, rows, scopedGuestId, sql, str } from "./core"
+import { bad, choice, fail, missing, now, rows, scopedGuestId, sql, str } from "./core"
+import { actorBindings, commentView, gateOf, outsider, sees, visibleSQL, type Viewer } from "./visibility"
 import { appIdSQL, appKey, readBatch } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 
-const fields = `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,
+const fields = `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,
   (SELECT count(*) FROM comments WHERE issue_id=i.id) AS comment_count,
   (SELECT json_group_array(json_object('id',l.id,'name',l.name,'color',l.color,'description',l.description))
     FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id ORDER BY l.name) AS labels`
-type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "labels"> & {
+type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "labels" | "private" | "hidden"> & {
+  private: number
+  hidden: string | null
   author: string
   assignee: string | null
   activity: string | null
@@ -43,7 +47,12 @@ function normalizeActor(actor: Actor, roles: Roles): Actor {
   if (actor.type === "member") actor.role = roles.get(actor.id) ?? null
   return actor
 }
-const parseActor = (json: string, roles: Roles) => normalizeActor(JSON.parse(json), roles)
+export const parseActor = (json: string, roles: Roles) => normalizeActor(JSON.parse(json), roles)
+function moderation(json: string | null, roles: Roles): Moderation | null {
+  if (!json) return null
+  const m: Moderation = JSON.parse(json)
+  return { ...m, by: normalizeActor(m.by, roles) }
+}
 function currentActivity(json: string | null, roles: Roles): Activity | null {
   const activity: Activity | null = json && JSON.parse(json)
   return activity && activity.expires_at > now() ? { ...activity, actor: normalizeActor(activity.actor, roles) } : null
@@ -51,15 +60,24 @@ function currentActivity(json: string | null, roles: Roles): Activity | null {
 export async function readPresence(env: Env, issueId: string, appId?: string, publicOnly = false) {
   const row = await sql(
     env,
-    `SELECT i.activity,m.user_id,m.role,a.public FROM issues i JOIN apps a ON ${visibleIssues("a.id")} LEFT JOIN members m
-    ON m.app_id=i.app_id AND m.user_id=json_extract(i.activity,'$.actor.id') WHERE i.id=? ${appId ? "AND i.app_id=?" : ""} ${publicOnly ? "AND a.public=1" : ""}`,
+    `SELECT i.activity,i.private,i.hidden IS NOT NULL hidden,json_extract(i.author,'$.id') reporter,m.user_id,m.role,(a.public=1 AND (${visibleSQL(outsider)})) public FROM issues i JOIN apps a ON i.app_id=a.id LEFT JOIN members m
+    ON m.app_id=i.app_id AND m.user_id=json_extract(i.activity,'$.actor.id') WHERE i.id=? ${appId ? "AND i.app_id=?" : ""} ${publicOnly ? `AND a.public=1 AND ${visibleSQL(outsider)}` : ""}`,
     issueId,
     ...(appId ? [appId] : [])
-  ).first<{ activity: string | null; user_id: string | null; role: Member["role"] | null; public: number }>()
+  ).first<{
+    activity: string | null
+    user_id: string | null
+    role: Member["role"] | null
+    public: number
+    private: number
+    hidden: number
+    reporter: string
+  }>()
   return row
     ? {
         activity: currentActivity(row.activity, new Map(row.user_id && row.role ? [[row.user_id, row.role]] : [])),
-        public: !!row.public
+        public: !!row.public,
+        gate: { private: !!row.private, hidden: !!row.hidden, reporter: row.reporter }
       }
     : null
 }
@@ -74,6 +92,8 @@ function summary(r: StoredSummary, roles: Roles): IssueSummary {
     created_at,
     updated_at,
     comment_count,
+    private: !!r.private,
+    hidden: moderation(r.hidden, roles),
     author: parseActor(r.author, roles),
     assignee: r.assignee ? parseActor(r.assignee, roles) : null,
     activity: currentActivity(r.activity, roles),
@@ -103,10 +123,10 @@ export function issueNumber(n: unknown) {
 const pageSize = 30
 // Issue visibility within a selected workspace. Discovery additionally requires a public
 // workspace; direct links intentionally do not. Add future issue-level visibility rules here.
-export const visibleIssues = (workspace: string) => `i.app_id=${workspace}`
-function issueFilter(workspace: string, options: { label?: unknown; query?: unknown }) {
-  const where = [visibleIssues(workspace)],
-    values: unknown[] = []
+export const visibleIssues = (workspace: string, v: Viewer = outsider) => `i.app_id=${workspace} AND ${visibleSQL(v)}`
+function issueFilter(workspace: string, options: { label?: unknown; query?: unknown }, v: Viewer = outsider) {
+  const where = [visibleIssues(workspace, v)],
+    values: unknown[] = [...actorBindings(v)]
   if (options.label) {
     where.push(
       "EXISTS (SELECT 1 FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id AND l.name=?)"
@@ -114,24 +134,29 @@ function issueFilter(workspace: string, options: { label?: unknown; query?: unkn
     values.push(str(options.label, "label", 60))
   }
   if (options.query) {
-    const words = str(options.query, "query", 512)
-      .match(/[\p{L}\p{N}\p{M}_]+/gu)
-      ?.slice(0, 24)
+    let query = str(options.query, "query", 512)
+    const hidden = /(?:^|\s)is:hidden(?=\s|$)/i.test(query)
+    if (hidden) {
+      where.push("i.hidden IS NOT NULL")
+      query = query.replace(/(?:^|\s)is:hidden(?=\s|$)/gi, " ").trim()
+    }
+    const words = query.match(/[\p{L}\p{N}\p{M}_]+/gu)?.slice(0, 24)
     if (words?.length) {
       const phrase = words.map((w) => `"${w}"*`).join(" AND ")
       where.push(`(i.rowid IN (SELECT rowid FROM issue_fts WHERE issue_fts MATCH ?) OR i.id IN
-        (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ?))`)
+        (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ? ${v.team ? "" : "AND c.hidden IS NULL"}))`)
       values.push(phrase, phrase)
-    } else where.push("0")
+    } else if (!hidden || query) where.push("0")
   }
   return { where: where.join(" AND "), values }
 }
 export async function listIssues(
   env: Env,
   scope: ReadScope,
-  options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number; allStates?: boolean }
+  options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number; allStates?: boolean },
+  viewer: Viewer = outsider
 ): Promise<IssueList> {
-  const filter = issueFilter(appIdSQL(scope), options),
+  const filter = issueFilter(appIdSQL(scope), options, viewer),
     values = [appKey(scope), ...filter.values]
   const base = ` FROM issues i WHERE ${filter.where}`
   const totals = sql(
@@ -254,15 +279,41 @@ export async function getIssue(
     data: [items, team, files, comments, events, relations]
   } = await readBatch<
     [
-      StoredSummary & { body: string; template_id: string | null; system_info: string | null },
+      StoredSummary & {
+        body: string
+        template_id: string | null
+        system_info: string | null
+        edited_at: string | null
+      },
       TeamRow,
       AttachmentRow & { comment_id: string | null },
-      Pick<Comment, "id" | "body" | "created_at" | "updated_at"> & { author: string },
-      Omit<IssueEvent, "actor" | "data"> & { actor: string; data: string },
-      IssueRef & { relation_id: string; type: Relation["type"]; direction: Relation["direction"] }
+      Pick<Comment, "id" | "body" | "created_at" | "updated_at" | "edited_at"> & {
+        author: string
+        hidden: string | null
+      },
+      Omit<IssueEvent, "actor" | "data"> & {
+        actor: string
+        data: string
+        ref_author: string | null
+        ref_private: number | null
+        ref_hidden: string | null
+      },
+      IssueRef & {
+        relation_id: string
+        type: Relation["type"]
+        direction: Relation["direction"]
+        ref_author: string
+        ref_private: number
+        ref_hidden: string | null
+      }
     ]
   >(env, scope, [
-    sql(env, `SELECT ${fields},i.body,i.template_id,i.system_info FROM issues i WHERE ${where}`, key, number),
+    sql(
+      env,
+      `SELECT ${fields},i.body,i.template_id,i.system_info,i.edited_at FROM issues i WHERE ${where}`,
+      key,
+      number
+    ),
     teamQuery(env, scope),
     sql(
       env,
@@ -273,20 +324,21 @@ export async function getIssue(
     ),
     sql(
       env,
-      `SELECT id,body,created_at,updated_at,author FROM comments WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
+      `SELECT id,body,created_at,updated_at,author,hidden,edited_at FROM comments WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
       key,
       number
     ),
     sql(
       env,
-      `SELECT id,type,actor,data,created_at FROM issue_events WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
+      `SELECT e.id,e.type,e.actor,e.data,e.created_at,json_extract(other.author,'$.id') ref_author,other.private ref_private,other.hidden ref_hidden
+       FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') WHERE e.issue_id=(${target}) ORDER BY e.created_at,e.rowid`,
       key,
       number
     ),
     sql(
       env,
       `WITH target AS (${target}) SELECT rel.id relation_id,rel.type,CASE WHEN rel.source_id=t.id THEN 'outgoing' ELSE 'incoming' END direction,
-      i.id,i.number,i.title,i.status,i.close_reason FROM target t JOIN relations rel ON rel.source_id=t.id OR rel.target_id=t.id
+      i.id,i.number,i.title,i.status,i.close_reason,json_extract(i.author,'$.id') ref_author,i.private ref_private,i.hidden ref_hidden FROM target t JOIN relations rel ON rel.source_id=t.id OR rel.target_id=t.id
       JOIN issues i ON i.id=CASE WHEN rel.source_id=t.id THEN rel.target_id ELSE rel.source_id END ORDER BY rel.rowid`,
       key,
       number
@@ -294,7 +346,11 @@ export async function getIssue(
   ])
   const r = items[0],
     roles = roleMap(team)
-  if (!r) missing()
+  if (!r) {
+    if (await sql(env, `SELECT 1 FROM issue_tombstones WHERE ${where}`, key, number).first())
+      fail(410, "deleted", "Issue permanently deleted")
+    missing()
+  }
   if (typeof scope !== "string") {
     privileged = can(app!.role, "read")
     viewer = scope.user
@@ -309,14 +365,32 @@ export async function getIssue(
   }
   const s = summary(r, roles),
     timeline: TimelineItem[] = []
+  const v = { team: privileged, actorId: viewer?.id ?? null }
+  if (!sees(v, gateOf(s))) missing()
   for (const c of comments) {
     const author = parseActor(c.author, roles)
     timeline.push({
       kind: "comment",
-      comment: { ...c, author, by_issue_author: author.id === s.author.id, attachments: byParent.get(c.id) ?? [] }
+      comment: commentView(
+        {
+          ...c,
+          author,
+          by_issue_author: author.id === s.author.id,
+          attachments: byParent.get(c.id) ?? [],
+          hidden: moderation(c.hidden, roles),
+          viewer_is_author: false
+        },
+        v
+      )
     })
   }
-  for (const e of events) {
+  for (const { ref_author, ref_private, ref_hidden, ...e } of events) {
+    if (!privileged && (e.type === "hidden" || e.type === "unhidden")) continue
+    if (
+      (e.type === "related" || e.type === "unrelated") &&
+      (!ref_author || !sees(v, { reporter: ref_author, private: !!ref_private, hidden: !!ref_hidden }))
+    )
+      continue
     const data = JSON.parse(e.data)
     if (e.type === "assigned" && data.assignee) normalizeActor(data.assignee, roles)
     timeline.push({ kind: "event", event: { ...e, actor: parseActor(e.actor, roles), data } })
@@ -325,16 +399,22 @@ export async function getIssue(
   timeline.sort((a, b) => time(a).localeCompare(time(b)))
   return {
     ...s,
+    edited_at: r.edited_at,
     body: r.body,
     template_id: r.template_id,
     system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
     viewer_is_author: viewer?.type === s.author.type && viewer.id === s.author.id,
     attachments: byParent.get(null) ?? [],
     timeline,
-    relations: relations.map(({ relation_id: id, direction, type, ...issue }) => ({ id, direction, type, issue }))
+    relations: relations.flatMap(
+      ({ relation_id: id, direction, type, ref_author, ref_private, ref_hidden, ...issue }) =>
+        sees(v, { reporter: ref_author, private: !!ref_private, hidden: !!ref_hidden })
+          ? [{ id, direction, type, issue }]
+          : []
+    )
   }
 }
 export function summaryOf(issue: Issue): IssueSummary {
-  const { body, template_id, system_info, viewer_is_author, attachments, timeline, relations, ...s } = issue
+  const { body, template_id, system_info, viewer_is_author, attachments, timeline, relations, edited_at, ...s } = issue
   return s
 }

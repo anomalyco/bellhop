@@ -1,8 +1,8 @@
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { apps, detail, loadApp } from "./apps"
+import { apps, detail, loadApp, viewerApp } from "./apps"
 import { auth, currentUser, firstContact } from "./auth"
-import { ApiFailure, dbError, denied, missing, reservedSlugs, sql } from "./core"
+import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, feedRoom, issueRoom } from "./events"
 import { icons } from "./icons"
@@ -10,7 +10,8 @@ import { feed, feedApps, getIssue, issueNumber, listIssues } from "./issues"
 import { bySlug } from "./read-scope"
 import { issues } from "./mutations"
 import { media } from "./media"
-import { mcp } from "./mcp"
+import { mcp, authenticate } from "./mcp"
+import { sees } from "./visibility"
 import { oauth } from "./oauth"
 import { agents } from "./agents"
 import { queue } from "./webhooks"
@@ -44,7 +45,9 @@ api.use("*", async (c, next) => {
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
   if (!publicOAuth && origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
   if (
-    (c.req.path.startsWith("/api/") && !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path)) ||
+    (c.req.path.startsWith("/api/") &&
+      !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path) &&
+      !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues)?$/.test(c.req.path))) ||
     c.req.path === "/oauth/authorize"
   )
     await currentUser(c)
@@ -54,12 +57,16 @@ api.use("*", async (c, next) => {
 })
 // These readers include their app/role lookup in their own batch; other routes still load the
 // complete actor and app context before handling writes or checking workspace permissions.
-api.get("/api/apps/:slug", async (c) => c.json(await detail(c, bySlug(c))))
+api.get("/api/apps/:slug", async (c) => {
+  const { app, viewer } = await viewerApp(c, c.req.param("slug"))
+  return c.json(await detail(c, app, viewer))
+})
 api.get("/api/feed", async (c) => c.json(await feed(c.env, c.req.query())))
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
 api.get("/api/apps/:slug/issues", async (c) => {
   const { state, label, cursor, q } = c.req.query()
-  return c.json(await listIssues(c.env, bySlug(c), { state, label, cursor, query: q }))
+  const { app, viewer } = await viewerApp(c, c.req.param("slug"))
+  return c.json(await listIssues(c.env, app.id, { state, label, cursor, query: q }, viewer))
 })
 api.get("/api/apps/:slug/issues/:number", async (c) =>
   c.json(await getIssue(c.env, bySlug(c), issueNumber(c.req.param("number"))))
@@ -76,19 +83,29 @@ api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
 async function live(c: Ctx, number?: string) {
-  const slug = c.req.param("slug")
-  const query =
-    number === undefined
-      ? sql(c.env, "SELECT id FROM apps WHERE slug=?", slug)
-      : sql(
-          c.env,
-          "SELECT i.id FROM apps a JOIN issues i ON i.app_id=a.id WHERE a.slug=? AND i.number=?",
-          slug,
-          issueNumber(number)
-        )
-  const id = await query.first<string>("id")
-  if (!id) missing()
-  return (number === undefined ? appRoom(c.env, id) : issueRoom(c.env, id)).fetch(c.req.raw)
+  const { app, viewer, session } = await viewerApp(c, c.req.param("slug")!)
+  let bearer: string | null = null
+  if (c.req.header("Authorization")) {
+    const caller = await authenticate(c)
+    if (!caller?.apps.some((a) => a.id === app.id)) missing()
+    viewer.team = true
+    viewer.actorId = caller.actor.id
+    bearer = await sha256(c.req.header("Authorization")!.slice(7))
+  }
+  let room = appRoom(c.env, app.id)
+  if (number !== undefined) {
+    const r = await sql(
+      c.env,
+      "SELECT id,private,hidden,json_extract(author,'$.id') reporter FROM issues WHERE app_id=? AND number=?",
+      app.id,
+      issueNumber(number)
+    ).first<{ id: string; private: number; hidden: string | null; reporter: string }>()
+    if (!r || !sees(viewer, { ...r, private: !!r.private, hidden: !!r.hidden })) missing()
+    room = issueRoom(c.env, r.id)
+  }
+  const headers = new Headers(c.req.raw.headers)
+  headers.set("X-Bellhop-Viewer", JSON.stringify({ ...viewer, session: bearer ? null : session, bearer, app: app.id }))
+  return room.fetch(new Request(c.req.raw, { headers }))
 }
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))
@@ -100,7 +117,12 @@ api.get("*", (c) => {
   // Never turn unknown API/protocol routes into successful SPA documents.
   const path = c.req.path
   if (/^\/(api|auth|media|icon|mcp|\.well-known)(\/|$)/.test(path)) return c.notFound()
-  if (/^\/oauth(?:\/|$)/.test(path) && (/^\/oauth\/(register|authorize|device|token|revoke)\/?$/.test(path) || !c.req.header("accept")?.includes("text/html"))) return c.notFound()
+  if (
+    /^\/oauth(?:\/|$)/.test(path) &&
+    (/^\/oauth\/(register|authorize|device|token|revoke)\/?$/.test(path) ||
+      !c.req.header("accept")?.includes("text/html"))
+  )
+    return c.notFound()
   if (!c.env.APP_DOMAIN) {
     if (/^\/(?:@|src\/|node_modules\/)/.test(path)) return c.env.ASSETS.fetch(c.req.raw)
     const meta = /^\/([a-z0-9-]+)\/(robots\.txt|sitemap\.xml)$/.exec(path)

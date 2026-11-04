@@ -1,6 +1,9 @@
 import { Hono } from "hono"
 import type { Attachment } from "../shared/api"
 import { allowWrite } from "./auth"
+import { viewerApp } from "./apps"
+import { authenticate } from "./mcp"
+import { sees, seesComment } from "./visibility"
 import { bad, fail, missing, now, sql, str, uid } from "./core"
 import type { Bindings } from "./core"
 import { guestWrite } from "./guest-history"
@@ -27,7 +30,7 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
       if (done) break
       size += value.byteLength
       if (size > limit) tooLarge()
-      for (let i = 0; i < value.length;) {
+      for (let i = 0; i < value.length; ) {
         const n = Math.min(buffer.length - used, value.length - i)
         buffer.set(value.subarray(i, i + n), used)
         used += n
@@ -120,14 +123,44 @@ function range(value: string, size: number) {
     : null
 }
 media.get("/media/:id/:name", async (c) => {
+  c.header("Cache-Control", "private, no-store")
   const a = await sql(
     c.env,
-    "SELECT id,name,mime,size,kind,object_key FROM attachments WHERE id=?",
+    `SELECT a.id,a.name,a.mime,a.size,a.kind,a.object_key,a.owner_id,a.app_id,app.slug,l.issue_id,i.private,i.hidden,
+     json_extract(i.author,'$.id') reporter,c.hidden comment_hidden FROM attachments a JOIN apps app ON app.id=a.app_id
+     LEFT JOIN attachment_links l ON l.attachment_id=a.id LEFT JOIN issues i ON i.id=l.issue_id LEFT JOIN comments c ON c.id=l.comment_id WHERE a.id=?`,
     c.req.param("id")
-  ).first<AttachmentRow & { object_key: string }>()
-  // Visibility gate: today this UUID/name pair is a public, immutable capability. Check any
-  // future private-media policy here, before conditional or range responses, and change caching.
+  ).first<
+    AttachmentRow & {
+      object_key: string
+      slug: string
+      app_id: string
+      owner_id: string
+      issue_id: string | null
+      private: number
+      hidden: string | null
+      comment_hidden: string | null
+      reporter: string
+    }
+  >()
   if (!a || a.name !== c.req.param("name")) missing()
+  const restricted = !a.issue_id || !!a.private || !!a.hidden || !!a.comment_hidden
+  if (restricted) {
+    const { viewer } = await viewerApp(c, a.slug)
+    if (c.req.header("Authorization")) {
+      const agent = await authenticate(c)
+      if (!agent?.apps.some((app) => app.id === a.app_id)) missing()
+      viewer.team = true
+      viewer.actorId = agent.actor.id
+    }
+    if (
+      !a.issue_id
+        ? !viewer.team && viewer.actorId !== a.owner_id
+        : !sees(viewer, { private: !!a.private, hidden: !!a.hidden, reporter: a.reporter }) ||
+          !seesComment(viewer, a.comment_hidden)
+    )
+      missing()
+  }
   const size = a.size,
     requested = c.req.header("range"),
     slice = requested ? range(requested, a.size) : null,
@@ -143,7 +176,10 @@ media.get("/media/:id/:name", async (c) => {
     ...(validator && { onlyIf: new Headers({ "If-None-Match": validator }) })
   })
   if (!obj) missing()
-  const cache = { "Cache-Control": "public, max-age=31536000, immutable", ETag: obj.httpEtag }
+  const cache = {
+    "Cache-Control": restricted ? "private, no-store" : "public, max-age=31536000, immutable",
+    ETag: obj.httpEtag
+  }
   if (!("body" in obj)) return new Response(null, { status: 304, headers: cache })
   if (requested && !slice) {
     await obj.body.cancel()
