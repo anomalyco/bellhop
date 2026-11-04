@@ -11,6 +11,7 @@ import { issues } from "./mutations"
 import { media } from "./media"
 import { mcp } from "./mcp"
 import { oauth } from "./oauth"
+import { agents } from "./agents"
 import { queue } from "./webhooks"
 export { Room } from "./room"
 
@@ -45,6 +46,7 @@ api.use("/api/apps/:slug/*", async (c, next) => {
 })
 api.route("/", auth)
 api.route("/", oauth)
+api.route("/", agents)
 api.route("/", apps)
 api.route("/", icons)
 api.route("/", issues)

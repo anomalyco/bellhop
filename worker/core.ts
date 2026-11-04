@@ -17,11 +17,15 @@ export const sha256 = async (value: string) =>
 export const sql = (env: Env, statement: string, ...values: unknown[]) => env.DB.prepare(statement).bind(...values)
 /** With APP_DOMAIN (production) each app lives on its own subdomain; without it (dev) under /<slug>. */
 export function appUrl(env: Env, origin: string, slug: string, path = "/") {
-  return env.APP_DOMAIN ? `https://${slug}.${env.APP_DOMAIN}${path}` : new URL(`/${slug}${path === "/" ? "" : path}`, origin).href
+  return env.APP_DOMAIN
+    ? `https://${slug}.${env.APP_DOMAIN}${path}`
+    : new URL(`/${slug}${path === "/" ? "" : path}`, origin).href
 }
 /** Slugs double as subdomains, so names with other meanings stay unavailable. */
 export const reservedSlugs = new Set(
-  "admin api app assets auth blog cdn dev device docs help icon mail mcp media new oauth settings static status support www".split(" ")
+  "admin api app assets auth blog cdn dev device docs help icon mail mcp media new oauth settings static status support www".split(
+    " "
+  )
 )
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 
@@ -79,19 +83,17 @@ export function choice<T extends string>(v: unknown, choices: readonly T[], key:
   if (!choices.includes(v as T)) bad(`Invalid ${key}`)
   return v as T
 }
-export function member(c: Ctx) {
-  if (!c.var.user) fail(401, "sign_in", "Sign in to continue")
-  if (!c.var.app.role) denied()
-}
-export function owner(c: Ctx) {
-  member(c)
-  if (c.var.app.role !== "owner") denied()
-}
 export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role: App["role"]): Actor {
   return { type: "member", id: user.id, name: user.name, avatar_url: user.avatar_url, role }
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("last workspace owner"))
+    return new ApiFailure(409, "last_owner", "The workspace must keep a signed-in owner")
+  if (message.includes("NOT NULL constraint failed: agent_apps.app_id"))
+    return new ApiFailure(400, "invalid_input", "Workspace or agent role exceeds your access")
+  if (message.includes("NOT NULL constraint failed: agent_apps.agent_id"))
+    return new ApiFailure(403, "forbidden", "Agent cannot create workspaces")
   if (message.includes("rate limited")) return new ApiFailure(429, "rate_limited", "Hourly limit reached")
   if (/invalid attachment|UNIQUE constraint failed: attachment_links/.test(message))
     return new ApiFailure(400, "invalid_attachment", "Attachment unavailable")

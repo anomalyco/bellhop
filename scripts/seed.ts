@@ -1,5 +1,5 @@
 import { crc32, deflateSync } from "node:zlib"
-import type { App, AppDetail, AppSettings, Attachment, Config, Issue, IssueList, IssueStatus, NewToken } from "../shared/api"
+import type { App, AppDetail, AppSettings, Attachment, Config, ConnectedAgent, Issue, IssueList, IssueStatus, NewAgentToken } from "../shared/api"
 
 const base = new URL(process.argv[2] || "http://127.0.0.1:5287").origin,
   path = "/api/apps/opencode"
@@ -141,10 +141,13 @@ const app = owned.some((a) => a.slug === "opencode")
 const settings = await request<AppSettings>(owner, path + "/settings")
 const token =
   process.env.BELLHOP_SEED_TOKEN ||
-  (await request<NewToken>(owner, path + "/tokens", "POST", { name: "OpenCode" })).token
+  (await request<NewAgentToken>(owner, "/api/me/agents", "POST", {
+    name: "OpenCode", apps: [{ id: app.id, role: "member" }], all_workspaces: null, create_workspaces: false
+  })).token
 if (
   process.env.BELLHOP_SEED_TOKEN &&
-  !settings.tokens.some((t) => t.name === "OpenCode" && t.preview === token.slice(0, 10) + "…")
+  !(await request<ConnectedAgent[]>(owner, "/api/me/agents")).some((t) => t.kind === "token" && t.client_name === "OpenCode" &&
+    t.preview === token.slice(0, 10) + "…" && t.apps.some(a => a.id === app.id && (a.role === "member" || a.role === "admin")))
 )
   throw new Error("BELLHOP_SEED_TOKEN must be an OpenCode token for the opencode app")
 async function tool(name: string, args: object) {
@@ -155,7 +158,7 @@ async function tool(name: string, args: object) {
       "Content-Type": "application/json",
       Accept: "application/json, text/event-stream"
     },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { ...args, app: app.slug } } })
   })
   const msg = await r.json()
   if (!r.ok || msg.error || msg.result?.isError)

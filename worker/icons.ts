@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { detail } from "./apps"
-import { fail, missing, owner, sql, uid } from "./core"
+import { fail, missing, sql, uid } from "./core"
+import { requireTeam } from "./permissions"
 import type { Bindings, Ctx } from "./core"
 
 const maxSize = 1024 * 1024
@@ -66,11 +67,11 @@ async function replaceIcon(c: Ctx, image: Awaited<ReturnType<typeof readIcon>> |
 
 export const icons = new Hono<Bindings>()
 icons.put("/api/apps/:slug/icon", async (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   return replaceIcon(c, await readIcon(c))
 })
 icons.delete("/api/apps/:slug/icon", (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   return replaceIcon(c, null)
 })
 icons.get("/icon/:slug/:version", async (c) => {

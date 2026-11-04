@@ -8,8 +8,21 @@
 // - account: signed in with Google. Posts as their account on every app (no Turnstile), whether or not they're on
 //   that app's team. Signing in claims everything this browser wrote as a guest: those posts move to the account
 //   and open pages update live (`actor.updated`).
-// - member: signed in with Google, owner or member of the application.
-// - agent: an MCP token scoped to one application (POST /mcp). Its posts carry the AI badge.
+// - team: an account with a Role in the application. Each role includes the ones below it:
+//     viewer  reads everything in the app (system info; later private issues and internal notes) and posts like any
+//             account
+//     member  + triage: status, labels on issues, assignee, relations, claim
+//     admin   + workspace setup: name, description, icon, labels, templates, webhooks, agents and tokens, members up
+//             to admin
+//     owner   + owners and admins, ownership transfer, deleting the app; an app always keeps at least one owner
+// - agent: belongs to an account, not a workspace. Either an OAuth connection (an MCP client signed in through
+//   /oauth) or a token agent the account created (a static secret). Either way it lists the workspaces it may use
+//   (only ones where the account has a role) with an AgentRole per app, or covers all of them ("all workspaces",
+//   which includes ones the account creates or joins later) at one role, with per-app overrides or exclusions:
+//     viewer (read only) < responder (+ comment, activity, votes) < member (+ triage) < admin (+ workspace setup).
+//     An OAuth agent never exceeds the approving user's current role (an owner's agent is at most admin). Grants may
+//     also allow creating workspaces: the approving user owns them and the agent gets admin. Agent posts carry the AI
+//     badge.
 //
 // Routes (all under the Worker; everything else is the single-page app)
 //   GET    /api/config                                   -> Config
@@ -19,27 +32,32 @@
 //   GET    /api/apps                                     -> App[]              member: applications I own or belong to
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
-//   PATCH  /api/apps/:slug         { name?, description? } -> AppDetail        owner
-//   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  owner
-//   DELETE /api/apps/:slug/icon                          -> AppDetail          owner; back to the Bellhop mark
+//   PATCH  /api/apps/:slug         { name?, description? } -> AppDetail        admin
+//   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
+//   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  admin
+//   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
 //   GET    /icon/:slug/:version                          -> the app's icon (public, immutable; SVG is not accepted)
 //   GET    /api/apps/:slug/settings                      -> AppSettings        member
-//   PUT    /api/apps/:slug/webhook { url: string|null }  -> AppSettings        owner
-//   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        owner; new signing secret
-//   POST   /api/apps/:slug/webhook/test                  -> { delivery_id }    owner; sends a `ping` event
-//   POST   /api/apps/:slug/tokens  { name }              -> NewToken           owner; the secret is only returned here
-//   DELETE /api/apps/:slug/tokens/:id                    -> { ok: true }       owner
-//   POST   /api/apps/:slug/members { email }             -> AppSettings        owner
-//   DELETE /api/apps/:slug/members/:id                   -> AppSettings        owner
-//   POST   /api/apps/:slug/labels  LabelInput            -> Label              member
-//   PATCH  /api/apps/:slug/labels/:id LabelInput         -> Label              member
-//   DELETE /api/apps/:slug/labels/:id                    -> { ok: true }       member
-//   POST   /api/apps/:slug/templates TemplateInput       -> Template           member
-//   PATCH  /api/apps/:slug/templates/:id TemplateInput   -> Template           member
-//   DELETE /api/apps/:slug/templates/:id                 -> { ok: true }       member
+//   PUT    /api/apps/:slug/webhook { url: string|null }  -> AppSettings        admin
+//   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        admin; new signing secret
+//   POST   /api/apps/:slug/webhook/test                  -> { delivery_id }    admin; sends a `ping` event
+//   GET    /api/apps/:slug/agents                        -> AppAgent[]         admin; every agent with access here
+//   PATCH  /api/apps/:slug/agents/:id { role }           -> AppAgent           admin; capped at the approver's role
+//   DELETE /api/apps/:slug/agents/:id                    -> { ok: true }       admin; removes this app from the agent
+//                                                                             (an exclusion if it has all workspaces)
+//   POST   /api/apps/:slug/members { email, role? }      -> AppSettings        admin; role defaults to "member"
+//   PATCH  /api/apps/:slug/members/:id { role }          -> AppSettings        admin
+//   DELETE /api/apps/:slug/members/:id                   -> AppSettings        admin
+//          Granting, changing or removing admin/owner needs an owner; the last owner can't be removed or demoted.
+//   POST   /api/apps/:slug/labels  LabelInput            -> Label              admin
+//   PATCH  /api/apps/:slug/labels/:id LabelInput         -> Label              admin
+//   DELETE /api/apps/:slug/labels/:id                    -> { ok: true }       admin
+//   POST   /api/apps/:slug/templates TemplateInput       -> Template           admin
+//   PATCH  /api/apps/:slug/templates/:id TemplateInput   -> Template           admin
+//   DELETE /api/apps/:slug/templates/:id                 -> { ok: true }       admin
 //   GET    /api/apps/:slug/issues?state=open|closed&label=<name>&q=<text>&cursor=  -> IssueList   public
 //   POST   /api/apps/:slug/issues  NewIssue              -> Issue              guest + human, or member
-//   GET    /api/apps/:slug/issues/:number                -> Issue              public (system_info only for members)
+//   GET    /api/apps/:slug/issues/:number                -> Issue              public (system_info only for the team)
 //   PATCH  /api/apps/:slug/issues/:number IssuePatch     -> Issue              member; the guest author may edit title/body
 //   POST   /api/apps/:slug/issues/:number/comments NewComment -> Comment        guest + human, or member
 //   POST   /api/apps/:slug/issues/:number/relations { type, number } -> Issue   member
@@ -73,10 +91,15 @@
 // Pages on blhp.app (the web app): /oauth/consent?request=<id> and /device (enter or confirm a user code).
 //   GET    /api/oauth/requests/:id                      -> OAuthRequest       member (the signed-in user)
 //   POST   /api/oauth/device/lookup { user_code }       -> { request_id }     signed in
-//   POST   /api/oauth/requests/:id/approve { app_ids }  -> { redirect_to: string | null }   null for device requests
+//   POST   /api/oauth/requests/:id/approve OAuthApproval -> { redirect_to: string | null }  null for device requests
 //   POST   /api/oauth/requests/:id/deny                 -> { redirect_to: string | null }
-//   GET    /api/me/agents                               -> ConnectedAgent[]   the user's OAuth grants
-//   DELETE /api/me/agents/:id                           -> { ok: true }       revokes the grant and its tokens
+// Agents on the account (OAuth connections and token agents):
+//   GET    /api/me/agents                               -> ConnectedAgent[]
+//   POST   /api/me/agents AgentAccess & { name }         -> NewAgentToken      a token agent; the secret is only
+//                                                                             returned here
+//   PATCH  /api/me/agents/:id Partial<AgentAccess> & { name? } -> ConnectedAgent   `apps` replaces the overrides
+//   POST   /api/me/agents/:id/rotate                    -> NewAgentToken      token agents: new secret, old one stops
+//   DELETE /api/me/agents/:id                           -> { ok: true }       revokes it and all its tokens
 //
 // Errors: non-2xx responses carry ApiError. 401 = sign in, 403 = not allowed, 404, 409 (slug taken), 413 (too
 // large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited. A guest posting without a
@@ -93,7 +116,7 @@ export type Actor =
   | { type: "guest"; id: string; handle: string; name: string | null }
   // A signed-in account (the type name predates non-team accounts). `role` is its current role in this app, filled
   // in on read; null or absent means signed in but not on the team.
-  | { type: "member"; id: string; name: string; avatar_url: string | null; role?: "owner" | "member" | null }
+  | { type: "member"; id: string; name: string; avatar_url: string | null; role?: Role | null }
   | { type: "agent"; id: string; name: string }
 
 export interface ApiError {
@@ -123,8 +146,8 @@ export interface App {
   created_at: string
   /** The app's own icon (favicon and top-left logo on its pages), or null for the Bellhop mark. Versioned URL. */
   icon_url: string | null
-  /** The viewer's role in this application, null for guests. */
-  role: "owner" | "member" | null
+  /** The viewer's role in this application; null for guests and accounts not on the team. */
+  role: Role | null
 }
 
 export interface NewApp {
@@ -141,7 +164,6 @@ export interface AppDetail extends App {
 
 export interface AppSettings {
   webhook: { url: string | null; secret: string; deliveries: WebhookDelivery[] }
-  tokens: AgentToken[]
   members: Member[]
   /** Absolute URL of the MCP endpoint, for the OpenCode config snippet. */
   mcp_url: string
@@ -152,23 +174,13 @@ export interface Member {
   email: string
   name: string | null
   avatar_url: string | null
-  role: "owner" | "member"
+  role: Role
   /** False until that email has signed in once. */
   joined: boolean
 }
 
-export interface AgentToken {
-  id: string
-  /** Shown as the agent's name on its posts, e.g. "OpenCode". */
-  name: string
-  /** First characters of the secret, e.g. "bh_7f3a…", for recognising it. */
-  preview: string
-  created_at: string
-  last_used_at: string | null
-}
-
-export interface NewToken extends AgentToken {
-  /** The full secret, shown once. */
+/** A token agent just created or rotated: the full secret is shown once. */
+export interface NewAgentToken extends ConnectedAgent {
   token: string
 }
 
@@ -179,6 +191,25 @@ export interface WebhookDelivery {
   response_status: number | null
   attempts: number
   created_at: string
+}
+
+/** A team role in one application; see the Roles notes at the top. */
+export type Role = "owner" | "admin" | "member" | "viewer"
+/** What an agent may do in one application; see the Roles notes at the top. */
+export type AgentRole = "admin" | "member" | "responder" | "viewer"
+
+/** An agent with access to this application (settings, admins only); it belongs to `approved_by`'s account. */
+export interface AppAgent {
+  /** The agent's id. */
+  id: string
+  kind: "oauth" | "token"
+  client_name: string
+  approved_by: { name: string; avatar_url: string | null }
+  role: AgentRole
+  /** The most this agent can be here: the approving user's current role, capped at admin. */
+  max_role: AgentRole
+  created_at: string
+  last_used_at: string | null
 }
 
 export interface Label {
@@ -380,7 +411,11 @@ export interface WebhookPayload {
 
 // MCP tools (POST /mcp). An app token is scoped to its app; an OAuth token to the apps in its grant. Every issue tool
 // takes an optional `app` (slug), required when the token covers more than one app. Names and inputs:
-//   list_apps      {}                            the apps this token can use, with the role the agent acts with
+//   list_apps      {}                            the apps this agent can use now (all_workspaces included), with
+//                                                  its effective AgentRole in each
+//   create_app     { name, slug, description? }  grants allowed to create workspaces; the approving user owns it, the
+//                                                  agent joins it as admin
+//   Tool roles: read tools viewer; comment and set_activity responder; triage tools member; workspace setup admin.
 //   list_issues    { state?: "open"|"closed", label?: string, query?: string, limit?: number }
 //   get_issue      { number }                    full issue: body, timeline, attachments, relations, system info
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
@@ -406,6 +441,10 @@ export interface WebhookPayload {
 //   create_template { name, description?, title?, body?, labels?: string[] (names), ask_system_info?, position? }
 //   update_template { name, new_name?, description?, title?, body?, labels?, ask_system_info?, position? }
 //   delete_template { name }
+//   list_members   {}
+//   invite_member  { email, role? }              admin; admin/owner roles need the approving user to be an owner
+//   set_member_role { email, role }              same caps; the last owner stays
+//   remove_member  { email }
 
 /** The consent page's request: who is asking and which of the user's apps they can grant. */
 export interface OAuthRequest {
@@ -414,15 +453,42 @@ export interface OAuthRequest {
   client_name: string
   /** For authorization_code: the host the user will be sent back to. */
   redirect_host: string | null
-  apps: { id: string; slug: string; name: string; icon_url: string | null; role: "owner" | "member" }[]
+  /** The user's apps, with their role; an agent may be given up to that role (owner -> admin). */
+  apps: { id: string; slug: string; name: string; icon_url: string | null; role: Role }[]
   expires_at: string
 }
 
-/** An agent the user has connected over OAuth. */
+/**
+ * Which workspaces an agent may use. Its role in an app is the override for that app if there is one, else
+ * `all_workspaces` (when set and the account has a role there); either way capped by the account's current role
+ * there (owner/admin -> admin, member -> member, viewer -> responder). A `null` override role excludes that app.
+ */
+export interface AgentAccess {
+  /** Every workspace the account has a role in, now and later, at this role; null for only the listed apps. */
+  all_workspaces: AgentRole | null
+  /** Per-app roles (or exclusions with null). Only apps where the account has a role. */
+  apps: { id: string; role: AgentRole | null }[]
+  /** May create workspaces over MCP; the account owns them and the agent gets admin there. */
+  create_workspaces: boolean
+}
+
+/** The consent page's answer. At least one app, all workspaces, or create_workspaces. */
+export type OAuthApproval = AgentAccess
+
+/** An agent on the user's account: an OAuth connection or a token agent. */
 export interface ConnectedAgent {
   id: string
+  kind: "oauth" | "token"
+  /** The agent's name on its posts (the OAuth client name, or the token agent's name). */
   client_name: string
-  apps: { slug: string; name: string }[]
+  /** Token agents: the first characters of the secret, e.g. "bh_7f3a…". */
+  preview: string | null
+  all_workspaces: AgentRole | null
+  /** Every app it can use now, with its effective role; `override` is true when that app has its own entry. */
+  apps: { id: string; slug: string; name: string; role: AgentRole; override: boolean }[]
+  /** Apps excluded from all_workspaces. */
+  excluded: { id: string; slug: string; name: string }[]
+  create_workspaces: boolean
   created_at: string
   last_used_at: string | null
 }

@@ -1,7 +1,8 @@
 import { Hono } from "hono"
-import type { App, Label, Template } from "../shared/api"
+import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
   appCols,
+  createApp,
   deleteTemplate,
   detail,
   labels,
@@ -11,23 +12,11 @@ import {
   writeLabel,
   writeTemplate
 } from "./apps"
-import {
-  ApiFailure,
-  bad,
-  choice,
-  dbError,
-  denied,
-  fail,
-  ids,
-  input,
-  missing,
-  now,
-  rows,
-  sha256,
-  sql,
-  str
-} from "./core"
+import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, rows, sha256, sql, str } from "./core"
 import type { Bindings, Ctx } from "./core"
+import { agentAccessSQL, can, teamRole } from "./permissions"
+import type { Action } from "./permissions"
+import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
@@ -41,14 +30,50 @@ const number = { type: "integer", minimum: 1 },
   limit = { ...number, maximum: 100 }
 const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
-function tool(name: string, description: string, properties: Record<string, object>, required: string[] = []) {
+const toolRoles = {
+  list_apps: "discover",
+  create_app: "create",
+  get_app: "read",
+  list_issues: "read",
+  search_issues: "read",
+  get_issue: "read",
+  get_attachment: "read",
+  list_labels: "read",
+  list_templates: "read",
+  comment: "respond",
+  set_activity: "respond",
+  update_issue: "triage",
+  claim_issue: "triage",
+  relate_issues: "triage",
+  update_app: "setup",
+  get_webhook: "setup",
+  set_webhook: "setup",
+  rotate_webhook_secret: "setup",
+  test_webhook: "setup",
+  create_label: "setup",
+  update_label: "setup",
+  delete_label: "setup",
+  create_template: "setup",
+  update_template: "setup",
+  delete_template: "setup",
+  list_members: "setup",
+  invite_member: "setup",
+  set_member_role: "setup",
+  remove_member: "setup"
+} as const satisfies Record<string, Action | "discover" | "create">
+function tool(
+  name: keyof typeof toolRoles,
+  description: string,
+  properties: Record<string, object>,
+  required: string[] = []
+) {
   return {
     name,
     description,
     inputSchema: {
       type: "object",
       properties:
-        name === "list_apps"
+        name === "list_apps" || name === "create_app"
           ? properties
           : {
               ...properties,
@@ -72,34 +97,52 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
-  tool("get_app", "Read workspace details, counts, labels, and templates (owner).", {}),
-  tool("update_app", "Update workspace name or description (owner).", { name: text, description: text }),
-  tool("get_webhook", "Read webhook configuration and recent deliveries (owner).", {}),
-  tool("set_webhook", "Set an HTTPS webhook URL, or remove it (owner).", { url: { type: ["string", "null"] } }, [
+  tool("get_app", "Read workspace details, counts, labels, and templates.", {}),
+  tool("update_app", "Update workspace name or description (admin).", { name: text, description: text }),
+  tool("get_webhook", "Read webhook configuration and recent deliveries (admin).", {}),
+  tool("set_webhook", "Set an HTTPS webhook URL, or remove it (admin).", { url: { type: ["string", "null"] } }, [
     "url"
   ]),
-  tool("rotate_webhook_secret", "Rotate the signing secret and return the new secret once (owner).", {}),
-  tool("test_webhook", "Queue a ping to the configured webhook (owner).", {}),
-  tool("create_label", "Create a label (team member).", { name: text, color: text, description: text }, ["name"]),
+  tool("rotate_webhook_secret", "Rotate the signing secret and return the new secret once (admin).", {}),
+  tool("test_webhook", "Queue a ping to the configured webhook (admin).", {}),
+  tool("create_label", "Create a label (admin).", { name: text, color: text, description: text }, ["name"]),
   tool(
     "update_label",
-    "Update a label by its current name (team member).",
+    "Update a label by its current name (admin).",
     { name: text, new_name: text, color: text, description: text },
     ["name"]
   ),
-  tool("delete_label", "Delete a named label and remove it from issues (team member).", { name: text }, ["name"]),
-  tool("list_templates", "List issue templates with their labels (team member).", {}),
-  tool("create_template", "Create an issue template using label names (team member).", templateFields, ["name"]),
+  tool("delete_label", "Delete a named label and remove it from issues (admin).", { name: text }, ["name"]),
+  tool("list_templates", "List issue templates with their labels.", {}),
+  tool("create_template", "Create an issue template using label names (admin).", templateFields, ["name"]),
+  tool("update_template", "Update a template by its current name (admin).", { ...templateFields, new_name: text }, [
+    "name"
+  ]),
+  tool("delete_template", "Delete a template by name (admin).", { name: text }, ["name"]),
+  tool("list_members", "List the team and invitations (admin).", {}),
   tool(
-    "update_template",
-    "Update a template by its current name (team member).",
-    { ...templateFields, new_name: text },
-    ["name"]
+    "invite_member",
+    "Invite an account; defaults to member (admin).",
+    { email: text, role: { enum: ["viewer", "member", "admin", "owner"] } },
+    ["email"]
   ),
-  tool("delete_template", "Delete a template by name (team member).", { name: text }, ["name"])
+  tool(
+    "set_member_role",
+    "Change a team role (admin; managing admins/owners needs owner delegation).",
+    { email: text, role: { enum: ["viewer", "member", "admin", "owner"] } },
+    ["email", "role"]
+  ),
+  tool("remove_member", "Remove a team member or invitation (admin).", { email: text }, ["email"])
 ]
 const tools = [
+  ...workspaceTools,
   tool("list_apps", "List the workspaces this agent can use and its role in each.", {}),
+  tool(
+    "create_app",
+    "Create a workspace owned by your account. Requires separate permission to create workspaces.",
+    { name: text, slug: text, description: text },
+    ["name", "slug"]
+  ),
   tool("list_issues", "List issues by state, label, or search terms.", {
     state: { ...text, enum: states },
     label: text,
@@ -174,9 +217,8 @@ function integer(v: unknown, field: string, max = Number.MAX_SAFE_INTEGER) {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > max) bad(`Invalid ${field}`)
   return v
 }
-type Workspace = App & { role: "owner" | "member" }
-type Caller = { actor: Access["actor"]; apps: Workspace[]; oauth: boolean }
-const availableTools = (caller: Caller) => (caller.oauth ? [...tools, ...workspaceTools] : tools)
+type Workspace = Omit<App, "role"> & { role: AgentRole }
+type Caller = { actor: Access["actor"]; apps: Workspace[]; user: string; create: boolean }
 function named<T extends { name: string }>(items: T[], value: unknown, kind: "label" | "template"): T {
   const name = str(value, "name", kind === "template" ? 120 : 60)
     .trim()
@@ -192,38 +234,52 @@ function templateResult(t: Template, all: Label[]) {
   return { ...t, labels: all.filter((l) => t.label_ids.includes(l.id)).map((l) => l.name) }
 }
 async function call(c: Ctx, caller: Caller, name: string, args: Record<string, unknown>) {
-  const schema = availableTools(caller).find((t) => t.name === name)?.inputSchema ?? bad("Unknown tool")
+  const definition = tools.find((t) => t.name === name) ?? bad("Unknown tool"),
+    schema = definition.inputSchema,
+    action = toolRoles[definition.name]
   if (
     Object.keys(args).some((k) => !Object.hasOwn(schema.properties, k)) ||
     schema.required.some((k) => !Object.hasOwn(args, k))
   )
     bad("Unexpected or missing tool argument")
-  if (name === "list_apps") return textResult(caller.apps)
+  if (action === "discover") return textResult(caller.apps)
+  if (action === "create") {
+    if (!caller.create) denied()
+    return textResult(await createApp(c, { id: caller.user }, args, caller.actor.id))
+  }
   const { app: slug, ...b } = args
   const options = caller.apps.map((app) => app.slug).join(", ") || "(none)"
   if (slug === undefined && caller.apps.length > 1) bad(`Choose an app. Allowed: ${options}`)
   const chosen = slug === undefined ? caller.apps[0] : caller.apps.find((app) => app.slug === slug)
   if (!chosen) fail(403, "forbidden", `Workspace not allowed. Allowed: ${options}`)
+  if (!can(chosen.role, action)) denied()
   const a: Access = {
     app: chosen,
     env: c.env,
     ctx: c.executionCtx,
     origin: oauthOrigin(c),
     actor: caller.actor,
-    privileged: !!chosen.role
+    role: chosen.role
   }
   const { env, app, actor } = a,
     n = () => integer(b.number, "number")
-  if (
-    ["get_app", "update_app", "get_webhook", "set_webhook", "rotate_webhook_secret", "test_webhook"].includes(name) &&
-    chosen.role !== "owner"
-  )
-    denied()
+  const manager = { user: caller.user, agent: caller.actor.id }
   switch (name) {
     case "get_app":
-      return textResult(await detail(c, chosen))
+      return textResult({ ...(await detail(c, { ...chosen, role: null })), role: chosen.role })
     case "update_app":
-      return textResult(await detail(c, await updateApp(env, chosen, b)))
+      return textResult(await detail(c, await updateApp(env, { ...chosen, role: "admin" }, b)))
+    case "list_members":
+      return textResult(await roster(env, app.id))
+    case "invite_member":
+      await invite(env, app.id, manager, b.email, teamRole(b.role === undefined ? "member" : b.role))
+      return textResult({ ok: true })
+    case "set_member_role":
+      await changeMember(env, app.id, manager, { email: b.email }, teamRole(b.role))
+      return textResult({ ok: true })
+    case "remove_member":
+      await changeMember(env, app.id, manager, { email: b.email }, null)
+      return textResult({ ok: true })
     case "get_webhook": {
       const hook = await sql(
         env,
@@ -289,7 +345,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
         })
       )
     case "get_issue":
-      return textResult(await getIssue(env, app.id, n(), actor, true))
+      return textResult(await getIssue(env, app.id, n(), actor, can(a.role, "read")))
     case "list_labels":
       return textResult(await labels(env, app.id))
     case "get_attachment": {
@@ -344,42 +400,27 @@ async function authenticate(c: Ctx): Promise<Caller | null> {
   const token = /^Bearer (bh_(?:a_)?[a-f0-9]{64})$/i.exec(c.req.header("Authorization") ?? "")?.[1]
   if (!token) return null
   const hash = await sha256(token)
-  if (token.startsWith("bh_a_")) {
-    const grant = await sql(
-      c.env,
-      `UPDATE oauth_grants SET last_used_at=unixepoch() WHERE revoked_at IS NULL AND id IN
-      (SELECT grant_id FROM oauth_tokens WHERE hash=? AND kind='access' AND expires_at>unixepoch())
-      RETURNING id,user_id,(SELECT name FROM oauth_clients WHERE id=oauth_grants.client_id) name`,
-      hash
-    ).first<{ id: string; user_id: string; name: string }>()
-    if (!grant) return null
-    const apps = await rows<Workspace>(
-      sql(
-        c.env,
-        `SELECT ${appCols},m.role FROM oauth_grant_apps ga JOIN apps a ON a.id=ga.app_id
-      JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE ga.grant_id=? ORDER BY a.slug`,
-        grant.user_id,
-        grant.id
-      )
-    )
-    return { actor: { type: "agent", id: grant.id, name: grant.name }, apps, oauth: true }
-  }
+  const credential = token.startsWith("bh_a_")
+    ? "kind='oauth' AND id IN (SELECT grant_id FROM oauth_tokens WHERE hash=? AND kind='access' AND expires_at>unixepoch())"
+    : "kind='token' AND token_hash=?"
   const agent = await sql(
     c.env,
-    "UPDATE agent_tokens SET last_used_at=? WHERE token_hash=? RETURNING id,name,app_id",
-    now(),
+    `UPDATE agents SET last_used_at=unixepoch() WHERE revoked_at IS NULL AND ${credential} RETURNING id,user_id,name,create_workspaces`,
     hash
-  ).first<{ id: string; name: string; app_id: string }>()
+  ).first<{ id: string; user_id: string; name: string; create_workspaces: number }>()
   if (!agent) return null
-  const app = await sql(
-    c.env,
-    `SELECT ${appCols},'member' role FROM apps a WHERE id=?`,
-    agent.app_id
-  ).first<Workspace>()
-  if (!app) return null
+  const apps = await rows<Workspace>(
+    sql(
+      c.env,
+      `SELECT ${appCols},acl.role FROM (${agentAccessSQL}) acl JOIN apps a ON a.id=acl.app_id
+    WHERE acl.agent_id=? AND acl.role IS NOT NULL ORDER BY a.slug`,
+      agent.id
+    )
+  )
   return {
-    apps: [app],
-    oauth: false,
+    apps,
+    user: agent.user_id,
+    create: !!agent.create_workspaces,
     actor: { type: "agent", id: agent.id, name: agent.name }
   }
 }
@@ -434,7 +475,7 @@ mcp.post("/mcp", async (c) => {
     case "ping":
       return result({})
     case "tools/list":
-      return result({ tools: availableTools(a) })
+      return result({ tools })
     case "tools/call": {
       if (typeof p.name !== "string") return error(-32602, "Tool name required")
       try {

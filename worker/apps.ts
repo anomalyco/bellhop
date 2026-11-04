@@ -1,37 +1,10 @@
 import { Hono } from "hono"
-import type {
-  Actor,
-  AgentToken,
-  App,
-  AppDetail,
-  AppSettings,
-  Label,
-  Member,
-  Template,
-  WebhookDelivery
-} from "../shared/api"
-import {
-  bad,
-  body,
-  denied,
-  email,
-  fail,
-  ids,
-  member,
-  memberActor,
-  missing,
-  now,
-  owner,
-  reservedSlugs,
-  rows,
-  secret,
-  sha256,
-  sql,
-  str,
-  uid
-} from "./core"
+import type { Actor, App, AppDetail, AppSettings, Label, Member, Template, WebhookDelivery } from "../shared/api"
+import { bad, body, fail, ids, memberActor, missing, now, reservedSlugs, rows, secret, sql, str, uid } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { guestActor } from "./auth"
+import { can, requireTeam, teamRole } from "./permissions"
+import { changeMember, invite, roster } from "./members"
 import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 
 export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
@@ -85,39 +58,41 @@ export async function detail(c: Ctx, app = c.var.app): Promise<AppDetail> {
   return { ...app, labels: ls, templates: ts, counts: totals }
 }
 export function webhookDeliveries(env: Env, id: string) {
-  return rows<WebhookDelivery>(sql(env,
-    "SELECT id,event,status,response_status,attempts,created_at FROM webhook_deliveries WHERE app_id=? ORDER BY created_at DESC,rowid DESC LIMIT 50", id))
+  return rows<WebhookDelivery>(
+    sql(
+      env,
+      "SELECT id,event,status,response_status,attempts,created_at FROM webhook_deliveries WHERE app_id=? ORDER BY created_at DESC,rowid DESC LIMIT 50",
+      id
+    )
+  )
 }
 export async function settings(c: Ctx): Promise<AppSettings> {
   const id = c.var.app.id
-  const [hook, deliveries, tokens, members] = await Promise.all([
+  // Members need the roster to assign issues, but not the signing key or token configuration.
+  // Re-read after a member mutation: the caller may just have removed or demoted themselves.
+  const current = await sql(c.env, "SELECT role FROM members WHERE app_id=? AND user_id=?", id, c.var.user!.id).first<
+    Member["role"]
+  >("role")
+  const mcp_url = new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
+  if (!can(current, "setup"))
+    return {
+      webhook: { url: null, secret: "", deliveries: [] },
+      members: can(current, "triage") ? await roster(c.env, id) : [],
+      mcp_url
+    }
+  const [hook, deliveries, members] = await Promise.all([
     sql(c.env, "SELECT url,secret FROM webhook_settings WHERE app_id=?", id).first<{
       url: string | null
       secret: string
     }>(),
     webhookDeliveries(c.env, id),
-    rows<AgentToken>(
-      sql(
-        c.env,
-        "SELECT id,name,preview,created_at,last_used_at FROM agent_tokens WHERE app_id=? ORDER BY created_at DESC",
-        id
-      )
-    ),
-    rows<Omit<Member, "joined"> & { joined: number }>(
-      sql(
-        c.env,
-        `SELECT coalesce(m.user_id,m.id) id,m.email,u.name,u.avatar_url,m.role,m.user_id IS NOT NULL joined FROM members m
-      LEFT JOIN users u ON u.id=m.user_id WHERE m.app_id=? ORDER BY m.role DESC,m.email`,
-        id
-      )
-    )
+    roster(c.env, id)
   ])
   if (!hook) missing()
   return {
     webhook: { ...hook, deliveries },
-    tokens,
-    members: members.map((m) => ({ ...m, joined: !!m.joined })),
-    mcp_url: new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
+    members,
+    mcp_url
   }
 }
 export async function assignee(env: Env, appId: string, id: unknown): Promise<Actor | null> {
@@ -162,8 +137,10 @@ apps.get("/api/apps", async (c) => {
 apps.post("/api/apps", async (c) => {
   const u = c.var.user
   if (!u) fail(401, "sign_in", "Sign in to create an app")
-  const b = await body(c),
-    slug = str(b.slug, "slug", 40)
+  return c.json(await createApp(c, u, await body(c)), 201)
+})
+export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unknown>, grant?: string) {
+  const slug = str(b.slug, "slug", 40)
   if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(slug) || slug.length < 2 || reservedSlugs.has(slug))
     bad("Invalid or reserved slug")
   const app: App = {
@@ -187,12 +164,10 @@ apps.post("/api/apps", async (c) => {
     ),
     sql(
       c.env,
-      "INSERT INTO members(id,app_id,user_id,email,role) VALUES(?,?,?,?,?)",
+      "INSERT INTO members(id,app_id,user_id,email,role) SELECT ?,?,id,email,'owner' FROM users WHERE id=?",
       uid(),
       app.id,
-      u.id,
-      u.email,
-      "owner"
+      u.id
     ),
     sql(c.env, "INSERT INTO webhook_settings(app_id,secret) VALUES(?,?)", app.id, secret())
   ]
@@ -206,10 +181,20 @@ apps.post("/api/apps", async (c) => {
     q.push(sql(c.env, "INSERT INTO templates VALUES(?,?,?,?,?,?,?,?)", id, app.id, n, d, "", b, Number(i === 0), i))
     q.push(sql(c.env, "INSERT INTO template_labels VALUES(?,?)", id, labelIds[i]))
   })
+  if (grant)
+    q.push(
+      sql(
+        c.env,
+        `INSERT INTO agent_apps(agent_id,app_id,role,delegated_admin) VALUES
+    ((SELECT id FROM agents WHERE id=? AND user_id=? AND revoked_at IS NULL AND create_workspaces=1),?,'admin',1)`,
+        grant,
+        u.id,
+        app.id
+      )
+    )
   await c.env.DB.batch(q)
-  c.set("app", app)
-  return c.json(await detail(c), 201)
-})
+  return detail(c, grant ? { ...app, role: "admin" } : app)
+}
 apps.get("/api/apps/:slug", async (c) => c.json(await detail(c)))
 export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
   const name = str(b.name === undefined ? app.name : b.name, "name", 120).trim(),
@@ -218,84 +203,66 @@ export async function updateApp(env: Env, app: App, b: Record<string, unknown>):
   return { ...app, name, description }
 }
 apps.patch("/api/apps/:slug", async (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   c.set("app", await updateApp(c.env, c.var.app, await body(c)))
   return c.json(await detail(c))
 })
 apps.get("/api/apps/:slug/settings", async (c) => {
-  member(c)
+  requireTeam(c, "triage")
   return c.json(await settings(c))
 })
 apps.put("/api/apps/:slug/webhook", async (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   await configureWebhook(c.env, c.var.app.id, (await body(c)).url)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   await rotateWebhook(c.env, c.var.app.id)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/test", async (c) => {
-  owner(c)
+  requireTeam(c, "setup")
   return c.json(await testWebhook(c.env, c.env.PUBLIC_ORIGIN || c.req.url, c.var.app, c.var.actor))
 })
-apps.post("/api/apps/:slug/tokens", async (c) => {
-  owner(c)
-  const name = str((await body(c)).name, "name", 100).trim(),
-    token = `bh_${secret()}`,
-    id = uid(),
-    preview = token.slice(0, 10) + "…",
-    created_at = now()
-  await sql(
-    c.env,
-    "INSERT INTO agent_tokens(id,app_id,name,token_hash,preview,created_at) VALUES(?,?,?,?,?,?)",
-    id,
-    c.var.app.id,
-    name,
-    await sha256(token),
-    preview,
-    created_at
-  ).run()
-  return c.json({ id, name, preview, created_at, last_used_at: null, token }, 201)
-})
-apps.delete("/api/apps/:slug/tokens/:id", async (c) => {
-  owner(c)
-  if (
-    !(await sql(c.env, "DELETE FROM agent_tokens WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")).run()).meta
-      .changes
-  )
-    missing()
-  return c.json({ ok: true })
-})
 apps.post("/api/apps/:slug/members", async (c) => {
-  owner(c)
-  const address = email((await body(c)).email)
-  await sql(
+  requireTeam(c, "setup")
+  const b = await body(c)
+  await invite(
     c.env,
-    "INSERT INTO members(id,app_id,email,user_id,role) VALUES(?,?,?,(SELECT id FROM users WHERE email=?),'member')",
-    uid(),
     c.var.app.id,
-    address,
-    address
-  ).run()
+    { user: c.var.user!.id },
+    b.email,
+    teamRole(b.role === undefined ? "member" : b.role)
+  )
+  return c.json(await settings(c))
+})
+apps.patch("/api/apps/:slug/members/:id", async (c) => {
+  requireTeam(c, "setup")
+  await changeMember(
+    c.env,
+    c.var.app.id,
+    { user: c.var.user!.id },
+    { id: c.req.param("id") },
+    teamRole((await body(c)).role)
+  )
+  return c.json(await settings(c))
+})
+apps.post("/api/apps/:slug/transfer", async (c) => {
+  requireTeam(c, "ownership")
+  await changeMember(
+    c.env,
+    c.var.app.id,
+    { user: c.var.user!.id },
+    { id: str((await body(c)).member_id, "member_id", 64) },
+    "owner",
+    true
+  )
   return c.json(await settings(c))
 })
 apps.delete("/api/apps/:slug/members/:id", async (c) => {
-  owner(c)
-  const id = c.req.param("id")
-  if (id === c.var.user?.id) denied()
-  if (
-    !(
-      await sql(
-        c.env,
-        "DELETE FROM members WHERE app_id=? AND coalesce(user_id,id)=? AND role!='owner'",
-        c.var.app.id,
-        id
-      ).run()
-    ).meta.changes
-  )
-    missing()
+  requireTeam(c, "setup")
+  await changeMember(c.env, c.var.app.id, { user: c.var.user!.id }, { id: c.req.param("id") }, null)
   return c.json(await settings(c))
 })
 export async function writeLabel(env: Env, appId: string, b: Record<string, unknown>, id?: string) {
@@ -333,7 +300,7 @@ export async function writeLabel(env: Env, appId: string, b: Record<string, unkn
   return label
 }
 async function saveLabel(c: Ctx, id?: string) {
-  member(c)
+  requireTeam(c, "setup")
   return c.json(await writeLabel(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/labels", (c) => saveLabel(c))
@@ -391,7 +358,7 @@ export async function writeTemplate(env: Env, appId: string, b: Record<string, u
   return t
 }
 async function saveTemplate(c: Ctx, id?: string) {
-  member(c)
+  requireTeam(c, "setup")
   return c.json(await writeTemplate(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/templates", (c) => saveTemplate(c))
@@ -401,6 +368,6 @@ export async function deleteTemplate(env: Env, appId: string, id: string) {
   return { ok: true }
 }
 apps.delete("/api/apps/:slug/templates/:id", async (c) => {
-  member(c)
+  requireTeam(c, "setup")
   return c.json(await deleteTemplate(c.env, c.var.app.id, c.req.param("id")))
 })

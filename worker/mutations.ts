@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type {
   Actor,
+  AgentRole,
   App,
   CloseReason,
   Comment,
@@ -13,7 +14,8 @@ import type {
 } from "../shared/api"
 import { assignee, labelCols, selectedLabels } from "./apps"
 import { allowWrite, postBody } from "./auth"
-import { bad, body, choice, denied, ids, input, member, missing, now, rows, sql, str, uid } from "./core"
+import { bad, body, choice, denied, ids, input, missing, now, rows, sql, str, uid } from "./core"
+import { can, requireTeam } from "./permissions"
 import type { Bindings, Ctx } from "./core"
 import { emit, setActivity } from "./events"
 import type { Change, Work } from "./events"
@@ -28,7 +30,7 @@ export interface Access {
   actor: Actor
   roles?: ReturnType<typeof appRoles>
   guestHash?: string
-  privileged: boolean
+  role: App["role"] | AgentRole
   origin: string
 }
 function access(c: Ctx): Access {
@@ -38,12 +40,12 @@ function access(c: Ctx): Access {
     app: c.var.app,
     actor: c.var.actor,
     guestHash: c.var.guestHash,
-    privileged: !!c.var.app.role,
+    role: c.var.app.role,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
 const roles = (a: Access) => a.roles ??= appRoles(a.env, a.app.id)
-const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, a.privileged, roles(a))
+const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, can(a.role, "read"), roles(a))
 const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a))
 // A rename can commit between loading the request actor and writing its JSON snapshot. Usually this
 // matches no rows; a stale guest would violate NOT NULL and roll back the entire post or event.
@@ -193,7 +195,8 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
   const issue = await full(a, n),
     keys = Object.keys(b),
     supported = ["title", "body", "status", "close_reason", "label_ids", "assignee_id"]
-  if (!a.privileged && (!issue.viewer_is_author || keys.some((k) => k !== "title" && k !== "body") || claim)) denied()
+  if (!can(a.role, "triage") && (!issue.viewer_is_author || keys.some((k) => k !== "title" && k !== "body") || claim))
+    denied()
   if (keys.some((k) => !supported.includes(k))) bad("Unknown issue field")
   const at = now(),
     q: D1PreparedStatement[] = [],
@@ -274,7 +277,7 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
   return next
 }
 export async function relate(a: Access, n: number, other: number, type: Relation["type"], remove?: string) {
-  if (!a.privileged) denied()
+  if (!can(a.role, "triage")) denied()
   if (n === other) bad("Cannot relate an issue to itself")
   const { env, app } = a,
     [s, t] = await Promise.all([summary(a, n), summary(a, other)])
@@ -358,7 +361,7 @@ issues.post(`${path}/comments`, async (c) => {
   return c.json(await addComment(access(c), issueNumber(c.req.param("number")), b), 201)
 })
 issues.post(`${path}/relations`, async (c) => {
-  member(c)
+  requireTeam(c, "triage")
   const b = await body(c)
   return c.json(
     await relate(
@@ -370,7 +373,7 @@ issues.post(`${path}/relations`, async (c) => {
   )
 })
 issues.delete(`${path}/relations/:id`, async (c) => {
-  member(c)
+  requireTeam(c, "triage")
   const a = access(c),
     n = issueNumber(c.req.param("number")),
     id = c.req.param("id"),
@@ -387,7 +390,7 @@ issues.delete(`${path}/relations/:id`, async (c) => {
   return c.json(n === r.source ? source : await full(a, n))
 })
 issues.delete("/api/apps/:slug/labels/:id", async (c) => {
-  member(c)
+  requireTeam(c, "setup")
   await removeLabel(access(c), c.req.param("id"))
   return c.json({ ok: true })
 })

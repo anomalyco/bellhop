@@ -1,5 +1,6 @@
 import { Hono } from "hono"
-import type { ConnectedAgent, OAuthRequest } from "../shared/api"
+import type { OAuthRequest } from "../shared/api"
+import { attachScopes, createFlag, defaultRole, selection } from "./agents"
 import { bad, body, denied, fail, missing, rows, secret, sha256, sql, uid } from "./core"
 import type { Bindings, Ctx } from "./core"
 
@@ -331,17 +332,12 @@ oauth.get("/api/oauth/requests/:id", async (c) => {
 oauth.post("/api/oauth/requests/:id/approve", async (c) => {
   const r = await pending(c),
     user = c.var.user!.id,
-    { app_ids } = await body(c)
-  if (
-    !Array.isArray(app_ids) ||
-    !app_ids.length ||
-    app_ids.length > 100 ||
-    app_ids.some((x) => typeof x !== "string" || x.length > 64)
-  )
-    bad("Choose 1–100 workspaces")
-  const ids = [...new Set(app_ids)],
-    selected = JSON.stringify(ids),
-    grant = uid(),
+    b = await body(c),
+    selected = selection(b.apps === undefined ? [] : b.apps),
+    create = createFlag(b.create_workspaces),
+    all = defaultRole(b.all_workspaces)
+  if (!selected.some((s) => s.role) && !create && !all) bad("Choose a workspace or allow creating workspaces")
+  const grant = uid(),
     code = secret(),
     t = seconds()
   // Every downstream insert is gated by this attempt's fresh grant ID. Concurrent consent or
@@ -350,27 +346,22 @@ oauth.post("/api/oauth/requests/:id/approve", async (c) => {
     sql(
       c.env,
       `UPDATE oauth_requests SET status='approved',grant_id=? WHERE id=? AND status='pending'
-    AND expires_at>unixepoch() AND (SELECT count(*) FROM members WHERE user_id=? AND app_id IN (SELECT value FROM json_each(?)))=?`,
+    AND expires_at>unixepoch()`,
       grant,
-      r.id,
-      user,
-      selected,
-      ids.length
+      r.id
     ),
     sql(
       c.env,
-      `INSERT INTO oauth_grants(id,user_id,client_id,created_at) SELECT grant_id,?,client_id,? FROM oauth_requests WHERE id=? AND grant_id=?`,
+      `INSERT INTO agents(id,user_id,kind,client_id,name,created_at,create_workspaces,all_workspaces) SELECT r.grant_id,?,'oauth',r.client_id,cl.name,?,?,?
+       FROM oauth_requests r JOIN oauth_clients cl ON cl.id=r.client_id WHERE r.id=? AND r.grant_id=?`,
       user,
       t,
+      Number(create),
+      all,
       r.id,
       grant
     ),
-    sql(
-      c.env,
-      `INSERT INTO oauth_grant_apps SELECT g.id,j.value FROM oauth_grants g,json_each(?) j WHERE g.id=?`,
-      selected,
-      grant
-    )
+    attachScopes(c.env, grant, user, selected)
   ]
   if (r.kind === "authorization_code")
     statements.push(
@@ -413,7 +404,7 @@ async function exchange(c: Ctx, cl: Client, b: Record<string, unknown>, type: st
     refreshHash = await sha256(refresh),
     t = seconds(),
     ms = Date.now()
-  const active = "SELECT id FROM oauth_grants WHERE client_id=? AND revoked_at IS NULL"
+  const active = "SELECT id FROM agents WHERE kind='oauth' AND client_id=? AND revoked_at IS NULL"
   let source: string,
     hash: string,
     column = "hash"
@@ -446,7 +437,7 @@ async function exchange(c: Ctx, cl: Client, b: Record<string, unknown>, type: st
     q.push(
       sql(
         c.env,
-        `UPDATE oauth_grants SET revoked_at=? WHERE revoked_at IS NULL AND client_id=? AND id IN
+        `UPDATE agents SET revoked_at=? WHERE revoked_at IS NULL AND client_id=? AND id IN
       (SELECT grant_id FROM oauth_tokens WHERE hash=? AND kind='refresh' AND spent_by IS NOT NULL)`,
         t,
         cl.id,
@@ -540,47 +531,10 @@ oauth.post("/oauth/revoke", async (c) => {
   if (!cl) invalid("Unknown client", "invalid_client")
   await sql(
     c.env,
-    `UPDATE oauth_grants SET revoked_at=unixepoch() WHERE client_id=? AND revoked_at IS NULL AND id IN
+    `UPDATE agents SET revoked_at=unixepoch() WHERE client_id=? AND revoked_at IS NULL AND id IN
     (SELECT grant_id FROM oauth_tokens WHERE hash=?)`,
     cl.id,
     await sha256(field(b.token))
   ).run()
   return c.body(null, 200)
-})
-oauth.get("/api/me/agents", async (c) => {
-  const user = signedIn(c),
-    items = await rows<{
-      id: string
-      client_name: string
-      created_at: number
-      last_used_at: number | null
-      apps: string
-    }>(
-      sql(
-        c.env,
-        `SELECT g.id,cl.name client_name,g.created_at,g.last_used_at,(SELECT json_group_array(json_object('slug',a.slug,'name',a.name))
-     FROM oauth_grant_apps ga JOIN apps a ON a.id=ga.app_id JOIN members m ON m.app_id=a.id AND m.user_id=g.user_id WHERE ga.grant_id=g.id) apps
-     FROM oauth_grants g JOIN oauth_clients cl ON cl.id=g.client_id WHERE g.user_id=? AND g.revoked_at IS NULL ORDER BY g.created_at DESC`,
-        user.id
-      )
-    )
-  return c.json(
-    items.map((r) => ({
-      ...r,
-      created_at: iso(r.created_at),
-      last_used_at: r.last_used_at === null ? null : iso(r.last_used_at),
-      apps: JSON.parse(r.apps)
-    })) satisfies ConnectedAgent[]
-  )
-})
-oauth.delete("/api/me/agents/:id", async (c) => {
-  const user = signedIn(c),
-    r = await sql(
-      c.env,
-      "UPDATE oauth_grants SET revoked_at=unixepoch() WHERE id=? AND user_id=? AND revoked_at IS NULL",
-      c.req.param("id"),
-      user.id
-    ).run()
-  if (!r.meta.changes) missing()
-  return c.json({ ok: true })
 })
