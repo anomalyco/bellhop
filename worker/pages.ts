@@ -1,7 +1,8 @@
 import type { Ctx } from "./core"
 import { appUrl, rows, sql } from "./core"
 import { visibleIssues, workspaceActivitySQL } from "./issues"
-import { preview, statuses } from "./previews"
+import { preview, snippet, statuses } from "./previews"
+import type { Actor, IssueStatus } from "../shared/api"
 
 // Dev serves workspaces under /<slug>. The apex also understands these old page links;
 // the production sitemap always points to the canonical workspace subdomain instead.
@@ -48,7 +49,8 @@ export async function page(c: Ctx) {
   const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
   const segment = /^\/issues\/([^/]+)\/?$/.exec(path)?.[1]
   // SQLite's numeric affinity would otherwise resolve e.g. /issues/1e1 as issue 10.
-  const number = segment === undefined ? null : /^[1-9]\d*$/.test(segment) && Number.isSafeInteger(Number(segment)) ? segment : "0"
+  const number =
+    segment === undefined ? null : /^[1-9]\d*$/.test(segment) && Number.isSafeInteger(Number(segment)) ? segment : "0"
   const [p, asset] = await Promise.all([
     preview(c.env, slug, number, true),
     c.env.ASSETS.fetch(new Request(new URL("/", url), { headers: { Accept: "text/html" } }))
@@ -91,6 +93,10 @@ export async function page(c: Ctx) {
     `<link rel="icon" href="${xml(icon ?? "/favicon.svg")}"><link rel="apple-touch-icon" href="${xml(icon ?? "/apple-touch-icon.png")}">`
   ]
   if (noindex) tags.push(meta("robots", "noindex"))
+  if (slug && p.code === 200 && (number || /^\/(?:index\.html)?$/.test(path))) {
+    const href = appPath(number ? `/issues/${number}/feed.atom` : "/feed.atom")
+    tags.push(`<link rel="alternate" type="application/atom+xml" href="${xml(href)}">`)
+  }
   if (article)
     tags.push(
       meta("article:published_time", article.published),
@@ -129,6 +135,96 @@ export async function page(c: Ctx) {
       }
     })
     .transform(new Response(asset.body, { status: p.code, headers }))
+}
+
+type AtomEntry = { id: string; title: string; href: string; author: string; updated: string; summary: string }
+const atomText = (value: string) =>
+  xml(value.replace(/[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffd\u{10000}-\u{10ffff}]/gu, ""))
+function authorName(raw: string) {
+  const a = JSON.parse(raw) as Actor
+  return a.name && !/\S+@\S+/.test(a.name)
+    ? a.name
+    : a.type === "guest"
+      ? a.handle
+      : a.type === "agent"
+        ? "Agent"
+        : "Reporter"
+}
+export async function atom(c: Ctx, number?: string) {
+  const slug = workspace(c),
+    o = origin(c)
+  if (!slug || slug === "feed.atom" || (number !== undefined && !/^[1-9]\d*$/.test(number))) return notFound(c)
+  const link = (path: string) => appUrl(c.env, o, slug, path)
+  const where = `i.app_id=a.id AND i.private=0 AND i.hidden IS NULL`
+  type Row = {
+    id: string
+    number: number
+    title: string
+    actor: string
+    body: string
+    updated: string
+    kind: "issue" | "comment" | "status"
+  }
+  type Scope = { name: string; public: number; created_at: string; issue_id: string | null; issue_title: string | null }
+  const target = `SELECT i.id FROM issues i JOIN apps a ON ${where} WHERE a.slug=?1 AND i.number=?2`
+  // Same snapshot for visibility, feed identity and entries; no cookies, comment bodies
+  // from internal notes, or team-only timeline events enter this projection.
+  const [context, page] = await c.env.DB.batch([
+    number
+      ? sql(
+          c.env,
+          `SELECT a.name,a.public,i.created_at,i.id issue_id,i.title issue_title FROM apps a JOIN issues i ON ${where} WHERE a.slug=? AND i.number=?`,
+          slug,
+          number
+        )
+      : sql(c.env, "SELECT name,public,created_at,NULL issue_id,NULL issue_title FROM apps WHERE slug=?", slug),
+    number
+      ? sql(
+          c.env,
+          `WITH target AS (${target}) SELECT c.id,c.author actor,substr(c.body,1,4096) body,c.updated_at updated,'comment' kind FROM comments c WHERE c.issue_id=(SELECT id FROM target) AND c.hidden IS NULL AND c.internal=0
+        UNION ALL SELECT e.id,e.actor,e.data,e.created_at,'status' FROM issue_events e WHERE e.issue_id=(SELECT id FROM target) AND e.type='status_changed' ORDER BY updated DESC,id DESC LIMIT 50`,
+          slug,
+          number
+        )
+      : sql(
+          c.env,
+          `SELECT i.id,i.number,i.title,i.author actor,substr(i.body,1,4096) body,i.updated_at updated,'issue' kind FROM apps a JOIN issues i ON ${where} WHERE a.slug=? ORDER BY i.updated_at DESC,i.id DESC LIMIT 50`,
+          slug
+        )
+  ])
+  const s = context!.results[0] as Scope | undefined
+  if (!s) return c.text("Feed not found", 404, { "X-Robots-Tag": "noindex", "Cache-Control": "no-store" })
+  const href = link(number ? `/issues/${number}` : "/"),
+    self = link(number ? `/issues/${number}/feed.atom` : "/feed.atom"),
+    title = number ? `${s.issue_title} · #${number} · ${s.name}` : `${s.name} issues`
+  const entries = (page!.results as Row[]).map((r): AtomEntry => {
+    const author = authorName(r.actor),
+      base = { id: `tag:blhp.app,2026:${r.kind}/${r.id}`, author, updated: r.updated }
+    if (r.kind === "status") {
+      const d = JSON.parse(r.body) as { from: IssueStatus; to: IssueStatus; close_reason: string | null }
+      const state = statuses[d.to].name
+      return {
+        ...base,
+        href,
+        title: `Status: ${state}`,
+        summary: `${statuses[d.from].name} → ${state}${d.close_reason ? ` (${d.close_reason.replaceAll("_", " ")})` : ""}`
+      }
+    }
+    return {
+      ...base,
+      href: number ? href : link(`/issues/${r.number}`),
+      title: number ? `Reply by ${author}` : r.title,
+      summary: snippet(r.body, 320)
+    }
+  })
+  const tag = (name: string, value: string) => `<${name}>${atomText(value)}</${name}>`,
+    alt = (h: string) => `<link rel="alternate" href="${xml(h)}"/>`
+  const doc = `<?xml version="1.0" encoding="UTF-8"?><feed xmlns="http://www.w3.org/2005/Atom">${tag("id", s.issue_id ? `tag:blhp.app,2026:thread/${s.issue_id}` : self)}${tag("title", title)}${tag("updated", entries[0]?.updated ?? s.created_at)}<author><name>Bellhop</name></author>${alt(href)}<link rel="self" type="application/atom+xml" href="${xml(self)}"/>${entries.map((e) => `<entry>${tag("id", e.id)}${tag("title", e.title)}${tag("updated", e.updated)}${alt(e.href)}<author>${tag("name", e.author)}</author>${tag("summary", e.summary)}</entry>`).join("")}</feed>`
+  return c.body(doc, 200, {
+    "Content-Type": "application/atom+xml; charset=utf-8",
+    "Cache-Control": s.public ? "public, max-age=0, s-maxage=60" : "private, no-store",
+    ...(!s.public && { "X-Robots-Tag": "noindex" })
+  })
 }
 
 export async function ogImage(c: Ctx) {

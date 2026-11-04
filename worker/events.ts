@@ -6,16 +6,18 @@ import type {
   IssueSummary,
   LiveEvent,
   TimelineItem,
-  WebhookEventType
+  Label,
+  CloseReason,
+  IssueStatus
 } from "../shared/api"
-import { appUrl, missing, now, rows, sql, str } from "./core"
+import { missing, now, rows, sql, str } from "./core"
 import { readPresence, visibleIssues } from "./issues"
-import { enqueueWebhook } from "./webhooks"
+import { enqueueWebhooks, type Hook } from "./webhooks"
 import { projectTiers } from "./tier-actors"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
 export interface Change {
-  type: Exclude<WebhookEventType, "ping">
+  type: "issue.opened" | "issue.updated" | "comment.created"
   app: Pick<App, "id" | "slug" | "name" | "public">
   origin: string
   issue: IssueSummary
@@ -23,6 +25,8 @@ export interface Change {
   items?: TimelineItem[]
   comments?: Comment[]
   deletedComment?: string
+  removed?: Comment
+  ruleItems?: TimelineItem[]
   internalOnly?: boolean
   liveOnly?: boolean
   mentioned?: Actor[]
@@ -92,39 +96,62 @@ export function emit(env: Env, ctx: Work, change: Change) {
     ctx.waitUntil(feedRoom(env).refreshConversationFeed(issue.id, "feed.issue"))
   if (change.liveOnly) return
   const origin = env.PUBLIC_ORIGIN || change.origin
-  const payload = {
-    app,
-    type,
-    actor: change.actor,
-    issue: { ...issue, url: appUrl(env, origin, app.slug, `/issues/${issue.number}`) },
-    ...(type === "issue.updated" && { changes: change.changes ?? [] })
-  }
+  const payload = { type, ...(type === "issue.updated" && { changes: change.changes ?? [] }) }
   // Webhook recipients are team integrations, not one of the connected browser viewers.
   const comments = change.comments?.length
     ? change.comments
     : items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))
-  ctx.waitUntil(
-    (async () => {
-      for (const mentioned of change.mentioned ?? []) {
-        if (mentioned.id !== change.actor.id)
-          await enqueueWebhook(env, origin, {
-            ...payload,
-            type: "mention.created",
-            mentioned,
-            ...(comments[0] ? { comment: { ...comments[0], viewer_is_author: false, viewer_helpful: false } } : {})
-          })
+  const hooks: Hook[] = []
+  for (const mentioned of change.mentioned ?? []) {
+    if (mentioned.id !== change.actor.id)
+      hooks.push({
+        ...payload,
+        type: "mention.created",
+        mentioned,
+        ...(comments[0] ? { comment: { ...comments[0], viewer_is_author: false, viewer_helpful: false } } : {})
+      })
+  }
+  const edit = change.changes?.includes("comment.edited")
+  if (!(change.actor.type === "agent" && (type === "comment.created" || edit))) {
+    if (!comments.length) hooks.push(payload)
+    else
+      for (const c of comments) {
+        const comment = { ...c, viewer_is_author: false, viewer_helpful: false }
+        hooks.push({ ...payload, comment })
+        if (edit) hooks.push({ type: "comment.edited", comment })
       }
-      if (change.actor.type === "agent" && (type === "comment.created" || change.changes?.includes("comment.edited")))
-        return
-      if (!comments.length) await enqueueWebhook(env, origin, payload)
-      else
-        for (const comment of comments)
-          await enqueueWebhook(env, origin, {
-            ...payload,
-            comment: { ...comment, viewer_is_author: false, viewer_helpful: false }
-          })
-    })()
-  )
+  }
+  if (change.removed)
+    hooks.push({
+      type: "comment.deleted",
+      comment: {
+        ...change.removed,
+        viewer_is_author: false,
+        viewer_helpful: false,
+        body: "",
+        mentions: [],
+        attachments: []
+      }
+    })
+  for (const item of [...items, ...(change.ruleItems ?? [])]) {
+    if (item.kind !== "event") continue
+    const { type: t, data } = item.event
+    if (t === "status_changed" && data.from !== data.to) {
+      if (data.to === "closed")
+        hooks.push({
+          type: "issue.closed",
+          transition: { status: "closed", close_reason: data.close_reason as CloseReason }
+        })
+      else if (data.from === "closed")
+        hooks.push({ type: "issue.reopened", transition: { status: data.to as IssueStatus, close_reason: null } })
+    } else if (t === "labeled" || t === "unlabeled") hooks.push({ type: `issue.${t}`, label: data.label as Label })
+    else if (t === "assigned" || t === "claimed")
+      hooks.push({
+        type: "issue.assigned",
+        transition: { assignee: t === "claimed" ? item.event.actor : (data.assignee as Actor | null) }
+      })
+  }
+  ctx.waitUntil(enqueueWebhooks(env, origin, app, change.actor, issue, hooks))
 }
 export async function setActivity(
   env: Env,

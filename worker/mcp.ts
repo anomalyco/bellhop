@@ -28,7 +28,7 @@ import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
 import { fromAppRow, type AppRow } from "./read-scope"
-import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
+import { configureWebhook, redeliver, rotateWebhook, testWebhook, webhookEvents } from "./webhooks"
 
 const number = { type: "integer", minimum: 1 },
   text = { type: "string" },
@@ -59,6 +59,7 @@ const toolRoles = {
   update_app: "setup",
   get_webhook: "setup",
   set_webhook: "setup",
+  redeliver_webhook: "setup",
   rotate_webhook_secret: "setup",
   test_webhook: "setup",
   create_label: "setup",
@@ -122,9 +123,13 @@ const workspaceTools = [
     public: { type: "boolean" }
   }),
   tool("get_webhook", "Read webhook configuration and recent deliveries (admin).", {}),
-  tool("set_webhook", "Set an HTTPS webhook URL, or remove it (admin).", { url: { type: ["string", "null"] } }, [
-    "url"
-  ]),
+  tool("redeliver_webhook", "Replay a stored webhook delivery (admin).", { delivery_id: text }, ["delivery_id"]),
+  tool(
+    "set_webhook",
+    "Set an HTTPS webhook URL and event subscriptions, or remove it (admin).",
+    { url: { type: ["string", "null"] }, events: { type: "array", items: { type: "string", enum: webhookEvents } } },
+    ["url"]
+  ),
   tool("rotate_webhook_secret", "Rotate the signing secret and return the new secret once (admin).", {}),
   tool("test_webhook", "Queue a ping to the configured webhook (admin).", {}),
   tool("create_label", "Create a label (admin).", { name: text, color: text, description: text }, ["name"]),
@@ -349,18 +354,21 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     case "get_webhook": {
       const hook = await sql(
         env,
-        "SELECT url,secret!='' has_secret FROM webhook_settings WHERE app_id=?",
+        "SELECT url,secret!='' has_secret,events FROM webhook_settings WHERE app_id=?",
         app.id
-      ).first<{ url: string | null; has_secret: number }>()
+      ).first<{ url: string | null; has_secret: number; events: string }>()
       if (!hook) missing()
       return textResult({
         url: hook.url,
         has_secret: !!hook.has_secret,
+        events: JSON.parse(hook.events),
         deliveries: await webhookDeliveries(env, app.id)
       })
     }
     case "set_webhook":
-      return textResult(await configureWebhook(env, app.id, b.url))
+      return textResult(await configureWebhook(env, app.id, b.url, b.events))
+    case "redeliver_webhook":
+      return textResult(await redeliver(env, app.id, str(b.delivery_id, "delivery id", 64)))
     case "rotate_webhook_secret":
       return textResult(await rotateWebhook(env, app.id))
     case "test_webhook":
@@ -523,8 +531,7 @@ export async function authenticate(c: Ctx): Promise<Caller | null> {
     )
   ])
   const agent = identity!.results[0] as
-    | { id: string; user_id: string; name: string; create_workspaces: number; stale: number }
-    | undefined
+    { id: string; user_id: string; name: string; create_workspaces: number; stale: number } | undefined
   if (!agent) return null
   // One activity timestamp covers both bearer types. The second check avoids redundant writes
   // if several calls authenticated before the first background update committed.

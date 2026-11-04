@@ -24,7 +24,7 @@ import { browserGuest, guestActor, sessionHash } from "./auth"
 import { visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { can, requireTeam, teamRole } from "./permissions"
 import { changeMember, invite, roster } from "./members"
-import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
+import { configureWebhook, redeliver, rotateWebhook, testWebhook } from "./webhooks"
 import { appCols, appIdSQL, appKey, appStatement, bySlug, fromAppRow, readBatch } from "./read-scope"
 import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
@@ -161,12 +161,13 @@ export async function settings(c: Ctx): Promise<AppSettings> {
   const mcp_url = new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
   if (!can(current, "setup"))
     return {
-      webhook: { url: null, secret: "", deliveries: [] },
+      webhook: { url: null, secret: "", events: [], deliveries: [] },
       members: can(current, "triage") ? await roster(c.env, id) : [],
       mcp_url
     }
   const [hook, deliveries, members] = await Promise.all([
-    sql(c.env, "SELECT url,secret FROM webhook_settings WHERE app_id=?", id).first<{
+    sql(c.env, "SELECT url,secret,events FROM webhook_settings WHERE app_id=?", id).first<{
+      events: string
       url: string | null
       secret: string
     }>(),
@@ -175,7 +176,7 @@ export async function settings(c: Ctx): Promise<AppSettings> {
   ])
   if (!hook) missing()
   return {
-    webhook: { ...hook, deliveries },
+    webhook: { ...hook, events: JSON.parse(hook.events), deliveries },
     members,
     mcp_url
   }
@@ -321,7 +322,8 @@ apps.get("/api/apps/:slug/settings", async (c) => {
 })
 apps.put("/api/apps/:slug/webhook", async (c) => {
   requireTeam(c, "setup")
-  await configureWebhook(c.env, c.var.app.id, (await body(c)).url)
+  const b = await body(c)
+  await configureWebhook(c.env, c.var.app.id, b.url, b.events)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
@@ -332,6 +334,10 @@ apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
 apps.post("/api/apps/:slug/webhook/test", async (c) => {
   requireTeam(c, "setup")
   return c.json(await testWebhook(c.env, c.env.PUBLIC_ORIGIN || c.req.url, c.var.app, c.var.actor))
+})
+apps.post("/api/apps/:slug/webhook/deliveries/:id/redeliver", async (c) => {
+  requireTeam(c, "setup")
+  return c.json(await redeliver(c.env, c.var.app.id, c.req.param("id")))
 })
 apps.post("/api/apps/:slug/members", async (c) => {
   requireTeam(c, "setup")

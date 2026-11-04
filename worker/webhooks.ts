@@ -1,5 +1,5 @@
-import type { WebhookPayload } from "../shared/api"
-import { bad, hex, now, secret, sha256, sql, str, uid } from "./core"
+import { DEFAULT_WEBHOOK_EVENTS, type WebhookPayload, type WebhookEventType, type IssueSummary } from "../shared/api"
+import { appUrl, bad, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
 import { teamProjection } from "./tier-actors"
 
 export function webhookUrl(value: unknown, env: Env) {
@@ -11,10 +11,31 @@ export function webhookUrl(value: unknown, env: Env) {
   return url.href
 }
 
-export async function configureWebhook(env: Env, app: string, value: unknown) {
+export const webhookEvents = [
+  "ping",
+  ...DEFAULT_WEBHOOK_EVENTS,
+  "issue.closed",
+  "issue.reopened",
+  "issue.labeled",
+  "issue.unlabeled",
+  "issue.assigned",
+  "issue.deleted",
+  "issue.moved",
+  "comment.edited",
+  "comment.deleted"
+] satisfies WebhookEventType[]
+export async function configureWebhook(
+  env: Env,
+  app: string,
+  value: unknown,
+  selection: unknown = DEFAULT_WEBHOOK_EVENTS
+) {
   const url = webhookUrl(value, env)
-  await sql(env, "UPDATE webhook_settings SET url=? WHERE app_id=?", url, app).run()
-  return { url }
+  if (!Array.isArray(selection) || selection.some((e) => !webhookEvents.includes(e)))
+    bad("Unknown webhook event or invalid events list")
+  const events = [...new Set<WebhookEventType>(selection)]
+  await sql(env, "UPDATE webhook_settings SET url=?,events=? WHERE app_id=?", url, JSON.stringify(events), app).run()
+  return { url, events }
 }
 export async function rotateWebhook(env: Env, app: string) {
   const key = secret()
@@ -27,7 +48,7 @@ export async function testWebhook(
   app: WebhookPayload["app"],
   actor: NonNullable<WebhookPayload["actor"]>
 ) {
-  const id = await enqueueWebhook(env, origin, { type: "ping", app, actor })
+  const [id] = await enqueueWebhooks(env, origin, app, actor, null, [{ type: "ping" }])
   if (!id) bad("Set a webhook URL first")
   return { delivery_id: id }
 }
@@ -37,62 +58,144 @@ interface Job {
   destinationHash: string
 }
 
-export async function enqueueWebhook(
+export type Hook = Pick<WebhookPayload, "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to"> & {
+  transition?: Partial<Pick<IssueSummary, "assignee" | "status" | "close_reason">>
+}
+// Ping is an explicit admin test, not an automatic subscription.
+const subscribed = (event: string) => `(${event}='ping' OR ${event} IN (SELECT value FROM json_each(s.events)))`
+export async function enqueueWebhooks(
   env: Env,
   origin: string,
-  { app, ...event }: Omit<WebhookPayload, "id" | "created_at" | "mcp_url">
+  app: WebhookPayload["app"],
+  actor: NonNullable<WebhookPayload["actor"]>,
+  issue: IssueSummary | null,
+  events: Hook[]
 ) {
+  if (!events.length) return []
   const settings = await sql(
     env,
-    `SELECT url,(SELECT count(*) FROM comments WHERE issue_id=?) comment_count FROM webhook_settings WHERE app_id=?`,
-    event.issue?.id ?? null,
+    `SELECT url,events,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    issue?.id ?? null,
     app.id
-  ).first<{ url: string | null; comment_count: number }>()
-  if (!settings?.url) return null
-  const url = settings.url
-  const id = uid(),
-    created_at = now()
-  const payload: WebhookPayload = {
-    ...event,
-    ...(event.issue ? { issue: { ...event.issue, comment_count: settings.comment_count, viewer_voted: false } } : {}),
-    id,
-    created_at,
-    app: { id: app.id, slug: app.slug, name: app.name },
-    mcp_url: new URL("/mcp", origin).href
+  ).first<{ url: string; events: string; comment_count: number }>()
+  if (!settings) return []
+  const enabled = new Set<string>(JSON.parse(settings.events)),
+    selected = events.filter((e) => e.type === "ping" || enabled.has(e.type))
+  if (!selected.length) return []
+  // Source tombstones retain the pre-move/delete count; never count comments in a different app.
+  const sourceSnapshot = selected.some((e) => e.type === "issue.moved" || e.type === "issue.deleted")
+  const { base, hooks } = await teamProjection(env, app.id, {
+    base: {
+      actor,
+      ...(issue
+        ? {
+            issue: {
+              ...issue,
+              url: appUrl(env, origin, app.slug, `/issues/${issue.number}`),
+              comment_count: sourceSnapshot ? issue.comment_count : settings.comment_count,
+              viewer_voted: false
+            }
+          }
+        : {}),
+      app: { id: app.id, slug: app.slug, name: app.name },
+      mcp_url: new URL("/mcp", origin).href
+    },
+    hooks: selected
+  })
+  const ids: string[] = [],
+    destinationHash = await sha256(settings.url)
+  // One triage action can replace dozens of labels. Keep both round trips and peak
+  // payload memory bounded; queue messages only carry IDs and a destination fingerprint.
+  for (let offset = 0; offset < hooks.length; offset += 16) {
+    const pending = hooks.slice(offset, offset + 16).map(({ transition, ...hook }) => {
+      const id = uid(),
+        created_at = now(),
+        payload: WebhookPayload = {
+          ...base,
+          ...hook,
+          ...(transition && base.issue && { issue: { ...base.issue, ...transition } }),
+          id,
+          created_at
+        }
+      // Recheck policy and scope at insertion. Only confirmed deletions and source-side moves
+      // may describe a row that no longer exists in the workspace.
+      const gate =
+        hook.type === "issue.deleted"
+          ? "EXISTS(SELECT 1 FROM issue_tombstones WHERE app_id=?2 AND number=?8)"
+          : hook.type === "issue.moved"
+            ? "EXISTS(SELECT 1 FROM issue_moves WHERE from_app=?2 AND from_number=?8 AND issue_id=?7)"
+            : "(?7 IS NULL OR EXISTS(SELECT 1 FROM issues WHERE app_id=?2 AND id=?7))"
+      const statement = sql(
+        env,
+        `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?1,s.app_id,?3,?4,?5 FROM webhook_settings s
+      WHERE s.app_id=?2 AND s.url=?6 AND ${subscribed("?3")} AND ${gate}
+      AND (?9 IS NULL OR ${hook.type === "comment.deleted" ? "NOT " : ""}EXISTS(SELECT 1 FROM comments WHERE id=?9 AND issue_id=?7))`,
+        id,
+        app.id,
+        hook.type,
+        JSON.stringify(payload),
+        created_at,
+        settings.url,
+        issue?.id ?? null,
+        issue?.number ?? null,
+        hook.comment?.id ?? null
+      )
+      return { id, statement }
+    })
+    const result = await env.DB.batch(pending.map((p) => p.statement))
+    const added = pending.flatMap((p, i) => (result[i]!.meta.changes ? [p.id] : []))
+    await sendJobs(env, added, destinationHash)
+    ids.push(...added)
   }
-  const inserted = await sql(
-    env,
-    `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?,?,?,?,?
-     WHERE (? IS NULL OR EXISTS(SELECT 1 FROM issues WHERE id=? AND app_id=?))
-       AND (? IS NULL OR EXISTS(SELECT 1 FROM comments WHERE id=? AND issue_id=?))`,
-    id,
-    app.id,
-    payload.type,
-    JSON.stringify(await teamProjection(env, app.id, payload)),
-    created_at,
-    payload.issue?.id ?? null,
-    payload.issue?.id ?? null,
-    app.id,
-    payload.comment?.id ?? null,
-    payload.comment?.id ?? null,
-    payload.issue?.id ?? null
-  ).run()
-  if (!inserted.meta.changes) return null // A deletion won the race with enqueueing this snapshot.
+  return ids
+}
+
+export async function redeliver(env: Env, app: string, original: string) {
+  const id = uid()
+  // Copy inside the transaction: a concurrently purged snapshot cannot be resurrected.
+  // Keep the original event timestamp and content; only delivery identity changes.
+  const [old, copy] = await env.DB.batch<{ url: string | null }>([
+    sql(
+      env,
+      "SELECT s.url FROM webhook_deliveries d JOIN webhook_settings s ON s.app_id=d.app_id WHERE d.app_id=? AND d.id=?",
+      app,
+      original
+    ),
+    sql(
+      env,
+      `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?1,d.app_id,d.event,json_set(d.payload,'$.id',?1,'$.redelivery_of',d.id),?2
+      FROM webhook_deliveries d JOIN webhook_settings s ON s.app_id=d.app_id WHERE d.app_id=?3 AND d.id=?4 AND s.url IS NOT NULL AND ${subscribed("d.event")}`,
+      id,
+      now(),
+      app,
+      original
+    )
+  ])
+  const row = old!.results[0] ?? missing()
+  if (!row.url || !copy!.meta.changes) bad("Configure a webhook subscribed to this event first")
+  await sendJobs(env, [id], await sha256(row.url))
+  return { delivery_id: id }
+}
+async function sendJobs(env: Env, ids: string[], destinationHash: string) {
+  if (!ids.length) return
   try {
     // Keep large payloads and credentials out of the queue. Don't replay old events to a new URL.
-    await env.WEBHOOKS.send({ id, destinationHash: await sha256(url) } satisfies Job)
+    await env.WEBHOOKS.sendBatch(ids.map((id) => ({ body: { id, destinationHash } satisfies Job })))
   } catch (error) {
-    await sql(env, "UPDATE webhook_deliveries SET status='failed' WHERE id=? AND status='pending'", id).run()
+    await sql(
+      env,
+      "UPDATE webhook_deliveries SET status='failed' WHERE id IN(SELECT value FROM json_each(?)) AND status='pending'",
+      JSON.stringify(ids)
+    ).run()
     throw error
   }
-  return id
 }
 
 async function deliver(env: Env, message: Message<Job>) {
   const { id, destinationHash } = message.body
   const delivery = await sql(
     env,
-    `SELECT d.payload,d.event,s.url,s.secret FROM webhook_deliveries d
+    `SELECT d.payload,d.event,CASE WHEN ${subscribed("d.event")} THEN s.url END url,s.secret FROM webhook_deliveries d
     JOIN webhook_settings s ON s.app_id=d.app_id WHERE d.id=? AND d.status='pending'`,
     id
   ).first<{ payload: string; event: string; url: string | null; secret: string }>()

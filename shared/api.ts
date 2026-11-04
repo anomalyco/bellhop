@@ -45,7 +45,9 @@
 //   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
 //   GET    /icon/:slug/:version                          -> the app's icon (public, immutable; SVG is not accepted)
 //   GET    /api/apps/:slug/settings                      -> AppSettings        member
-//   PUT    /api/apps/:slug/webhook { url: string|null }  -> AppSettings        admin
+//   PUT    /api/apps/:slug/webhook { url: string|null, events?: WebhookEventType[] } -> AppSettings   admin; events
+//          defaults to DEFAULT_WEBHOOK_EVENTS (today's behaviour)
+//   POST   /api/apps/:slug/webhook/deliveries/:id/redeliver -> { delivery_id }   admin; same payload, new delivery id
 //   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        admin; new signing secret
 //   POST   /api/apps/:slug/webhook/test                  -> { delivery_id }    admin; sends a `ping` event
 //   GET    /api/apps/:slug/agents                        -> AppAgent[]         admin; every agent with access here
@@ -74,6 +76,8 @@
 //          events, relations). The number stays taken: GET then answers 410 with code "deleted".
 //   POST   /api/apps/:slug/issues/:number/hide { reason: ModerationReason } -> Issue   member
 //   DELETE /api/apps/:slug/issues/:number/hide           -> Issue              member; unhide
+//   GET    /api/apps/:slug/issues/similar?title=<text>   -> IssueRef[]         public: up to 5 likely duplicates the
+//          viewer may see, best first (for the new-issue page as people type)
 //   GET    /api/apps/:slug/issues/:number/history        -> Revision[]         whoever can see the issue; title/body
 //   POST   /api/apps/:slug/issues/:number/vote           -> { votes, viewer_voted }   guest + human, or account ("Me too")
 //   DELETE /api/apps/:slug/issues/:number/vote           -> { votes, viewer_voted }
@@ -115,6 +119,9 @@
 //   GET    /api/live/apps/:slug                          WebSocket, list page: LiveEvent
 //   GET    /api/live/apps/:slug/issues/:number           WebSocket, issue page: LiveEvent
 //   GET    /api/live/feed                                WebSocket, home feed: LiveEvent (feed.issue, activity)
+// Atom feeds, public and visibility-filtered like the list (no notes, private or hidden content), linked from pages:
+//   GET    /feed.atom              a workspace's recently opened and updated issues (on its host)
+//   GET    /issues/:number/feed.atom   an issue's public replies and status changes
 // Search engines, answered by the Worker per host:
 //   GET    /robots.txt    home and public workspaces: allow all, with a Sitemap line; private workspaces: Disallow: /
 //   GET    /sitemap.xml   home: a sitemap index of the public workspaces; a public workspace: its issue URLs (lastmod)
@@ -359,7 +366,7 @@ export interface Revision {
 }
 
 export interface AppSettings {
-  webhook: { url: string | null; secret: string; deliveries: WebhookDelivery[] }
+  webhook: { url: string | null; secret: string; events: WebhookEventType[]; deliveries: WebhookDelivery[] }
   members: Member[]
   /** Absolute URL of the MCP endpoint, for the OpenCode config snippet. */
   mcp_url: string
@@ -650,7 +657,25 @@ export type LiveEvent =
 // mention.created: once per newly @mentioned team member or agent per write (posting or editing), never for
 // self-mentions; an agent mentioned by another agent does get it (that's how one hands work to another).
 // Internal notes are delivered too, with comment.internal true.
-export type WebhookEventType = "ping" | "issue.opened" | "issue.updated" | "comment.created" | "mention.created"
+// Granular events are opt-in; issue.updated still fires for every change (with `changes`) for whoever subscribes.
+export type WebhookEventType =
+  | "ping"
+  | "issue.opened"
+  | "issue.updated"
+  | "issue.closed" // status became closed (close_reason in issue)
+  | "issue.reopened"
+  | "issue.labeled" // label in `label`
+  | "issue.unlabeled"
+  | "issue.assigned" // assignee in issue.assignee (null when cleared)
+  | "issue.deleted"
+  | "issue.moved" // moved_to in `moved_to`
+  | "comment.created"
+  | "comment.edited"
+  | "comment.deleted"
+  | "mention.created"
+
+/** What a webhook gets until its events are changed (the behaviour before events were selectable). */
+export const DEFAULT_WEBHOOK_EVENTS: WebhookEventType[] = ["issue.opened", "issue.updated", "comment.created", "mention.created"]
 
 export interface WebhookPayload {
   id: string
@@ -665,6 +690,12 @@ export interface WebhookPayload {
   changes?: string[]
   /** For mention.created: who was mentioned (the comment, or the issue body when there is no comment). */
   mentioned?: Actor
+  /** For issue.labeled / issue.unlabeled. */
+  label?: Label
+  /** For issue.moved: where it went. */
+  moved_to?: { slug: string; number: number; url: string }
+  /** Set when this delivery is a manual redelivery of an earlier one. */
+  redelivery_of?: string
   mcp_url: string
 }
 
@@ -700,7 +731,8 @@ export interface WebhookPayload {
 //   get_app        {}                            name, description, icon, counts, labels, templates
 //   update_app     { name?, description? }       owner
 //   get_webhook    {}                            URL, whether a secret is set, recent deliveries
-//   set_webhook    { url: string|null }          https only; null removes it
+//   set_webhook    { url: string|null, events?: WebhookEventType[] }   https only; null removes it
+//   redeliver_webhook { delivery_id }
 //   rotate_webhook_secret {}                     returns the new secret once
 //   test_webhook   {}                            sends a ping, returns the delivery id
 //   create_label   { name, color?, description? }

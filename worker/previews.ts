@@ -61,7 +61,7 @@ type Row = AppRow & {
   labels: string
 }
 const markdown = new MarkdownIt({ html: true })
-function snippet(body: string) {
+export function snippet(body: string, limit = 160) {
   const text = markdown
     .parse(body, {})
     .flatMap((t) =>
@@ -80,7 +80,7 @@ function snippet(body: string) {
     .join(" ")
     .replace(/\s+/g, " ")
     .trim()
-  return Array.from(text).slice(0, 160).join("")
+  return Array.from(text).slice(0, limit).join("")
 }
 
 // No cookies, membership, session, or user-supplied v. Both the HTML and the PNG use this

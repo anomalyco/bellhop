@@ -18,7 +18,8 @@ import { oauth } from "./oauth"
 import { agents } from "./agents"
 import { tierRoutes } from "./tiers"
 import { queue } from "./webhooks"
-import { ogImage, page, robots, sitemap } from "./pages"
+import { atom, ogImage, page, robots, sitemap } from "./pages"
+import { similar } from "./similar"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -50,7 +51,7 @@ api.use("*", async (c, next) => {
   if (
     (c.req.path.startsWith("/api/") &&
       !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path) &&
-      !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues(?:\/\d+)?)?$/.test(c.req.path))) ||
+      !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues(?:\/(?:\d+|similar))?)?$/.test(c.req.path))) ||
     c.req.path === "/oauth/authorize"
   )
     await currentUser(c)
@@ -121,6 +122,7 @@ api.get("/api/apps/:slug/issues", async (c) => {
   const { app, viewer } = await viewerApp(c, c.req.param("slug"), myAuthorFilter(q) ? reportCookies(c) : undefined)
   return c.json(await listIssues(c.env, app.id, { state, label, cursor, query: q, sort }, viewer))
 })
+api.get("/api/apps/:slug/issues/similar", similar)
 api.get("/api/apps/:slug/issues/:number", async (c) => {
   const { app, viewer } = await viewerApp(c, c.req.param("slug"))
   return c.json(
@@ -182,6 +184,12 @@ api.get("/api/live/feed", async (c) => {
 api.route("/", mcp)
 api.get("/robots.txt", robots)
 api.get("/sitemap.xml", sitemap)
+api.get("/feed.atom", (c) => atom(c))
+api.get("/issues/:number/feed.atom", (c) =>
+  c.env.APP_DOMAIN && new URL(c.req.url).hostname.endsWith(`.${c.env.APP_DOMAIN}`)
+    ? atom(c, c.req.param("number"))
+    : c.notFound()
+)
 api.get("/og/*", ogImage)
 api.get("*", (c) => {
   // Never turn unknown API/protocol routes into successful SPA documents.
@@ -194,6 +202,8 @@ api.get("*", (c) => {
   )
     return c.notFound()
   if (!c.env.APP_DOMAIN) {
+    const feed = /^\/[a-z0-9-]+\/(?:issues\/(\d+)\/)?feed\.atom$/.exec(path)
+    if (feed) return atom(c, feed[1])
     if (/^\/[^/]+\/og\//.test(path)) return ogImage(c)
     if (/^\/(?:@|src\/|node_modules\/)/.test(path)) return c.env.ASSETS.fetch(c.req.raw)
     const meta = /^\/([a-z0-9-]+)\/(robots\.txt|sitemap\.xml)$/.exec(path)

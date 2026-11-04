@@ -30,6 +30,7 @@ import { guestWrite } from "./guest-history"
 import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, ref, summaryOf } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { teamProjection } from "./tier-actors"
+import { enqueueWebhooks } from "./webhooks"
 
 export interface Access {
   env: Env
@@ -90,7 +91,16 @@ function notify(
   a: Access,
   payload: Pick<
     Change,
-    "type" | "issue" | "items" | "changes" | "comments" | "deletedComment" | "internalOnly" | "mentioned"
+    | "type"
+    | "issue"
+    | "items"
+    | "changes"
+    | "comments"
+    | "deletedComment"
+    | "internalOnly"
+    | "mentioned"
+    | "removed"
+    | "ruleItems"
   >
 ) {
   emit(a.env, a.ctx, { app: a.app, origin: a.origin, actor: a.actor, ...payload })
@@ -240,7 +250,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
   )
   const results = await env.DB.batch<Record<string, unknown>>(q),
     number = results[1]!.results[0]!.number as number
-  const ruleFrames: LiveEvent[] = []
+  const ruleFrames: Extract<LiveEvent, { type: "timeline.added" }>[] = []
   for (const result of results.slice(ruleStart, ruleStart + 2)) {
     for (const row of result.results as { id: string; type: "labeled" | "assigned"; data: string }[]) {
       const event = { id: row.id, type: row.type, data: JSON.parse(row.data), actor, created_at: at }
@@ -252,7 +262,13 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
   // Even a pre-tiers Room understands internalOnly; never send rules in a mixed-audience RPC.
   if (ruleFrames.length)
     a.ctx.waitUntil(issueRoom(env, id).publishConversation(ruleFrames, { app: app.id, internalOnly: true }))
-  notify(a, { type: "issue.opened", issue: summaryOf(issue), items, mentioned: addedMentions(mentions, [], actor) })
+  notify(a, {
+    type: "issue.opened",
+    issue: summaryOf(issue),
+    items,
+    ruleItems: ruleFrames.map((e) => e.item),
+    mentioned: addedMentions(mentions, [], actor)
+  })
   return issue
 }
 async function commentTarget(a: Access, n: number, b: Record<string, unknown>) {
@@ -672,6 +688,9 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
   const event: LiveEvent = { type: "issue.moved", issue_id: id, to },
     opts = { app: a.app.id, moved: { gate: gateOf(old), target: dest.id, number: n } }
   a.ctx.waitUntil(
+    enqueueWebhooks(a.env, a.origin, a.app, a.actor, summaryOf(old), [{ type: "issue.moved", moved_to: to }])
+  )
+  a.ctx.waitUntil(
     Promise.all([
       appRoom(a.env, a.app.id).publishConversation([event], opts),
       issueRoom(a.env, id).publishConversation([event], opts)
@@ -827,6 +846,7 @@ async function deleteComment(a: Access, n: number, id: string) {
     type: "issue.updated",
     issue: await summary(a, n),
     deletedComment: id,
+    removed: c,
     changes: ["comment.deleted"],
     internalOnly: c.internal
   })
@@ -885,6 +905,7 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
 }
 async function deleteIssue(a: Access, n: number) {
   if (!can(a.role, "setup")) denied()
+  const before = await summary(a, n)
   const [tomb, files, parents] = await a.env.DB.batch<unknown>([
     sql(
       a.env,
@@ -931,6 +952,7 @@ async function deleteIssue(a: Access, n: number) {
     },
     gate = { reporter: g.reporter, private: !!g.private, hidden: !!g.hidden }
   purgeFiles(a, files!.results as { object_key: string }[])
+  a.ctx.waitUntil(enqueueWebhooks(a.env, a.origin, a.app, a.actor, before, [{ type: "issue.deleted" }]))
   const event: LiveEvent = { type: "issue.deleted", issue_id: g.id, number: n }
   a.ctx.waitUntil(
     Promise.all([
