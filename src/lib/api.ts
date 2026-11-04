@@ -30,8 +30,11 @@ import type {
   Role,
   RelationType,
   Revision,
+  Person,
   Template,
   TemplateInput,
+  Tier,
+  TierInput,
 } from "../../shared/api"
 import { load, peek } from "./cache"
 import { runHumanCheck } from "./human"
@@ -189,6 +192,19 @@ export const api = {
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`, { reason }),
   unhideComment: (slug: string, number: number, id: string) => request<Comment>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`),
   commentHistory: (slug: string, number: number, id: string) => get<Revision[]>(`${app(slug)}/issues/${number}/comments/${enc(id)}/history`),
+  tiers: (slug: string) => get<Tier[]>(`${app(slug)}/tiers`),
+  createTier: (slug: string, input: TierInput) => request<Tier>("POST", `${app(slug)}/tiers`, input),
+  patchTier: (slug: string, id: string, input: TierInput) => request<Tier>("PATCH", `${app(slug)}/tiers/${enc(id)}`, input),
+  deleteTier: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/tiers/${enc(id)}`),
+  people: (slug: string, params: { tier?: string; q?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.tier) qs.set("tier", params.tier)
+    if (params.q) qs.set("q", params.q)
+    return get<Person[]>(`${app(slug)}/people${qs.size ? `?${qs}` : ""}`)
+  },
+  /** By email (applies when they sign in) or by actor id; tier_id null removes it. */
+  setTier: (slug: string, who: { email: string } | { actor_id: string }, tierId: string | null) =>
+    request<Person>("PUT", `${app(slug)}/people/tier`, { ...who, tier_id: tierId }),
   blocks: (slug: string) => get<Block[]>(`${app(slug)}/blocks`),
   block: (slug: string, actorId: string, hideContent: boolean) => request<Block>("POST", `${app(slug)}/blocks`, { actor_id: actorId, hide_content: hideContent }),
   unblock: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/blocks/${enc(id)}`),
@@ -235,6 +251,9 @@ export const keys = {
   history: (slug: string, number: number, commentId?: string) => `history:${slug}:${number}:${commentId ?? "issue"}`,
   blocks: (slug: string) => `blocks:${slug}`,
   mentionables: (slug: string) => `mentionables:${slug}`,
+  tiers: (slug: string) => `tiers:${slug}`,
+  /** Every people list of an app shares this prefix; then the tier id ("" for all). */
+  people: (slug: string, tier = "") => `people:${slug}:${tier}`,
   /** All list pages of one app share this prefix; the rest of the key is the filter. */
   lists: (slug: string) => `issues:${slug}:`,
 }

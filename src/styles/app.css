@@ -1260,7 +1260,8 @@ a.box-row:hover {
   font-weight: var(--weight-medium);
 }
 .report-by .role-badge,
-.report-by .guest-marker {
+.report-by .guest-marker,
+.report-by .tier-badge {
   margin-left: 6px;
   vertical-align: 1px;
 }
@@ -1576,7 +1577,8 @@ button.prop:hover,
 }
 .group-head .ai-badge,
 .group-head .role-badge,
-.group-head .guest-marker {
+.group-head .guest-marker,
+.group-head .tier-badge {
   margin-left: -2px;
 }
 .group-avatar {

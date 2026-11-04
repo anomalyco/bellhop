@@ -23,6 +23,7 @@ import { EditedMarker, HiddenLine, IssueFlags, reasons, type CommentContext } fr
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
 export function IssueView({ model, nameField }: { model: IssueModel; nameField: RefObject<HTMLInputElement | null> }) {
   const { app, issue, actionError } = model
+  const authorTier = issue.author.type !== "agent" ? (issue.author.tier ?? null) : null
   const ctx: CommentContext = { app, issue, member: model.member, viewerId: model.viewer?.id ?? null, signedIn: !!model.me?.user }
   return (
     <Page>
@@ -36,9 +37,9 @@ export function IssueView({ model, nameField }: { model: IssueModel; nameField: 
                 <HiddenLine key={b.key} reason={b.reason} />
               ) : b.kind === "events" ? (
                 b.events.length > 2 ? (
-                  <EventBurst key={b.key} slug={app.slug} events={b.events} />
+                  <EventBurst key={b.key} slug={app.slug} events={b.events} authorTier={authorTier} />
                 ) : (
-                  b.events.map((e) => <EventLine key={e.id} slug={app.slug} event={e} />)
+                  b.events.map((e) => <EventLine key={e.id} slug={app.slug} event={e} authorTier={authorTier} />)
                 )
               ) : (
                 <MessageGroup key={b.key} slug={app.slug} author={b.author} byAuthor={b.byAuthor} messages={b.messages} ctx={ctx} internal={b.internal} />

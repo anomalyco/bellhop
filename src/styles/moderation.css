@@ -412,8 +412,8 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
-  height: 36px;
-  padding: 0 8px;
+  min-height: 36px;
+  padding: 4px 8px;
   font: inherit;
   font-size: var(--text-ui);
   text-align: left;
@@ -434,6 +434,26 @@
   min-width: 0;
   overflow: hidden;
   font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+/* Same-name agents get a second line saying how they connect and whose they are */
+.mention-option-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.mention-option-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.mention-option-qualifier {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -519,7 +539,7 @@
 
 @media (pointer: coarse) {
   .mention-option {
-    height: 40px;
+    min-height: 40px;
   }
   .helpful {
     position: relative;

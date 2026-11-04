@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, type CSSProperties } from "react"
 import type { Actor } from "../../shared/api"
 import { AgentAvatar, AiBadge, Avatar } from "./primitives"
 
@@ -39,7 +39,18 @@ export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boole
       {badge && actor.type === "agent" && <AiBadge />}
       {badge && actor.type === "member" && actor.role && <span className="role-badge">{actor.role === "owner" ? "Owner" : "Member"}</span>}
       {badge && actor.type === "guest" && actor.name && <span className="guest-marker">Guest</span>}
+      {badge && actor.type !== "agent" && actor.tier && <TierBadge tier={actor.tier} />}
     </>
+  )
+}
+
+/** A person's tier (VIP, Pro…): its colour as a dot on a faint tint of it, with the name. Only the team gets tiers. */
+export function TierBadge({ tier }: { tier: { name: string; color: string } }) {
+  return (
+    <span className="tier-badge" style={{ "--tier": `#${tier.color}` } as CSSProperties} title={`Tier: ${tier.name}`}>
+      <span className="tier-dot" aria-hidden="true" />
+      {tier.name}
+    </span>
   )
 }
 

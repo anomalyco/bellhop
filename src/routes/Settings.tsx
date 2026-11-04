@@ -14,12 +14,14 @@ import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel
 import { appLabel, appPath, homeUrl, signInHref } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 import { PublicToggle, VisibilityValue } from "../ui/workspace/Visibility"
+import { ColorField, randomColor } from "../ui/ColorField"
+import { Tiers } from "./settings/Tiers"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
 import "../styles/moderation.css"
 
-type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members" | "blocked"
+type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members" | "tiers" | "blocked"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 const sections: { id: Section; label: string; min: Role }[] = [
@@ -29,6 +31,7 @@ const sections: { id: Section; label: string; min: Role }[] = [
   { id: "members", label: "Members", min: "member" },
   { id: "agents", label: "Agents", min: "admin" },
   { id: "webhook", label: "Webhook", min: "admin" },
+  { id: "tiers", label: "Tiers", min: "member" },
   { id: "blocked", label: "Blocked", min: "member" },
 ]
 
@@ -100,6 +103,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "agents" && <Agents app={app} />}
           {active === "webhook" && <Webhook app={app} />}
           {active === "members" && <Members app={app} />}
+          {active === "tiers" && <Tiers app={app} />}
           {active === "blocked" && <Blocked app={app} />}
         </div>
       </div>
@@ -359,8 +363,6 @@ function IconField({ app }: { app: AppDetail }) {
 
 /* Labels */
 
-const palette = ["fa4d56", "ff832b", "f1c21b", "42be65", "08bdba", "33b1ff", "4589ff", "a56eff", "ee5396", "878d96"]
-const randomColor = () => palette[Math.floor(Math.random() * palette.length)]!
 
 function Labels({ app }: { app: AppDetail }) {
   const admin = canSetup(app.role)
@@ -490,27 +492,7 @@ function LabelForm({ slug, label, onDone }: { slug: string; label?: LabelType; o
           <label className="field-label" htmlFor="label-color">
             Colour
           </label>
-          <div className="row" style={{ gap: 6 }}>
-            <button
-              type="button"
-              className="color-swatch"
-              style={{ "--swatch": valid ? `#${color}` : "#878d96" } as CSSProperties}
-              onClick={() => setColor(randomColor())}
-              aria-label="Pick a random colour"
-              title="Random colour"
-            />
-            <div className="input" style={{ width: 110 }}>
-              <span className="input-prefix mono">#</span>
-              <input
-                id="label-color"
-                className="mono"
-                value={color}
-                onChange={(e) => setColor(e.target.value.replace(/[^0-9a-f]/gi, "").slice(0, 6))}
-                aria-invalid={!valid}
-              />
-            </div>
-            <input type="color" className="color-native" value={valid ? `#${color}` : "#878d96"} onChange={(e) => setColor(e.target.value.slice(1))} aria-label="Colour picker" />
-          </div>
+          <ColorField id="label-color" value={color} onChange={setColor} />
         </div>
         <div className="label-form-actions">
           <Button variant="invisible" onClick={() => onDone(null)}>

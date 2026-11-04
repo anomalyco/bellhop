@@ -14,6 +14,7 @@ import { Markdown } from "../../ui/Markdown"
 import { Menu, MenuHeader, MenuItem } from "../../ui/Menu"
 import { Button } from "../../ui/primitives"
 import { Page } from "../../ui/Shell"
+import { TierPicker, canHaveTier } from "../../ui/tiers/TierPicker"
 import { AppLink, SiteLink } from "../../ui/SiteLink"
 import "../../styles/moderation.css"
 
@@ -154,7 +155,7 @@ export interface CommentContext {
   signedIn: boolean
 }
 
-type Mode = "edit" | "delete" | "block" | null
+type Mode = "edit" | "delete" | "block" | "tier" | null
 
 /**
  * One comment in a group: its body (collapsed behind a marker when hidden, for the team), "edited", and the "…"
@@ -229,6 +230,11 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
               {(mine || member) && (
                 <MenuItem danger onSelect={pick(() => setMode("delete"))}>
                   Delete
+                </MenuItem>
+              )}
+              {member && canHaveTier(author) && (
+                <MenuItem description="VIP, Pro… only the team sees it" onSelect={pick(() => setMode("tier"))}>
+                  Set tier…
                 </MenuItem>
               )}
               {canBlock && (
@@ -334,6 +340,14 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
             Delete
           </Button>
         </div>
+      )}
+      {mode === "tier" && (
+        <TierPicker
+          slug={slug}
+          actor={author}
+          onDone={() => setMode(null)}
+          onChanged={() => void load(keys.issue(slug, issue.number), () => api.issue(slug, issue.number)).catch(() => {})}
+        />
       )}
       {mode === "block" && (
         <div className="msg-confirm msg-confirm-block">

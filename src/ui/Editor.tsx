@@ -89,6 +89,12 @@ export function Editor({
       ? people.filter((p) => p.handle.startsWith(at.query) || p.name.toLowerCase().split(/\s+/).some((w) => w.startsWith(at.query))).slice(0, 6)
       : []
   const suggesting = !!at && suggestions.length > 0
+  // Agents that share a name ("OpenCode" twice) get what tells them apart: how they connect and whose they are.
+  const qualifier = (p: Mentionable) => {
+    if (p.type !== "agent" || (people ?? []).filter((x) => x.name === p.name).length < 2) return null
+    const kind = p.agent_kind === "oauth" ? "Connected app" : p.agent_kind === "token" ? "Token agent" : null
+    return [kind, p.owner_name].filter(Boolean).join(" · ") || null
+  }
   const listId = `mentions-${slug}-${variant ?? "page"}`
 
   const detect = (el: HTMLTextAreaElement) => {
@@ -363,8 +369,13 @@ export function Editor({
                 onClick={() => choose(p)}
               >
                 <ActorAvatar actor={actor} size={20} />
-                <span className="mention-option-name">{p.name}</span>
-                {p.type === "agent" && <AiBadge />}
+                <span className="mention-option-text">
+                  <span className="mention-option-line">
+                    <span className="mention-option-name">{p.name}</span>
+                    {p.type === "agent" && <AiBadge />}
+                  </span>
+                  {qualifier(p) && <span className="mention-option-qualifier">{qualifier(p)}</span>}
+                </span>
                 <span className="mention-option-handle mono">@{p.handle}</span>
               </button>
             )

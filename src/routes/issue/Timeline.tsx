@@ -1,10 +1,10 @@
 import { useState, type ReactNode } from "react"
-import type { Activity, Actor, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, ModerationReason, Relation } from "../../../shared/api"
+import type { Activity, Actor, ActorTier, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, ModerationReason, Relation } from "../../../shared/api"
 import { visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 import { Time, useUntil } from "../../lib/time"
 import { formatSize } from "../../lib/upload"
-import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
+import { ActorAvatar, ActorName, TierBadge, actorName } from "../../ui/Actor"
 import {
   ArrowUpIcon,
   ChevronDownIcon,
@@ -263,22 +263,38 @@ function PencilGlyph() {
   )
 }
 
-export function EventLine({ slug, event }: { slug: string; event: IssueEvent }) {
+/** A tier rule's own doing ("VIP rule added bug"): team-only events whose data names the tier. */
+const ruleOf = (event: IssueEvent) => (event.data.rule as { tier_id: string; tier_name: string } | undefined) ?? null
+
+export function EventLine({ slug, event, authorTier }: { slug: string; event: IssueEvent; authorTier?: ActorTier | null }) {
   const { icon, tone, body } = eventContent(slug, event)
+  const rule = ruleOf(event)
+  // The rule's tier is the reporter's (it fired when they opened the issue); its colour comes from there when it
+  // still matches, otherwise the badge stays neutral.
+  const color = rule && authorTier?.id === rule.tier_id ? authorTier.color : "878d96"
   return (
-    <div className="event" data-tone={tone}>
+    <div className="event" data-tone={tone} data-rule={rule ? "" : undefined}>
       <span className="event-icon">{icon}</span>
       <span className="event-text">
-        <ActorName actor={event.actor} badge={false} /> {body} · <Time iso={event.created_at} />
+        {rule ? (
+          <>
+            <TierBadge tier={{ name: rule.tier_name, color }} /> rule {body}
+          </>
+        ) : (
+          <>
+            <ActorName actor={event.actor} badge={false} /> {body}
+          </>
+        )}{" "}
+        · <Time iso={event.created_at} />
       </span>
     </div>
   )
 }
 
 /** More than two events in a row fold into one line saying who and when; it expands in place. */
-export function EventBurst({ slug, events }: { slug: string; events: IssueEvent[] }) {
+export function EventBurst({ slug, events, authorTier }: { slug: string; events: IssueEvent[]; authorTier?: ActorTier | null }) {
   const [open, setOpen] = useState(false)
-  const names = [...new Set(events.map((e) => actorName(e.actor)))]
+  const names = [...new Set(events.map((e) => (ruleOf(e) ? `${ruleOf(e)!.tier_name} rule` : actorName(e.actor))))]
   const last = events[events.length - 1]!
   return (
     <div className="burst" data-open={open || undefined}>
@@ -298,7 +314,7 @@ export function EventBurst({ slug, events }: { slug: string; events: IssueEvent[
         </span>
         <ChevronDownIcon size={12} />
       </button>
-      {open && events.map((e) => <EventLine key={e.id} slug={slug} event={e} />)}
+      {open && events.map((e) => <EventLine key={e.id} slug={slug} event={e} authorTier={authorTier} />)}
     </div>
   )
 }

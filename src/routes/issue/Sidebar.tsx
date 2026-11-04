@@ -3,7 +3,10 @@ import type { Actor, Issue } from "../../../shared/api"
 import { stateText, visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 import { Time } from "../../lib/time"
-import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
+import { ActorAvatar, ActorName, TierBadge, actorName } from "../../ui/Actor"
+import { TierPicker, canHaveTier } from "../../ui/tiers/TierPicker"
+import { api, keys } from "../../lib/api"
+import { load } from "../../lib/cache"
 import { ChevronDownIcon, LinkIcon, PersonIcon, PlusIcon, SettingsIcon, TagIcon } from "../../ui/icons"
 import { Menu } from "../../ui/Menu"
 import { AiBadge, Button, Label, StateIcon } from "../../ui/primitives"
@@ -259,16 +262,47 @@ function RelationsSection({ model }: { model: IssueModel }) {
 /** Reporter, times, participants, attachments, system info and the copy-link action. */
 function InfoSections({ model }: { model: IssueModel }) {
   const { issue, member } = model
+  const [settingTier, setSettingTier] = useState(false)
   const files = allAttachments(issue)
   const people = participants(issue)
   return (
     <>
-      <Section title="Reporter">
+      <Section
+        title="Reporter"
+        action={
+          member && canHaveTier(issue.author) ? (
+            <Button
+              iconOnly
+              size="small"
+              variant="invisible"
+              aria-label="Set tier"
+              title="Set tier"
+              aria-expanded={settingTier}
+              icon={<SettingsIcon size={14} />}
+              onClick={() => setSettingTier(!settingTier)}
+            />
+          ) : undefined
+        }
+      >
         <div className="side-value">
           <ActorAvatar actor={issue.author} size={20} />
           <ActorName actor={issue.author} badge={false} />
           <ReporterKind actor={issue.author} />
+          {issue.author.type !== "agent" && issue.author.tier && <TierBadge tier={issue.author.tier} />}
         </div>
+        {issue.author.type !== "agent" && issue.author.tier && !issue.author.tier.agents_reply && (
+          <p className="side-humans" title={`${issue.author.tier.name}: agents can only leave internal notes here`}>
+            Humans only: agents leave internal notes, a person replies
+          </p>
+        )}
+        {settingTier && (
+          <TierPicker
+            slug={model.app.slug}
+            actor={issue.author}
+            onDone={() => setSettingTier(false)}
+            onChanged={() => void load(keys.issue(model.app.slug, issue.number), () => api.issue(model.app.slug, issue.number)).catch(() => {})}
+          />
+        )}
         <dl className="side-times">
           <div>
             <dt>Opened</dt>

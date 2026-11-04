@@ -315,6 +315,31 @@ a.btn[data-variant="primary"]:hover {
   color: var(--fg-muted);
   box-shadow: inset 0 0 0 0.5px var(--border-strong);
 }
+/* A person's tier: a faint tint of its colour and a dot, in the role badge's size */
+.tier-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 4px;
+  height: 16px;
+  padding: 0 5px 0 4px;
+  color: var(--fg);
+  font-size: 11px;
+  font-weight: var(--weight-button);
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+  background: color-mix(in oklab, var(--tier) 16%, transparent);
+  border-radius: var(--radius-small);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--tier) 45%, transparent);
+}
+.tier-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  background: var(--tier);
+  border-radius: 50%;
+}
 /* A named guest: a quiet word, not a badge */
 .guest-marker {
   flex: none;

@@ -1,0 +1,313 @@
+/* Tiers: Settings → Tiers, the inline "Set tier" picker, and "Humans only" under a reporter. State is a faint tint
+   of the tier's colour, a dot or a label; never a side rule. */
+
+/* The picker, under a comment or the sidebar's reporter */
+.tier-picker {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--layer-1);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.tier-picker-label {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.tier-picker-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.tier-option {
+  --tier: var(--fg-faint);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-small);
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--text-ui);
+  color: var(--fg);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 0.5px var(--border-strong);
+  cursor: pointer;
+}
+.tier-option:hover:not(:disabled) {
+  background: var(--hover);
+}
+.tier-option[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--tier) 16%, transparent);
+  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--tier) 55%, transparent);
+}
+.tier-picker-note {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.side-humans {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+
+/* Settings → Tiers */
+.tier + .tier {
+  border-top: 1px solid var(--border-muted);
+}
+.tier[data-open] {
+  background: color-mix(in oklab, var(--tier) 4%, transparent);
+}
+.tier-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+.tier-toggle {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.tier-toggle > .icon {
+  flex: none;
+  margin-top: 3px;
+  color: var(--icon-muted);
+  transition: transform 160ms var(--ease);
+}
+.tier[data-open] .tier-toggle > .icon {
+  transform: rotate(180deg);
+}
+.tier-swatch {
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-top: 4px;
+  background: var(--tier);
+  border-radius: 50%;
+}
+.tier-main {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.tier-name-line {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+}
+.tier-name {
+  font-weight: var(--weight-medium);
+}
+.tier-count,
+.tier-rules {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.tier-description {
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.tier-actions {
+  flex: none;
+}
+.tier-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+  max-width: 360px;
+}
+.tier-confirm-text {
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.tier-error {
+  margin: 0;
+  padding: 0 16px 10px 40px;
+}
+.tier-people {
+  display: grid;
+  gap: 2px;
+  padding: 0 16px 14px 40px;
+}
+.tier-add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 440px;
+}
+.tier-add .input {
+  flex: 1;
+  min-width: 0;
+}
+.tier-add-hint,
+.tier-empty {
+  margin: 4px 0 6px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.tier-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 4px 0;
+}
+.tier-person + .tier-person {
+  border-top: 1px solid var(--border-muted);
+}
+.tier-person > .avatar {
+  flex: none;
+}
+.tier-person-main {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.tier-person-name {
+  overflow: hidden;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.tier-person-meta {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The form (a box row, so it needs the extra class to be a grid) */
+.box-row.tier-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+}
+.tier-form-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 16px;
+}
+.tier-form-wide {
+  grid-column: 1 / -1;
+}
+.tier-rules-form {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.tier-rules-form legend {
+  margin-bottom: 8px;
+  padding: 0;
+}
+.tier-rule {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 32px;
+}
+.tier-rule-label {
+  flex: none;
+  width: 96px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.tier-rule-value {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+}
+.btn.tier-assignee {
+  max-width: 240px;
+}
+.tier-assignee-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.checkbox.tier-check {
+  align-items: flex-start;
+}
+.issue-meta .tier-badge {
+  vertical-align: 1px;
+}
+.tier-check input {
+  margin-top: 2px;
+}
+.tier-check > span {
+  display: grid;
+  gap: 2px;
+}
+.tier-check-hint {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
+.tier-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+@media (pointer: coarse) {
+  .tier-option {
+    position: relative;
+  }
+  .tier-option::after {
+    content: "";
+    position: absolute;
+    inset: -8px 0;
+  }
+  .tier-check {
+    min-height: 40px;
+  }
+}
+
+@media (max-width: 640px) {
+  /* Edit and Delete stay beside the tier; only the delete confirm takes a line of its own */
+  .box-row.tier-row:has(.tier-confirm) {
+    flex-wrap: wrap;
+  }
+  .tier-confirm {
+    width: 100%;
+    max-width: none;
+    justify-content: flex-start;
+    padding-left: 24px;
+  }
+  .tier-actions {
+    gap: 0;
+  }
+  .tier-people,
+  .tier-error {
+    padding-left: 16px;
+  }
+  .tier-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .tier-rule {
+    flex-wrap: wrap;
+    gap: 6px 12px;
+  }
+}

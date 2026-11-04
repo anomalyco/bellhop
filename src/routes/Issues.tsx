@@ -7,7 +7,7 @@ import { applyActivity, applyActorUpdate, applySummary, dropIssue, fetchList, fo
 import { useLive } from "../lib/live"
 import { appPath } from "../lib/site"
 import { Time, useUntil } from "../lib/time"
-import { ActorAvatar, actorName } from "../ui/Actor"
+import { ActorAvatar, TierBadge, actorName } from "../ui/Actor"
 import { ChevronDownIcon, CommentIcon, EyeOffIcon, LockIcon, PinIcon, PlusIcon, SearchIcon, SortIcon, TagIcon, ThumbIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
 import { AppIcon, Button, Dots, Label, StateIcon } from "../ui/primitives"
@@ -377,7 +377,14 @@ export const IssueRow = memo(function IssueRow({
           )}
         </div>
         <div className="issue-meta">
-          <span className="mono">#{issue.number}</span> · {actorName(issue.author)} opened <Time iso={issue.created_at} />
+          <span className="mono">#{issue.number}</span> · {actorName(issue.author)}
+          {issue.author.type !== "agent" && issue.author.tier && (
+            <>
+              {" "}
+              <TierBadge tier={issue.author.tier} />
+            </>
+          )}{" "}
+          opened <Time iso={issue.created_at} />
           {issue.private && (
             <span className="row-flag" title="Only the team and the reporter can see it">
               <LockIcon size={12} />
