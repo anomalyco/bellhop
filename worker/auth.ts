@@ -158,7 +158,14 @@ function nextPath(c: Ctx, input?: string) {
   const url = new URL(input, origin)
   return url.origin === origin && !url.pathname.startsWith("//") ? url.pathname + url.search + url.hash : "/"
 }
-export async function signIn(c: Ctx, address: string, name: string | null, picture: string | null, sub: string | null) {
+export async function signIn(
+  c: Ctx,
+  address: string,
+  name: string | null,
+  picture: string | null,
+  sub: string | null,
+  notice?: () => Promise<void>
+) {
   const token = secret(),
     hash = await sha256(token),
     preference = guestLocale(c)
@@ -167,7 +174,7 @@ export async function signIn(c: Ctx, address: string, name: string | null, pictu
       c.env,
       `INSERT INTO users(id,email,name,avatar_url,google_sub,locale) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET
       name=CASE WHEN ? IS NULL THEN users.name ELSE excluded.name END,avatar_url=CASE WHEN ? IS NULL THEN users.avatar_url ELSE excluded.avatar_url END,google_sub=coalesce(excluded.google_sub,users.google_sub),locale=coalesce(users.locale,excluded.locale)
-      WHERE users.google_sub IS NULL OR excluded.google_sub IS NULL OR users.google_sub=excluded.google_sub`,
+      WHERE users.google_sub IS NULL OR users.google_sub=excluded.google_sub`,
       uid(),
       address,
       name ?? address.split("@")[0]!,
@@ -179,16 +186,26 @@ export async function signIn(c: Ctx, address: string, name: string | null, pictu
     ),
     sql(
       c.env,
-      `INSERT INTO sessions SELECT ?,id,? FROM users WHERE email=? AND (? IS NULL OR google_sub=?) RETURNING user_id`,
+      `INSERT INTO sessions SELECT ?,id,? FROM users WHERE email=? AND google_sub IS ? RETURNING user_id`,
       hash,
       new Date(Date.now() + month * 1000).toISOString(),
       address,
-      sub,
       sub
     )
   ])
   const session = result[1]?.results[0]
-  if (!session) denied()
+  if (!session) {
+    if (notice) return
+    denied()
+  }
+  if (notice) {
+    try {
+      await notice()
+    } catch {
+      await sql(c.env, "DELETE FROM sessions WHERE token_hash=?", hash).run()
+      fail(503, "mail_unavailable", "Email delivery unavailable")
+    }
+  }
   const account = (await userBySession(c, hash, undefined, null)) ?? missing()
   c.set("user", account)
   if (preference) cookie(c, "bh_locale", "", 0, true)

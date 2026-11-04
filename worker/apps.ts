@@ -181,6 +181,7 @@ export async function detail(
         nudge_days: number | null
         mode: AppDetail["mode"]
         require_verified_email: number
+        trusted: number
       }
     ]
   >(
@@ -198,7 +199,7 @@ export async function detail(
       ),
       sql(
         c.env,
-        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email FROM apps WHERE id=?",
+        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,trusted FROM apps WHERE id=?",
         scope
       )
     ],
@@ -212,6 +213,7 @@ export async function detail(
     counts: totals[0]!,
     nudge_days: v.nudge_days,
     mode: v.mode,
+    ...(can(target.role, "setup") && { trusted: !!v.trusted }),
     helpdesk: { require_verified_email: !!v.require_verified_email },
     visibility: {
       default: v.default_private || v.mode === "helpdesk" ? "private" : "public",
@@ -388,6 +390,7 @@ function publicFlag(v: unknown) {
   return v
 }
 export async function updateApp(env: Env, app: App, actor: Actor, b: Record<string, unknown>): Promise<App> {
+  if (b.trusted !== undefined) bad("trusted is read-only")
   const mode = b.mode === undefined ? null : choice(b.mode, ["tracker", "helpdesk"] as const, "mode"),
     desk = b.helpdesk === undefined ? null : input(b.helpdesk)
   if (desk && typeof desk.require_verified_email !== "boolean") bad("Invalid require_verified_email")

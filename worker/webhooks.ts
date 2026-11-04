@@ -133,7 +133,7 @@ export async function enqueueWebhooks(
   if (!events.length) return []
   const settings = await sql(
     env,
-    `SELECT url,events,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'external_id',NULL,'verified_via','email','created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    `SELECT url,events,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
     issue?.author.id ?? null,
     issue?.id ?? null,
     app.id

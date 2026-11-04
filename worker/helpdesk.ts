@@ -1,5 +1,5 @@
 import { Hono } from "hono"
-import type { Actor, Contact, ContactDetail, ContactPage, Verification } from "../shared/api"
+import type { Actor, Contact, ContactDetail, ContactPage, Me, Verification } from "../shared/api"
 import {
   bad,
   body,
@@ -27,7 +27,8 @@ import { listIssues, issueNumber, issueSummary } from "./issues"
 import { actorIds, owns, visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { authenticate } from "./mcp"
 import { enqueueWebhooks } from "./webhooks"
-import { mailOrigin } from "./mail-provider"
+import { esc, mailOrigin, sendMail } from "./mail-provider"
+import { accountCopy } from "./mail-copy"
 
 export const helpdesk = new Hono<Bindings>(),
   base = "/api/apps/:slug"
@@ -40,7 +41,7 @@ helpdesk.post("/auth/email/start", async (c) => {
   const address = email((await body(c)).email)
   await issueCode(
     c.env,
-    { kind: "account", app: null, email: address },
+    { kind: "account", app: null, email: address, requester: await sha256(c.var.guestId) },
     clientIP(c),
     "Bellhop",
     requestLocale(c).locale
@@ -52,9 +53,23 @@ helpdesk.post("/auth/email/verify", async (c) => {
   await enforce(c, "RL_IP", "code-verify:" + clientIP(c))
   const b = await body(c),
     address = email(b.email)
-  await redeemCode(c.env, { kind: "account", app: null, email: address }, b.code)
-  await signIn(c, address, null, null, null)
-  return c.json(await me(c))
+  const id = await redeemCode(
+    c.env,
+    { kind: "account", app: null, email: address, requester: await sha256(c.var.guestId) },
+    b.code
+  )
+  if (id)
+    await signIn(c, address, null, null, null, () => {
+      const text = accountCopy[requestLocale(c).locale].notice
+      return sendMail(c.env, "signin-" + id, {
+        to: address,
+        fromName: "Bellhop",
+        subject: text,
+        text,
+        html: `<p>${esc(text)}</p>`
+      })
+    })
+  return c.json({ ok: true })
 })
 helpdesk.post(base + "/contact/start", async (c) => {
   assertContactHost(c)
@@ -62,7 +77,7 @@ helpdesk.post(base + "/contact/start", async (c) => {
   const address = email((await body(c)).email)
   await issueCode(
     c.env,
-    { kind: "contact", app: c.var.app.id, email: address },
+    { kind: "contact", app: c.var.app.id, email: address, requester: await sha256(c.var.guestId) },
     clientIP(c),
     c.var.app.name,
     requestLocale(c).locale
@@ -75,15 +90,19 @@ helpdesk.post(base + "/contact/verify", async (c) => {
   const b = await body(c),
     address = email(b.email),
     app = c.var.app
-  await redeemCode(c.env, { kind: "contact", app: app.id, email: address }, b.code)
+  await redeemCode(
+    c.env,
+    { kind: "contact", app: app.id, email: address, requester: await sha256(c.var.guestId) },
+    b.code
+  )
   const raw = secret(),
     at = now(),
     previous = await contactHash(c, app.slug)
-  const [, write, session] = await c.env.DB.batch<{ id: string; email: string; name: null }>([
+  const [, write, session] = await c.env.DB.batch<NonNullable<Me["contact"]>>([
     sql(c.env, "DELETE FROM contact_sessions WHERE app_id=? AND hash=?", app.id, previous),
     sql(
       c.env,
-      `INSERT INTO contacts(id,app_id,email,created_at,last_seen_at) SELECT ?,id,?,?,? FROM apps WHERE id=? AND mode='helpdesk' ON CONFLICT(app_id,email) DO UPDATE SET last_seen_at=excluded.last_seen_at RETURNING id,name,email`,
+      `INSERT INTO contacts(id,app_id,email,created_at,last_seen_at) SELECT ?,id,?,?,? FROM apps WHERE id=? AND mode='helpdesk' ON CONFLICT(app_id,email) DO UPDATE SET last_seen_at=excluded.last_seen_at RETURNING id,name,email,external_id,verified_via`,
       "ct_" + uid(),
       address,
       at,
@@ -92,14 +111,14 @@ helpdesk.post(base + "/contact/verify", async (c) => {
     ),
     sql(
       c.env,
-      "INSERT INTO contact_sessions SELECT ?,t.app_id,t.id,unixepoch()+? FROM contacts t JOIN apps a ON a.id=t.app_id WHERE t.app_id=? AND t.email=? AND a.mode='helpdesk'",
+      "INSERT INTO contact_sessions(hash,app_id,contact_id,expires) SELECT ?,t.app_id,t.id,unixepoch()+CAST(? AS INTEGER) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE t.app_id=? AND t.email=? AND a.mode='helpdesk'",
       await sha256(raw),
       contactTTL,
       app.id,
       address
     )
   ])
-  const contact = { ...(write!.results[0] ?? missing()), verified_via: "email" as const }
+  const contact = write!.results[0] ?? missing()
   if (!session!.meta.changes) missing()
   await claimContactGuest(c, contact)
   contactCookie(c, app.slug, raw)
@@ -128,13 +147,12 @@ export async function getContact(env: Env, app: string, b: Record<string, unknow
   const keys = ["id", "email", "external_id"].filter((k) => b[k] !== undefined)
   if (keys.length !== 1) bad("Supply one contact identifier")
   const k = keys[0]!
-  if (k === "external_id") missing()
   const t =
     (await sql(
       env,
       `SELECT ${contactCols} FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=? AND t.${k}=?`,
       app,
-      k === "email" ? email(b[k]) : str(b[k], "contact id", 80)
+      k === "email" ? email(b[k]) : str(b[k], k, k === "external_id" ? 255 : 80)
     ).first<Contact>()) ?? missing()
   const requests: ContactDetail["requests"] = []
   let cursor: string | undefined
@@ -206,6 +224,7 @@ export async function requestVerification(
   v: Viewer
 ): Promise<Verification> {
   const i = await requestTarget(c.env, app.id, n, v)
+  if (c.var.desk && !v.team && !c.var.contact) fail(401, "contact_required", "Sign in to request verification")
   if (!v.team && !owns(v, i.reporter)) denied()
   const id = await issueCode(
     c.env,
@@ -214,7 +233,8 @@ export async function requestVerification(
     app.name,
     i.reporter_locale ?? requestLocale(c).locale,
     actor,
-    actorIds(v)
+    actorIds(v),
+    v.team
   )
   return verification(
     (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
@@ -230,7 +250,10 @@ helpdesk.post(route, async (c) => {
     if (!caller || !role || role === "viewer") denied()
     actor = caller!.actor
     v = { team: true, actorId: actor.id }
-  } else if (!v.team) await allowWrite(c)
+  } else if (!v.team) {
+    if (c.var.desk && !c.var.contact) fail(401, "contact_required", "Sign in to request verification")
+    await allowWrite(c)
+  }
   return c.json(
     await requestVerification(c, c.var.app, issueNumber(c.req.param("number")), (await body(c)).email, actor, v),
     201

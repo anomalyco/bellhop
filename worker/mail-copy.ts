@@ -1,5 +1,31 @@
 import type { Locale } from "../shared/api"
 
+export const accountCopy: Record<Locale, { google: string; notice: string }> = {
+  en: { google: "This account signs in with Google.", notice: "New sign-in to your account using an email code." },
+  es: {
+    google: "Esta cuenta inicia sesión con Google.",
+    notice: "Se ha iniciado sesión en tu cuenta con un código de correo electrónico."
+  },
+  "pt-BR": {
+    google: "Esta conta usa o Google para entrar.",
+    notice: "Um novo acesso à sua conta foi feito com um código por e-mail."
+  },
+  fr: {
+    google: "Ce compte utilise Google pour se connecter.",
+    notice: "Nouvelle connexion à votre compte avec un code reçu par e-mail."
+  },
+  de: {
+    google: "Dieses Konto verwendet Google zur Anmeldung.",
+    notice: "Neue Anmeldung bei deinem Konto mit einem E-Mail-Code."
+  },
+  ja: {
+    google: "このアカウントには Google でログインします。",
+    notice: "メールのコードを使用してアカウントにログインしました。"
+  },
+  "zh-CN": { google: "此账户使用 Google 登录。", notice: "有人使用电子邮件验证码登录了你的账户。" },
+  ko: { google: "이 계정은 Google로 로그인합니다.", notice: "이메일 코드로 계정에 새로 로그인했습니다." }
+}
+
 // Machine-translated. The only identity in code mail is the sending workspace.
 export const deskCopy: Record<Locale,{signin:string;verify:string;code:string;confirm:string;intro:string}>={
  en:{signin:'Sign in to {workspace}',verify:'Verify your email for {workspace}',code:'Your code for {workspace} is {code}. It expires in 10 minutes. If you did not request it, ignore this email.',confirm:'Confirm email updates from {workspace}',intro:'Confirm that you want updates about your support request.'},

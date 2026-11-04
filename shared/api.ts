@@ -190,9 +190,11 @@
 //   GET    /auth/google  ->  Google OAuth  ->  /auth/google/callback  (then redirect to ?next= or /)
 //   GET    /auth/dev?email=<email>&next=<path>           only when DEV_LOGIN=1
 //   POST   /auth/logout
-//   POST   /auth/email/start       { email }             -> { ok: true }       human; emails a sign-in code
-//   POST   /auth/email/verify      { email, code }       -> Me                 signs in to the account with that email,
-//                                                                             creating it on first use
+//   POST   /auth/email/start       { email }             -> { ok: true }       human; sends a same-browser sign-in code,
+//                                                                             or Google instructions for a linked account
+//   POST   /auth/email/verify      { email, code }       -> { ok: true }       use /api/me to read the session. Valid email
+//       codes create/sign in email-only accounts and send a new-sign-in notice. A verified Google sign-in links the
+//       same email; thereafter only Google can sign in. Neither endpoint reveals which sign-in method an address uses.
 //   Sign-in and verification codes: 6 digits, valid 10 minutes, single use; 5 wrong tries end the code; rate limited
 //   per address, per IP and per workspace (429). The same answer whether or not the address has an account.
 //   POST   /mcp                                          MCP, Streamable HTTP, Authorization: Bearer <token>
@@ -224,7 +226,9 @@
 //   POST   /api/apps/:slug/contact/verify { email, code } -> Me               signs this browser in as that contact
 //   POST   /api/apps/:slug/identify       { token }      -> Me                 an IdentityToken from the host's server
 //   GET    /identify?token=<jwt>&next=<path>             the same as a link (e.g. Console's "Contact support"), on
-//                                                         the workspace's host; then redirects to next (same host)
+//                                                         the workspace's host; then redirects to next (same host).
+//                                                         Only the same-origin POST claims existing guest posts:
+//                                                         a forwarded link must not transfer the clicker's history.
 //   POST   /api/apps/:slug/contact/sign-out              -> Me
 //   GET    /api/apps/:slug/contacts?q=&cursor=           -> ContactPage        team (viewer and up) and agents
 //   GET    /api/apps/:slug/contacts/:id                  -> ContactDetail      team and agents
@@ -313,7 +317,7 @@ export interface Me {
   /** True while the bh_human cookie is valid; otherwise run Turnstile and POST /api/human before writing. */
   human: boolean
   /** The contact this browser is signed in as on this help desk's host; null elsewhere and when signed out. */
-  contact: { id: string; name: string | null; email: string | null; verified_via: ContactVerification | null } | null
+  contact: Pick<Contact, "id" | "name" | "email" | "external_id" | "verified_via"> | null
 }
 
 export interface App {
@@ -380,6 +384,8 @@ export interface FeedList {
 }
 
 export interface AppDetail extends App {
+  /** Admins only. Operator-set in D1 (no API write); permits using the workspace name alone as its mail sender. */
+  readonly trusted?: boolean
   labels: Label[]
   templates: Template[]
   /** What the viewer can see: includes private issues only for the team. */
@@ -408,6 +414,8 @@ export interface Contact {
   name: string | null
   /** A verified email: from a sign-in code, or an identity token with email_verified. */
   email: string | null
+  /** Display only. An email asserted by the host without verification; never used to link contacts or deliver mail. */
+  unverified_email: string | null
   /** The host app's user id, from an identity token's `sub`. */
   external_id: string | null
   verified_via: ContactVerification | null

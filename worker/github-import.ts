@@ -432,7 +432,7 @@ export async function importMessage(env: Env, m: Message<ImportMessage>) {
       const due = Math.min(e.retryAt, Math.ceil(Date.parse(j.created_at) / 1000) + 7 * 86400),
         changed = await sql(
           env,
-          `UPDATE github_jobs SET state='running',due=?,wake=?,version=version+1,failures=failures+? WHERE id=? AND version=? AND cipher IS NOT NULL`,
+          `UPDATE github_jobs SET state='running',due=?,wake=?,version=version+1,failures=failures+CAST(? AS INTEGER) WHERE id=? AND version=? AND cipher IS NOT NULL`,
           due,
           due + 120,
           Number(!e.limited),

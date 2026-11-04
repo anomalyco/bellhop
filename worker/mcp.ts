@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import { savedReplies } from "./team-tools"
 import { analytics } from "./analytics"
 import { getContact, requestVerification } from "./helpdesk"
-import { allowed, clientIP } from "./rate-limits"
+import { allowed, clientIP, enforce } from "./rate-limits"
 import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
   appCols,
@@ -361,6 +361,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     case "get_contact":
       return textResult(await getContact(env, app.id, b))
     case "request_verification":
+      await enforce(c, "RL_IP", "code-start:" + clientIP(c))
       return textResult(await requestVerification(c, app, n(), b.email, actor, { team: true, actorId: actor.id }))
     case "get_analytics":
       return textResult(await analytics(c, app.id, b.days === undefined ? 30 : integer(b.days, "days")))
@@ -396,7 +397,10 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       return textResult(await transferIssue(a, n(), dest.slug))
     }
     case "get_app":
-      return textResult({ ...(await detail(c, { ...chosen, role: null }, teamViewer)), role: chosen.role })
+      return textResult({
+        ...(await detail(c, { ...chosen, role: chosen.role === "admin" ? "admin" : null }, teamViewer)),
+        role: chosen.role
+      })
     case "update_app":
       return textResult(await detail(c, await updateApp(env, { ...chosen, role: "admin" }, actor, b)))
     case "list_members":

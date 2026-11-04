@@ -198,15 +198,15 @@ mailRoutes.put(route, async (c) => {
       r &&
       (await sql(
         c.env,
-        "SELECT locale FROM mail_people WHERE id=? AND nonce=? AND state='pending'",
+        "SELECT p.locale,a.trusted FROM mail_people p JOIN apps a ON a.id=p.app_id WHERE p.id=? AND p.nonce=? AND p.state='pending'",
         r.id,
         r.nonce
-      ).first<{ locale: Locale | null }>())
+      ).first<{ locale: Locale | null; trusted: number }>())
     if (r && pending) {
       const confirm = `${mailOrigin(c.env)}/email/confirm?t=${await mailToken(c.env, "confirm", r)}`,
         unsub = unsubscribeURL(c.env, await mailToken(c.env, "unsubscribe", r)),
         copy = mailCopy[pending.locale ?? "en"],
-        desk = c.var.desk ? deskCopy[pending.locale ?? "en"] : null,
+        desk = pending.trusted ? deskCopy[pending.locale ?? "en"] : null,
         workspace = c.var.app.name.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim(),
         intro = desk?.intro ?? copy.confirmIntro
       // Neutral double opt-in. Never disclose the issue, workspace or custom text to an unverified address.

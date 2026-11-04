@@ -240,23 +240,37 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
   }
 }
 
-export async function claimContactGuest(c: Ctx, contact: NonNullable<import("../shared/api").Me["contact"]>) {
+export async function claimContactGuest(
+  c: Ctx,
+  contact: NonNullable<import("../shared/api").Me["contact"]>,
+  app = c.var.app.id
+) {
   if (!c.var.existingGuest) return
-  const app = c.var.app.id,
-    previous = await scopedGuestId(c.var.guestId, app),
+  if (!contact.name) {
+    const row = await sql(
+      c.env,
+      `UPDATE contacts SET name=coalesce(name,(SELECT name FROM guest_names WHERE guest_hash=?)) WHERE app_id=? AND id=? RETURNING name`,
+      await sha256(c.var.guestId),
+      app,
+      contact.id
+    ).first<{ name: string | null }>()
+    contact.name = row?.name ?? null
+  }
+  const previous = await scopedGuestId(c.var.guestId, app),
     actor = contactActor(contact),
     json = JSON.stringify(actor)
   const [hits] = await c.env.DB.batch<RoomHit>([
     affectedRooms(c.env, JSON.stringify([previous]), app),
-    ...locations.map((s) =>
-      sql(
+    ...locations.map((s) => {
+      const named = contact.name ? "?" : `json_set(?,'$.name',json_extract(${s.col},'${s.path}.name'))`
+      return sql(
         c.env,
-        `UPDATE ${s.table} SET ${s.col}=${s.col === "activity" ? "json_set(activity,'$.actor',json(?))" : "?"}${s.table === "issues" && s.col === "author" ? ",revision=revision+1" : ""} WHERE ${s.id}=? AND ${s.guest} AND ${s.table === "issues" ? "app_id=?" : `EXISTS(SELECT 1 FROM issues i WHERE i.id=${s.table}.issue_id AND i.app_id=?)`}`,
+        `UPDATE ${s.table} SET ${s.col}=${s.col === "activity" ? `json_set(activity,'$.actor',json(${named}))` : named}${s.table === "issues" && s.col === "author" ? ",revision=revision+1" : ""} WHERE ${s.id}=? AND ${s.guest} AND ${s.table === "issues" ? "app_id=?" : `EXISTS(SELECT 1 FROM issues i WHERE i.id=${s.table}.issue_id AND i.app_id=?)`}`,
         json,
         previous,
         app
       )
-    ),
+    }),
     sql(c.env, "UPDATE attachments SET owner_id=? WHERE owner_id=? AND app_id=?", contact.id, previous, app),
     sql(
       c.env,

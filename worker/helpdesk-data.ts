@@ -1,6 +1,6 @@
 import type { Actor, Contact, Verification } from "../shared/api"
 import { sql } from "./core"
-export const contactCols = "t.id,t.name,t.email,NULL external_id,'email' verified_via,t.created_at,t.last_seen_at"
+export const contactCols = "t.id,t.name,t.email,t.unverified_email,t.external_id,t.verified_via,t.created_at,t.last_seen_at"
 export type ProofRow = Omit<Verification, "requested_by"> & { issue_id: string; requested_by: string }
 export const proofCols =
   "v.id,v.issue_id,v.email,CASE WHEN v.state='pending' AND v.expires<=unixepoch() THEN 'expired' ELSE v.state END state,v.requested_by,v.created_at,v.verified_at"

@@ -43,24 +43,35 @@ export function activeContact(c: Ctx, slug: string): Promise<ContactIdentity | n
 async function renew(c: Ctx, slug: string) {
   const hash = await contactHash(c, slug)
   if (!hash) return null
-  const [touch, read] = await c.env.DB.batch<NonNullable<Me["contact"]>>([
+  const lookup = sql(
+    c.env,
+    `SELECT t.id,t.name,t.email,t.external_id,t.verified_via,s.renewed_at<=unixepoch()-86400 due FROM contact_sessions s JOIN contacts t ON t.id=s.contact_id AND t.app_id=s.app_id JOIN apps a ON a.id=s.app_id WHERE s.hash=? AND s.expires>unixepoch() AND a.slug=? AND a.mode='helpdesk'`,
+    hash,
+    slug
+  )
+  type Read = NonNullable<Me["contact"]> & { due: number }
+  const current = await lookup.first<Read>()
+  if (!current) return null
+  const { due, ...initial } = current
+  if (!due) return { contact: initial, hash }
+  const [touch, , read] = await c.env.DB.batch<Read & { age: number }>([
     sql(
       c.env,
-      `UPDATE contact_sessions SET expires=unixepoch()+? WHERE hash=? AND expires>unixepoch() AND app_id=(SELECT id FROM apps WHERE slug=? AND mode='helpdesk')`,
+      `UPDATE contact_sessions SET renewed_at=unixepoch(),expires=min(unixepoch()+CAST(? AS INTEGER),created_at+7776000) WHERE hash=? AND expires>unixepoch() AND renewed_at<=unixepoch()-86400 AND app_id=(SELECT id FROM apps WHERE slug=? AND mode='helpdesk') RETURNING expires-unixepoch() age`,
       contactTTL,
       hash,
       slug
     ),
     sql(
       c.env,
-      `UPDATE contacts SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=(SELECT s.contact_id FROM contact_sessions s JOIN apps a ON a.id=s.app_id WHERE s.hash=? AND s.expires>unixepoch() AND a.slug=? AND a.mode='helpdesk') RETURNING id,name,email,'email' verified_via`,
-      hash,
-      slug
-    )
+      `UPDATE contacts SET last_seen_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE changes()>0 AND id=(SELECT contact_id FROM contact_sessions WHERE hash=?)`,
+      hash
+    ),
+    lookup
   ])
-  const contact = read!.results[0]
-  if (!touch!.meta.changes || !contact) return null
-  contactCookie(c, slug, getCookie(c, key(slug))!)
+  if (!read!.results[0]) return null
+  const { due: _renewed, ...contact } = read!.results[0]
+  if (touch!.results[0]) contactCookie(c, slug, getCookie(c, key(slug))!, touch!.results[0].age)
   return { contact, hash }
 }
 export const contactActor = (t: NonNullable<Me["contact"]>): Actor => ({
