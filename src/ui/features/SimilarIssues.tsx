@@ -6,6 +6,7 @@ import { visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 import { StateIcon } from "../primitives"
 import "../../styles/features.css"
+import { useT } from "../../i18n/core"
 
 /** Titles shorter than this (or with fewer than three letters) don't ask; the server would answer nothing anyway. */
 const enough = (t: string) => t.length >= 4 && (t.match(/\p{L}/gu)?.length ?? 0) >= 3
@@ -15,6 +16,7 @@ const enough = (t: string) => t.length >= 4 && (t.match(/\p{L}/gu)?.length ?? 0)
  * ("Similar issues"), over the form rather than pushing it down. Each opens in a new tab so the draft stays.
  */
 export function SimilarIssues({ slug, title, exclude, children }: { slug: string; title: string; exclude?: number[]; children: ReactNode }) {
+  const t = useT()
   const trimmed = title.trim()
   const [query, setQuery] = useState("")
   const [focused, setFocused] = useState(false)
@@ -53,8 +55,8 @@ export function SimilarIssues({ slug, title, exclude, children }: { slug: string
     >
       {children}
       {open && (
-        <div className="similar-pop" role="region" aria-label="Similar issues" onPointerDown={(e) => e.preventDefault()}>
-          <p className="similar-head">Similar issues</p>
+        <div className="similar-pop" role="region" aria-label={t("similar.title")} onPointerDown={(e) => e.preventDefault()}>
+          <p className="similar-head">{t("similar.title")}</p>
           <ul className="similar-list">
             {shown.map((i) => (
               <li key={i.id}>

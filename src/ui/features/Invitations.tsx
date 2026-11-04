@@ -6,6 +6,7 @@ import { Time } from "../../lib/time"
 import { AppIcon, Button } from "../primitives"
 import { RoleBadge } from "../roles/RoleSelect"
 import "../../styles/features.css"
+import { useT } from "../../i18n/core"
 
 /** The account's waiting invitations; null while signed out. A missing route (older backend) reads as none. */
 export function useInvitations() {
@@ -18,11 +19,12 @@ export function useInvitations() {
  * Accepting puts the workspace in the list below at once; declining just removes the row.
  */
 export function InvitationsSection({ invitations }: { invitations: Invitation[] }) {
+  const t = useT()
   if (invitations.length === 0) return null
   return (
     <section className="invites" aria-labelledby="invites-title">
       <h2 id="invites-title" className="section-title">
-        {invitations.length === 1 ? "Invitation" : `${invitations.length} invitations`}
+        {t("invite.title", { count: invitations.length })}
       </h2>
       <div className="box">
         {invitations.map((i) => (
@@ -34,6 +36,7 @@ export function InvitationsSection({ invitations }: { invitations: Invitation[] 
 }
 
 function InvitationRow({ invitation }: { invitation: Invitation }) {
+  const t = useT()
   const [busy, setBusy] = useState<"accept" | "decline" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const drop = () => setData<Invitation[]>(keys.invitations, (list) => list?.filter((i) => i.id !== invitation.id))
@@ -72,16 +75,16 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
           <RoleBadge role={invitation.role} />
         </div>
         <div className="issue-meta">
-          Invited by {invitation.invited_by.name} <Time iso={invitation.created_at} />
+          {t("invite.by", { name: invitation.invited_by.name })} <Time iso={invitation.created_at} />
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
       <div className="invite-actions">
         <Button size="small" variant="invisible" onClick={decline} disabled={!!busy}>
-          {busy === "decline" ? "Declining…" : "Decline"}
+          {busy === "decline" ? t("invite.declining") : t("invite.decline")}
         </Button>
         <Button size="small" variant="primary" onClick={accept} disabled={!!busy}>
-          {busy === "accept" ? "Joining…" : "Accept"}
+          {busy === "accept" ? t("invite.accepting") : t("invite.accept")}
         </Button>
       </div>
     </div>
@@ -90,8 +93,9 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
 
 /** For the account avatar in the header: a small dot while invitations wait. Renders nothing otherwise. */
 export function InvitationDot() {
+  const t = useT()
   const { data } = useInvitations()
   const n = data?.length ?? 0
   if (!n) return null
-  return <span className="invite-dot" aria-label={n === 1 ? "1 invitation" : `${n} invitations`} />
+  return <span className="invite-dot" aria-label={t("invite.dot", { count: n })} />
 }

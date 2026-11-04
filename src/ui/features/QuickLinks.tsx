@@ -2,16 +2,18 @@ import type { Filter } from "../../lib/issues"
 import { PersonIcon } from "../icons"
 import { SiteLink } from "../SiteLink"
 import "../../styles/features.css"
+import { useT } from "../../i18n/core"
 
 /** For the home feed's rail, for everyone (guests too): the way back to the issues you opened. */
 export function RailReports() {
+  const t = useT()
   return (
     <section className="rail-section rail-reports">
       <ul className="rail-list">
         <li>
           <SiteLink href="/reports" className="rail-row">
             <PersonIcon size={16} />
-            <span className="rail-name">Your reports</span>
+            <span className="rail-name">{t("menu.reports")}</span>
           </SiteLink>
         </li>
       </ul>
@@ -34,6 +36,7 @@ export function toggleMine(f: Filter): Filter {
  * the query has it. Pass `disabled` for the loading skeleton so the toolbar keeps its width.
  */
 export function MineFilter({ filter, onChange, disabled }: { filter: Filter; onChange?: (next: Filter) => void; disabled?: boolean }) {
+  const t = useT()
   const on = isMine(filter)
   return (
     <button
@@ -42,13 +45,13 @@ export function MineFilter({ filter, onChange, disabled }: { filter: Filter; onC
       data-variant="default"
       data-active={on ? "" : undefined}
       aria-pressed={on}
-      aria-label="Mine: issues you opened"
-      title="Issues you opened"
+      aria-label={t("mine.aria")}
+      title={t("mine.title")}
       disabled={disabled}
       onClick={() => onChange?.(toggleMine(filter))}
     >
       <PersonIcon size={14} />
-      <span className="filter-text">Mine</span>
+      <span className="filter-text">{t("mine.label")}</span>
     </button>
   )
 }

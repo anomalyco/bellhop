@@ -3,6 +3,7 @@ import { agentCap, agentRoleLabel, agentRoleText, agentRoles, atLeast, defaultAg
 import { AppIcon } from "../primitives"
 import { RoleSelect, type RoleOption } from "../roles/RoleSelect"
 import "../../styles/agents.css"
+import { t, useT } from "../../i18n/core"
 
 /** A workspace the account belongs to, with its team role there (which caps what an agent may get). */
 export interface AccessApp {
@@ -23,7 +24,7 @@ const roleOptions = (cap: AgentRole): RoleOption<AgentRole>[] =>
   agentRoles.map((r) => ({
     value: r,
     label: agentRoleLabel[r],
-    description: atLeast(cap, r) ? agentRoleText[r] : `Above your role in this workspace`,
+    description: atLeast(cap, r) ? agentRoleText[r] : t("accessEditor.aboveRole"),
     disabled: !atLeast(cap, r),
   }))
 
@@ -34,6 +35,7 @@ type RowValue = AgentRole | "default" | "none"
  * ticked ones each with a role; plus whether it may create workspaces. Roles above the account's own are disabled.
  */
 export function AccessEditor({ apps, value, onChange, name = "access" }: { apps: AccessApp[]; value: AgentAccess; onChange: (next: AgentAccess) => void; name?: string }) {
+  const t = useT()
   const all = value.all_workspaces
   const entry = (id: string) => value.apps.find((a) => a.id === id)
   const setEntry = (id: string, role: AgentRole | null | undefined) => {
@@ -55,23 +57,23 @@ export function AccessEditor({ apps, value, onChange, name = "access" }: { apps:
         <label className="access-check">
           <input type="checkbox" checked={!!all} onChange={(e) => toggleAll(e.target.checked)} />
           <span className="access-check-text">
-            <span className="access-check-title">All workspaces</span>
-            <span className="access-hint">Including ones you create or join later. Never more than your own role in each.</span>
+            <span className="access-check-title">{t("accessEditor.all")}</span>
+            <span className="access-hint">{t("accessEditor.allHint")}</span>
           </span>
         </label>
         {all && (
           <RoleSelect
             value={all}
-            label="Role in all workspaces"
+            label={t("accessEditor.roleAll")}
             options={agentRoles.map((r) => ({ value: r, label: agentRoleLabel[r], description: agentRoleText[r] }))}
             onChange={(r) => onChange({ ...value, all_workspaces: r })}
           />
         )}
       </div>
 
-      <div className="access-list" role="group" aria-label={all ? "Exceptions" : "Workspaces"}>
-        {all && apps.length > 0 && <p className="access-list-head">Exceptions: give a workspace a different role, or no access.</p>}
-        {apps.length === 0 && <p className="access-hint access-empty">You aren't on any workspace yet.</p>}
+      <div className="access-list" role="group" aria-label={all ? t("accessEditor.exceptions") : t("accessEditor.workspaces")}>
+        {all && apps.length > 0 && <p className="access-list-head">{t("accessEditor.exceptionsHead")}</p>}
+        {apps.length === 0 && <p className="access-hint access-empty">{t("accessEditor.noWorkspaces")}</p>}
         {apps.map((app) => {
           const cap = agentCap(app.role)
           const current = entry(app.id)
@@ -87,11 +89,11 @@ export function AccessEditor({ apps, value, onChange, name = "access" }: { apps:
                 </span>
                 <RoleSelect<RowValue>
                   value={row}
-                  label={`Role in ${app.name}`}
+                  label={t("accessEditor.roleIn", { name: app.name })}
                   options={[
-                    { value: "default", label: `${agentRoleLabel[all]} (all)`, description: "Same as all workspaces" },
+                    { value: "default", label: t("accessEditor.defaultRole", { role: agentRoleLabel[all] }), description: t("accessEditor.sameAsAll") },
                     ...roleOptions(cap),
-                    { value: "none", label: "No access", description: "Leave this workspace out", danger: true },
+                    { value: "none", label: t("accessEditor.noAccess"), description: t("accessEditor.leaveOut"), danger: true },
                   ]}
                   onChange={(r) => setEntry(app.id, r === "default" ? undefined : r === "none" ? null : r)}
                 />
@@ -110,7 +112,7 @@ export function AccessEditor({ apps, value, onChange, name = "access" }: { apps:
               </label>
               <RoleSelect
                 value={ticked ? current.role! : defaultAgentRole(app.role)}
-                label={`Role in ${app.name}`}
+                label={t("accessEditor.roleIn", { name: app.name })}
                 disabled={!ticked}
                 options={roleOptions(cap)}
                 onChange={(r) => setEntry(app.id, r)}
@@ -124,8 +126,8 @@ export function AccessEditor({ apps, value, onChange, name = "access" }: { apps:
         <label className="access-check">
           <input type="checkbox" checked={value.create_workspaces} onChange={(e) => onChange({ ...value, create_workspaces: e.target.checked })} />
           <span className="access-check-text">
-            <span className="access-check-title">Let it create workspaces</span>
-            <span className="access-hint">You'll own them, and it gets admin there.</span>
+            <span className="access-check-title">{t("accessEditor.create")}</span>
+            <span className="access-hint">{t("accessEditor.createHint")}</span>
           </span>
         </label>
       </div>

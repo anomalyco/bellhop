@@ -20,10 +20,13 @@ import { AttachmentList, EventBurst, EventLine, MessageGroup, TypingLine } from 
 import { EditedMarker, HiddenLine, IssueFlags, reasons, type CommentContext } from "./Moderation"
 import { DiagnosticsBlock, logIds } from "../../ui/features/Diagnostics"
 import { ImportedMarker } from "../../ui/features/Imported"
+import { tr, useT } from "../../i18n/core"
+import { formatNumber, sentenceGap } from "../../i18n"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
 export function IssueView({ model }: { model: IssueModel }) {
+  useT()
   const { app, issue, actionError } = model
   const authorTier = issue.author.type !== "agent" ? (issue.author.tier ?? null) : null
   const ctx: CommentContext = { app, issue, member: model.member, viewerId: model.viewer?.id ?? null, signedIn: !!model.me?.user }
@@ -63,6 +66,7 @@ export function IssueView({ model }: { model: IssueModel }) {
 }
 
 function Report({ model }: { model: IssueModel }) {
+  const t = useT()
   const { app, issue, canEdit, viewers } = model
   const [editingTitle, setEditingTitle] = useState(false)
   const [editingBody, setEditingBody] = useState(false)
@@ -87,12 +91,12 @@ function Report({ model }: { model: IssueModel }) {
           <div className="report-actions">
             {canEdit && (
               <Button size="small" variant="invisible" onClick={() => setEditingTitle(true)}>
-                Edit
+                {t("issue.edit")}
               </Button>
             )}
             <MeToo model={model} />
             <AppLink slug={app.slug} href={appPath(app.slug, "/new")} className="btn report-new" data-variant="default" data-size="small">
-              New issue
+              {t("issue.newIssue")}
             </AppLink>
             <IssueMenu model={model} onDelete={() => setConfirmDelete(true)} onMove={() => setMoving(true)} onError={setMenuError} />
           </div>
@@ -107,11 +111,13 @@ function Report({ model }: { model: IssueModel }) {
       {confirmDelete && (
         <div className="report-confirm" role="alert">
           <p className="report-confirm-text">
-            <strong>Delete #{issue.number} permanently?</strong> Its comments, files, events and history go too, and this can't be undone.
+            <strong>{t("issue.deleteConfirm", { number: String(issue.number) })}</strong>
+            {sentenceGap()}
+            {t("issue.deleteConfirmText")}
           </p>
           <div className="report-confirm-actions">
             <Button size="small" variant="invisible" onClick={() => setConfirmDelete(false)} disabled={deleting}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               size="small"
@@ -126,7 +132,7 @@ function Report({ model }: { model: IssueModel }) {
                 }
               }}
             >
-              {deleting ? "Deleting…" : "Delete issue"}
+              {deleting ? t("issue.deleting") : t("issue.delete")}
             </Button>
           </div>
         </div>
@@ -134,7 +140,7 @@ function Report({ model }: { model: IssueModel }) {
       <p className="report-by">
         <ActorAvatar actor={issue.author} size={18} />
         <span>
-          <ActorName actor={issue.author} /> opened this <Time iso={issue.created_at} />
+          {tr("issue.openedBy", { author: <ActorName actor={issue.author} />, time: <Time iso={issue.created_at} /> })}
           {issue.edited_at && (
             <>
               {" · "}
@@ -142,9 +148,9 @@ function Report({ model }: { model: IssueModel }) {
             </>
           )}
           {viewers !== null && viewers > 0 && (
-            <span className="report-viewers" title="People on this page now">
+            <span className="report-viewers" title={t("issue.viewersTitle")}>
               {" · "}
-              <PersonIcon size={12} /> {viewers} viewing
+              <PersonIcon size={12} /> {t("issue.viewing", { count: viewers })}
             </span>
           )}
         </span>
@@ -162,7 +168,7 @@ function Report({ model }: { model: IssueModel }) {
             {loose.length > 0 && <AttachmentList attachments={loose} />}
             {canEdit && (
               <button type="button" className="report-edit-body" onClick={() => setEditingBody(true)}>
-                Edit description
+                {t("issue.editDescription")}
               </button>
             )}
             <DiagnosticsBlock metadata={diagnostics} />
@@ -188,6 +194,7 @@ function IssueMenu({
   onMove: () => void
   onError: (message: string | null) => void
 }) {
+  const t = useT()
   const { app, issue, member } = model
   const admin = app.role === "owner" || app.role === "admin"
   // Locking, pinning and moving are triage: members and up (viewers on the team can't).
@@ -198,7 +205,7 @@ function IssueMenu({
     <Menu
       align="end"
       width={260}
-      trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label="Issue actions" icon={<KebabIcon />} {...p} />}
+      trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("issue.actions")} icon={<KebabIcon />} {...p} />}
     >
       {(close) => {
         const pick = (fn: () => unknown) => () => {
@@ -211,49 +218,49 @@ function IssueMenu({
             {triage && (
               <>
                 <MenuItem
-                  description={issue.pinned ? "Off the top of the list" : "At the top of the list; up to three"}
+                  description={issue.pinned ? t("issue.unpinText") : t("issue.pinText")}
                   onSelect={pick(() => model.onPin(!issue.pinned))}
                 >
-                  {issue.pinned ? "Unpin" : "Pin to the list"}
+                  {issue.pinned ? t("issue.unpin") : t("issue.pin")}
                 </MenuItem>
                 <MenuItem
-                  description={issue.locked ? "Anyone who can see it can reply again" : "Only the team can reply; votes still work"}
+                  description={issue.locked ? t("issue.unlockText") : t("issue.lockText")}
                   onSelect={pick(() => model.onLock(!issue.locked))}
                 >
-                  {issue.locked ? "Unlock conversation" : "Lock conversation"}
+                  {issue.locked ? t("issue.unlock") : t("issue.lock")}
                 </MenuItem>
               </>
             )}
             {privacy &&
               (issue.private ? (
-                <MenuItem description="Anyone with the link can see it" onSelect={pick(() => model.onPrivacy(false))}>
-                  Make public
+                <MenuItem description={t("issue.makePublicText")} onSelect={pick(() => model.onPrivacy(false))}>
+                  {t("issue.makePublic")}
                 </MenuItem>
               ) : (
-                <MenuItem description="Only the team and the reporter can see it" onSelect={pick(() => model.onPrivacy(true))}>
-                  Make private
+                <MenuItem description={t("issue.makePrivateText")} onSelect={pick(() => model.onPrivacy(true))}>
+                  {t("issue.makePrivate")}
                 </MenuItem>
               ))}
             {member &&
               (issue.hidden ? (
-                <MenuItem description="Back where everyone who could see it can" onSelect={pick(() => model.onHide(null))}>
-                  Unhide issue
+                <MenuItem description={t("issue.unhideText")} onSelect={pick(() => model.onHide(null))}>
+                  {t("issue.unhide")}
                 </MenuItem>
               ) : (
                 reasons.map((r) => (
-                  <MenuItem key={r.value} description={r.value === "spam" ? "Only the team will see it" : undefined} onSelect={pick(() => model.onHide(r.value))}>
-                    Hide as {r.label.toLowerCase()}
+                  <MenuItem key={r.value} description={r.value === "spam" ? t("issue.hideSpamText") : undefined} onSelect={pick(() => model.onHide(r.value))}>
+                    {r.hideAs}
                   </MenuItem>
                 ))
               ))}
             {triage && (
-              <MenuItem description="To another workspace you're on, with a new number" onSelect={pick(onMove)}>
-                Move to workspace…
+              <MenuItem description={t("issue.moveText")} onSelect={pick(onMove)}>
+                {t("issue.move")}
               </MenuItem>
             )}
             {admin && (
-              <MenuItem danger description="Permanent, with its comments and files" onSelect={pick(onDelete)}>
-                Delete issue
+              <MenuItem danger description={t("issue.deleteText")} onSelect={pick(onDelete)}>
+                {t("issue.delete")}
               </MenuItem>
             )}
           </>
@@ -265,6 +272,7 @@ function IssueMenu({
 
 /** "Me too": everyone can add theirs (guests pass the human check), with the count. */
 function MeToo({ model }: { model: IssueModel }) {
+  const t = useT()
   const { issue } = model
   const on = !!issue.viewer_voted
   const votes = issue.votes ?? 0
@@ -274,18 +282,19 @@ function MeToo({ model }: { model: IssueModel }) {
       className="btn me-too"
       aria-pressed={on}
       data-active={on || undefined}
-      title={on ? "You have this too. Click to take it back." : "You have this too"}
+      title={on ? t("metoo.on") : t("metoo.off")}
       icon={<ThumbIcon size={14} />}
       onClick={() => void model.onVote(!on)}
     >
-      Me too
-      {votes > 0 && <span className="mono-num me-too-n">{votes}</span>}
+      {t("metoo.label")}
+      {votes > 0 && <span className="mono-num me-too-n">{formatNumber(votes)}</span>}
     </Button>
   )
 }
 
 /** Moving to another workspace: pick where (workspaces you're a member of), see what carries over, then move. */
 function MovePanel({ model, onCancel }: { model: IssueModel; onCancel: () => void }) {
+  const t = useT()
   const { app, issue } = model
   const { data: apps } = useResource<App[]>(keys.apps, api.apps, 10_000)
   const targets = (apps ?? []).filter((a) => a.slug !== app.slug && atLeast(a.role, "member"))
@@ -307,7 +316,7 @@ function MovePanel({ model, onCancel }: { model: IssueModel; onCancel: () => voi
     <div className="report-confirm move-panel">
       <div className="move-pick">
         <span className="report-confirm-text">
-          <strong>Move #{issue.number} to</strong>
+          <strong>{t("move.to", { number: String(issue.number) })}</strong>
         </span>
         <Menu
           align="start"
@@ -320,7 +329,7 @@ function MovePanel({ model, onCancel }: { model: IssueModel; onCancel: () => voi
                   <span className="move-select-name">{to.name}</span>
                 </>
               ) : (
-                <span className="move-select-name">{apps ? (targets.length ? "Choose a workspace" : "No other workspaces") : "Loading…"}</span>
+                <span className="move-select-name">{apps ? (targets.length ? t("move.choose") : t("move.none")) : t("common.loading")}</span>
               )}
               <ChevronDownIcon size={12} />
             </button>
@@ -344,15 +353,14 @@ function MovePanel({ model, onCancel }: { model: IssueModel; onCancel: () => voi
         </Menu>
       </div>
       <p className="report-confirm-text move-note">
-        It gets a new number there. Labels carry over by name, the assignee if they're on that team; relations don't. The old link
-        will point to the new place.
+        {t("move.note")}
       </p>
       <div className="report-confirm-actions">
         <Button size="small" variant="invisible" onClick={onCancel} disabled={busy}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button size="small" variant="primary" onClick={move} disabled={!to || busy}>
-          {busy ? "Moving…" : "Move issue"}
+          {busy ? t("move.moving") : t("move.button")}
         </Button>
       </div>
       {error && <p className="field-error">{error}</p>}

@@ -17,26 +17,44 @@ import { Page } from "../../ui/Shell"
 import { TierPicker, canHaveTier } from "../../ui/tiers/TierPicker"
 import { AppLink, SiteLink } from "../../ui/SiteLink"
 import "../../styles/moderation.css"
+import { tKey, tr, useT } from "../../i18n/core"
+import { sentenceGap } from "../../i18n"
 
-export const reasons: { value: ModerationReason; label: string }[] = [
-  { value: "spam", label: "Spam" },
-  { value: "abuse", label: "Abuse" },
-  { value: "off_topic", label: "Off topic" },
-]
-export const reasonText: Record<ModerationReason, string> = { spam: "spam", abuse: "abuse", off_topic: "off topic" }
+export const reasons: { value: ModerationReason; readonly label: string; readonly hideAs: string }[] = (["spam", "abuse", "off_topic"] as const).map((value) => ({
+  value,
+  get label() {
+    return tKey(`reason.${value}`)
+  },
+  get hideAs() {
+    return tKey(`hideAs.${value}`)
+  },
+}))
+/** A reason inside a sentence ("Hidden · spam"), in the active language. */
+export const reasonText = {
+  get spam() {
+    return tKey("reasonText.spam")
+  },
+  get abuse() {
+    return tKey("reasonText.abuse")
+  },
+  get off_topic() {
+    return tKey("reasonText.off_topic")
+  },
+} as Record<ModerationReason, string>
 
 /** On the team: an account with a role here, or an agent. The team can't be blocked. */
 export const onTeam = (a: Actor) => a.type === "agent" || (a.type === "member" && !!a.role)
 
 /** "edited" beside a time; opens the earlier versions, newest first (the old text as markdown, title changes for issues). */
 export function EditedMarker({ slug, number, commentId }: { slug: string; number: number; commentId?: string }) {
+  const t = useT()
   return (
     <Menu
       align="start"
       width={440}
       trigger={(p) => (
-        <button type="button" className="edited-marker" aria-label="Edited: show earlier versions" {...p}>
-          edited
+        <button type="button" className="edited-marker" aria-label={t("edited.aria")} {...p}>
+          {t("edited.marker")}
         </button>
       )}
     >
@@ -51,16 +69,17 @@ function History({ slug, number, commentId }: { slug: string; number: number; co
     () => (commentId ? api.commentHistory(slug, number, commentId) : api.issueHistory(slug, number)),
     1_000,
   )
+  const t = useT()
   return (
     <div className="history">
       <MenuHeader>
-        <strong>Earlier versions</strong>
-        <span className="menu-item-description">Newest first. The current text is on the page.</span>
+        <strong>{t("history.title")}</strong>
+        <span className="menu-item-description">{t("history.subtitle")}</span>
       </MenuHeader>
       <div className="history-scroll">
-        {!data && !error && <div className="history-empty">Loading…</div>}
+        {!data && !error && <div className="history-empty">{t("common.loading")}</div>}
         {!!error && !data && <div className="history-empty">{errorMessage(error)}</div>}
-        {data?.length === 0 && <div className="history-empty">No earlier versions.</div>}
+        {data?.length === 0 && <div className="history-empty">{t("history.none")}</div>}
         {data?.map((rev, i) => {
           const older = data[i + 1]
           const titleChanged = rev.title !== null && (!older || older.title !== rev.title)
@@ -75,7 +94,7 @@ function History({ slug, number, commentId }: { slug: string; number: number; co
               </header>
               {titleChanged && <p className="history-title">{rev.title}</p>}
               <div className="history-body">
-                {rev.body.trim() ? <Markdown source={rev.body} slug={slug} /> : <p className="muted-text">No description</p>}
+                {rev.body.trim() ? <Markdown source={rev.body} slug={slug} /> : <p className="muted-text">{t("history.noDescription")}</p>}
               </div>
             </article>
           )
@@ -87,6 +106,7 @@ function History({ slug, number, commentId }: { slug: string; number: number; co
 
 /** The lock and eye markers under an issue's title, each with who can see it. */
 export function IssueFlags({ issue }: { issue: Issue }) {
+  const t = useT()
   if (!issue.private && !issue.hidden && !issue.locked && !issue.pinned) return null
   return (
     <div className="report-flags">
@@ -94,37 +114,41 @@ export function IssueFlags({ issue }: { issue: Issue }) {
         <p className="flag-line">
           <span className="flag">
             <PinIcon size={12} />
-            Pinned
+            {t("flag.pinned")}
           </span>
-          <span className="flag-text">Shown at the top of the issue list.</span>
+          <span className="flag-text">{t("flag.pinnedText")}</span>
         </p>
       )}
       {issue.locked && (
         <p className="flag-line">
           <span className="flag">
             <CommentIcon size={12} />
-            Locked
+            {t("flag.locked")}
           </span>
-          <span className="flag-text">Only the team can reply. Anyone can still say "Me too".</span>
+          <span className="flag-text">{t("flag.lockedText")}</span>
         </p>
       )}
       {issue.private && (
         <p className="flag-line">
           <span className="flag">
             <LockIcon size={12} />
-            Private
+            {t("flag.private")}
           </span>
-          <span className="flag-text">Only the team and {issue.viewer_is_author ? "you" : "the reporter"} can see this issue.</span>
+          <span className="flag-text">{issue.viewer_is_author ? t("flag.privateYou") : t("flag.privateReporter")}</span>
         </p>
       )}
       {issue.hidden && (
         <p className="flag-line">
           <span className="flag" data-tone="hidden">
             <EyeOffIcon size={12} />
-            Hidden · {reasonText[issue.hidden.reason]}
+            {t("flag.hidden", { reason: reasonText[issue.hidden.reason] })}
           </span>
           <span className="flag-text">
-            Only the team can see it.{issue.hidden.by && <> Hidden by {actorName(issue.hidden.by)}</>} <Time iso={issue.hidden.at} />.
+            {t("flag.hiddenText")}
+            {sentenceGap()}
+            {issue.hidden.by
+              ? tr("flag.hiddenBy", { name: actorName(issue.hidden.by), time: <Time iso={issue.hidden.at} /> })
+              : tr("flag.hiddenAt", { time: <Time iso={issue.hidden.at} /> })}
           </span>
         </p>
       )}
@@ -134,12 +158,13 @@ export function IssueFlags({ issue }: { issue: Issue }) {
 
 /** For people outside the team: a hidden comment as one quiet line, with nothing of what it said. */
 export function HiddenLine({ reason }: { reason: ModerationReason }) {
+  const t = useT()
   return (
     <div className="event hidden-line">
       <span className="event-icon">
         <EyeOffIcon size={14} />
       </span>
-      <span className="event-text">Hidden by a moderator · {reasonText[reason]}</span>
+      <span className="event-text">{t("hiddenLine", { reason: reasonText[reason] })}</span>
     </div>
   )
 }
@@ -162,6 +187,7 @@ type Mode = "edit" | "delete" | "block" | "tier" | null
  * menu: edit and delete for the author; delete, hide or unhide, and block for the team. Confirms are inline.
  */
 export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; comment: Comment; children: ReactNode }) {
+  const t = useT()
   const { app, issue, member } = ctx
   const slug = app.slug
   const [mode, setMode] = useState<Mode>(null)
@@ -197,7 +223,7 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
       <Menu
         align="end"
         width={240}
-        trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`Actions for ${actorName(author)}'s comment`} icon={<KebabIcon />} {...p} />}
+        trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("comment.actions", { name: actorName(author) })} icon={<KebabIcon />} {...p} />}
       >
         {(close) => {
           const pick = (fn: () => void) => () => {
@@ -214,39 +240,39 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
                     setMode("edit")
                   })}
                 >
-                  Edit
+                  {t("common.edit")}
                 </MenuItem>
               )}
               {member &&
                 (comment.hidden ? (
-                  <MenuItem onSelect={pick(() => act(async () => store(await api.unhideComment(slug, issue.number, comment.id))))}>Unhide</MenuItem>
+                  <MenuItem onSelect={pick(() => act(async () => store(await api.unhideComment(slug, issue.number, comment.id))))}>{t("comment.unhide")}</MenuItem>
                 ) : (
                   reasons.map((r) => (
                     <MenuItem key={r.value} onSelect={pick(() => act(async () => store(await api.hideComment(slug, issue.number, comment.id, r.value))))}>
-                      Hide as {r.label.toLowerCase()}
+                      {r.hideAs}
                     </MenuItem>
                   ))
                 ))}
               {(mine || member) && (
                 <MenuItem danger onSelect={pick(() => setMode("delete"))}>
-                  Delete
+                  {t("common.delete")}
                 </MenuItem>
               )}
               {member && canHaveTier(author) && (
-                <MenuItem description="VIP, Pro… only the team sees it" onSelect={pick(() => setMode("tier"))}>
-                  Set tier…
+                <MenuItem description={t("comment.setTierText")} onSelect={pick(() => setMode("tier"))}>
+                  {t("comment.setTier")}
                 </MenuItem>
               )}
               {canBlock && (
                 <MenuItem
                   danger
-                  description="They can't post or upload here any more"
+                  description={t("comment.blockText")}
                   onSelect={pick(() => {
                     setHideAll(false)
                     setMode("block")
                   })}
                 >
-                  Block {actorName(author)}
+                  {t("comment.block", { name: actorName(author) })}
                 </MenuItem>
               )}
             </>
@@ -278,14 +304,14 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
             onBusyChange={setUploading}
             onSubmit={() => void save()}
             autoFocus
-            label="Edit comment"
+            label={t("comment.editLabel")}
             actions={
               <>
                 <Button variant="invisible" onClick={() => setMode(null)} disabled={busy}>
-                  Cancel
+                  {t("common.cancel")}
                 </Button>
                 <Button variant="primary" onClick={() => void save()} disabled={busy || uploading || !draft.trim()}>
-                  {busy ? "Saving…" : "Save"}
+                  {busy ? t("common.saving") : t("common.save")}
                 </Button>
               </>
             }
@@ -295,9 +321,9 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
         <>
           <p className="msg-hidden">
             <EyeOffIcon size={12} />
-            <span>Hidden · {reasonText[comment.hidden.reason]}</span>
+            <span>{t("comment.hidden", { reason: reasonText[comment.hidden.reason] })}</span>
             <button type="button" className="link-button msg-hidden-toggle" aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-              {expanded ? "Collapse" : "Show"}
+              {expanded ? t("comment.collapse") : t("comment.show")}
             </button>
           </p>
           {expanded && <div className="msg-hidden-body">{children}</div>}
@@ -313,7 +339,7 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
             (comment.helpful ?? 0) > 0 && (
               <span className="helpful-count">
                 <ThumbIcon size={12} />
-                {comment.helpful} found this helpful
+                {t("comment.foundHelpful", { count: comment.helpful ?? 0 })}
               </span>
             )
           )}
@@ -322,9 +348,9 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
       )}
       {mode === "delete" && (
         <div className="msg-confirm">
-          <span className="msg-confirm-text">{mine ? "Delete your comment?" : `Delete ${actorName(author)}'s comment?`} This can't be undone.</span>
+          <span className="msg-confirm-text">{mine ? t("comment.deleteYours") : t("comment.deleteTheirs", { name: actorName(author) })}</span>
           <Button size="small" variant="invisible" onClick={() => setMode(null)} disabled={busy}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button
             size="small"
@@ -337,7 +363,7 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
               })
             }
           >
-            Delete
+            {t("common.delete")}
           </Button>
         </div>
       )}
@@ -351,14 +377,14 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
       )}
       {mode === "block" && (
         <div className="msg-confirm msg-confirm-block">
-          <span className="msg-confirm-text">Block {actorName(author)}? They won't be able to post, edit or upload here.</span>
+          <span className="msg-confirm-text">{t("comment.blockConfirm", { name: actorName(author) })}</span>
           <label className="checkbox msg-confirm-check">
             <input type="checkbox" checked={hideAll} onChange={(e) => setHideAll(e.target.checked)} />
-            Also hide everything they wrote here
+            {t("comment.blockHideAll")}
           </label>
           <span className="msg-confirm-actions">
             <Button size="small" variant="invisible" onClick={() => setMode(null)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               size="small"
@@ -369,11 +395,11 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
                   await api.block(slug, author.id, hideAll)
                   // Hiding their posts changes comments across the page; take the server's view.
                   if (hideAll) await load(keys.issue(slug, issue.number), () => api.issue(slug, issue.number))
-                  setNote(`Blocked ${actorName(author)}. Unblock them in Settings → Blocked.`)
+                  setNote(t("comment.blocked", { name: actorName(author) }))
                 })
               }
             >
-              Block
+              {t("comment.blockButton")}
             </Button>
           </span>
         </div>
@@ -386,13 +412,14 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
 
 /** In place of an issue that was deleted (410, or deleted while open). */
 export function DeletedIssue({ slug, number }: { slug: string; number: number }) {
+  const t = useT()
   return (
     <Page narrow>
       <div className="blank deleted">
-        <h1 className="blank-title">This issue was deleted</h1>
-        <p className="muted-text">#{number} was removed by the team, along with its comments and files.</p>
+        <h1 className="blank-title">{t("deleted.title")}</h1>
+        <p className="muted-text">{t("deleted.text", { number: String(number) })}</p>
         <AppLink slug={slug} href={appPath(slug)} className="btn">
-          Back to issues
+          {t("deleted.back")}
         </AppLink>
       </div>
     </Page>
@@ -401,6 +428,7 @@ export function DeletedIssue({ slug, number }: { slug: string; number: number })
 
 /** In place of an issue that moved to another workspace: straight there (an old link), or an offer (moved while open). */
 export function MovedIssue({ number, to, redirect }: { number: number; to: { slug: string; number: number }; redirect?: boolean }) {
+  const t = useT()
   const [, navigate] = useLocation()
   const href = appPath(to.slug, `/issues/${to.number}`)
   useEffect(() => {
@@ -411,13 +439,19 @@ export function MovedIssue({ number, to, redirect }: { number: number; to: { slu
   return (
     <Page narrow>
       <div className="blank moved">
-        <h1 className="blank-title">This issue moved</h1>
+        <h1 className="blank-title">{t("moved.title")}</h1>
         <p className="muted-text">
-          #{number} is now <span className="mono">{to.slug}</span> #{to.number}
-          {redirect ? ". Taking you there…" : ", in another workspace."}
+          {tr(redirect ? "moved.textRedirect" : "moved.text", {
+            number: String(number),
+            place: (
+              <>
+                <span className="mono">{to.slug}</span> #{to.number}
+              </>
+            ),
+          })}
         </p>
         <SiteLink href={href} className="btn" data-variant="primary">
-          Go to #{to.number}
+          {t("moved.go", { number: String(to.number) })}
         </SiteLink>
       </div>
     </Page>
@@ -426,6 +460,7 @@ export function MovedIssue({ number, to, redirect }: { number: number; to: { slu
 
 /** "This helped" on someone else's comment: a quiet toggle with its count (guests pass the human check first). */
 function Helpful({ ctx, comment, onError }: { ctx: CommentContext; comment: Comment; onError: (e: string | null) => void }) {
+  const t = useT()
   const { app, issue } = ctx
   const on = !!comment.viewer_helpful
   const count = comment.helpful ?? 0
@@ -443,9 +478,10 @@ function Helpful({ ctx, comment, onError }: { ctx: CommentContext; comment: Comm
     }
   }
   return (
-    <button type="button" className="helpful" aria-pressed={on} onClick={toggle} title={on ? "You found this helpful" : "Mark as helpful"}>
+    <button type="button" className="helpful" aria-pressed={on} onClick={toggle} title={on ? t("comment.helpedOn") : t("comment.markHelpful")}>
       <ThumbIcon size={12} />
-      This helped{count > 0 && <span className="mono-num helpful-n">{count}</span>}
+      {t("comment.helped")}
+      {count > 0 && <span className="mono-num helpful-n">{count}</span>}
     </button>
   )
 }

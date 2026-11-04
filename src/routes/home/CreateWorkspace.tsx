@@ -7,6 +7,7 @@ import { addressParts, appPath, isAbsolute } from "../../lib/site"
 import { Button } from "../../ui/primitives"
 import { PublicToggle } from "../../ui/workspace/Visibility"
 import "../../styles/onboarding.css"
+import { t, useT } from "../../i18n/core"
 
 const slugify = (name: string) =>
   name
@@ -24,14 +25,15 @@ const reserved = new Set(
 )
 
 function slugProblem(slug: string, strict: boolean) {
-  if (!slug) return strict ? "Choose an address." : null
-  if (reserved.has(slug)) return "That address is reserved. Try another."
-  if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(slug)) return strict || slug.length > 1 ? "Use 2–40 lowercase letters, digits and hyphens, not starting or ending with a hyphen." : null
+  if (!slug) return strict ? t("create.chooseAddress") : null
+  if (reserved.has(slug)) return t("create.reserved")
+  if (!/^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(slug)) return strict || slug.length > 1 ? t("create.badSlug") : null
   return null
 }
 
 /** One focused step: name the workspace, check its address, create it and land on its issue list. */
 export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel?: () => void }) {
+  useT()
   const [, navigate] = useLocation()
   const [name, setName] = useState("")
   const [slug, setSlug] = useState("")
@@ -44,7 +46,7 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
   const { prefix, suffix } = addressParts()
 
   const address = edited ? slug : slugify(name)
-  const problem = taken === address ? "That URL is taken. Try another." : slugProblem(address, strict)
+  const problem = taken === address ? t("create.taken") : slugProblem(address, strict)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -70,12 +72,12 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
   return (
     <form className="create" onSubmit={submit} noValidate>
       <div className="create-head">
-        <h1 className="create-title">{first ? "Create your first workspace" : "New workspace"}</h1>
-        <p className="create-sub">A workspace is your product's support site. People report issues there, and your agent answers them.</p>
+        <h1 className="create-title">{first ? t("create.first") : t("create.new")}</h1>
+        <p className="create-sub">{t("create.sub")}</p>
       </div>
       <div className="field">
         <label className="field-label" htmlFor="ws-name">
-          Name
+          {t("create.name")}
         </label>
         <div className="input" data-size="large">
           <input
@@ -89,11 +91,11 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
             aria-invalid={strict && !name.trim()}
           />
         </div>
-        {strict && !name.trim() && <p className="field-error">Give your workspace a name.</p>}
+        {strict && !name.trim() && <p className="field-error">{t("create.nameRequired")}</p>}
       </div>
       <div className="field">
         <label className="field-label" htmlFor="ws-url">
-          URL
+          {t("create.url")}
         </label>
         <div className="input create-url" data-size="large" data-invalid={problem ? "" : undefined}>
           {prefix && <span className="create-url-affix mono">{prefix}</span>}
@@ -120,7 +122,7 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
           </p>
         ) : (
           <p id="ws-url-note" className="create-note">
-            Where people report issues. You can't change it later.
+            {t("create.urlNote")}
           </p>
         )}
       </div>
@@ -133,11 +135,11 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
       <div className="create-actions">
         {onCancel && (
           <Button variant="invisible" onClick={onCancel}>
-            Cancel
+            {t("common.cancel")}
           </Button>
         )}
         <Button type="submit" variant="primary" disabled={saving}>
-          {saving ? "Creating…" : "Create workspace"}
+          {saving ? t("create.creating") : t("create.button")}
         </Button>
       </div>
     </form>

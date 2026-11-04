@@ -1,5 +1,6 @@
 import type { Config, Me } from "../../shared/api"
 import { load, peek, setData } from "./cache"
+import { t } from "../i18n/core"
 
 // Turnstile, rendered on demand. Guests must pass it before their first write; the Worker answers 428
 // once the bh_human cookie expires, and the API client calls runHumanCheck() and retries once.
@@ -28,7 +29,7 @@ function loadScript(): Promise<Turnstile> {
     el.onload = () => (window.turnstile ? resolve(window.turnstile) : reject(new Error("Turnstile didn't load.")))
     el.onerror = () => {
       script = null
-      reject(new Error("Couldn't load the human check. Check your connection and try again."))
+      reject(new Error(t("human.loadFailed")))
     }
     document.head.appendChild(el)
   })
@@ -62,9 +63,9 @@ async function check(host?: HTMLElement) {
     panel = document.createElement("div")
     panel.className = "human-check"
     panel.setAttribute("role", "dialog")
-    panel.setAttribute("aria-label", "Human check")
+    panel.setAttribute("aria-label", t("human.title"))
     const text = document.createElement("div")
-    text.textContent = "Confirm you're human to continue"
+    text.textContent = t("human.prompt")
     slot = document.createElement("div")
     panel.append(text, slot)
     document.body.appendChild(panel)
@@ -79,8 +80,8 @@ async function check(host?: HTMLElement) {
         appearance: "interaction-only",
         theme: "dark",
         callback: resolve,
-        "error-callback": () => reject(new Error("The human check failed. Try again.")),
-        "expired-callback": () => reject(new Error("The human check expired. Try again.")),
+        "error-callback": () => reject(new Error(t("human.failed"))),
+        "expired-callback": () => reject(new Error(t("human.expired"))),
         "before-interactive-callback": () => panel.setAttribute("data-visible", ""),
       })
     })
@@ -90,7 +91,7 @@ async function check(host?: HTMLElement) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
     })
-    if (!res.ok) throw new Error("The human check failed. Try again.")
+    if (!res.ok) throw new Error(t("human.failed"))
     setData<Me>("me", (me) => (me ? { ...me, human: true } : me))
   } finally {
     cancelHosted = null

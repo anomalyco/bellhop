@@ -4,9 +4,11 @@ import { api, errorMessage } from "../../lib/api"
 import { storeIssue } from "../../lib/issues"
 import { Editor } from "../../ui/Editor"
 import { Button } from "../../ui/primitives"
+import { useT } from "../../i18n/core"
 
 /** Inline title editing for members and the author. */
 export function TitleForm({ app, issue, onDone }: { app: AppDetail; issue: Issue; onDone: () => void }) {
+  const t = useT()
   const [title, setTitle] = useState(issue.title)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,13 +32,13 @@ export function TitleForm({ app, issue, onDone }: { app: AppDetail; issue: Issue
   return (
     <form className="issue-title-form" onSubmit={save}>
       <div className="input" data-size="large" style={{ flex: 1 }}>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" autoFocus maxLength={256} />
+        <input value={title} onChange={(e) => setTitle(e.target.value)} aria-label={t("field.title")} autoFocus maxLength={256} />
       </div>
       <Button type="submit" disabled={saving}>
-        Save
+        {t("common.save")}
       </Button>
       <Button variant="invisible" onClick={onDone}>
-        Cancel
+        {t("common.cancel")}
       </Button>
       {error && <p className="field-error">{error}</p>}
     </form>
@@ -45,6 +47,7 @@ export function TitleForm({ app, issue, onDone }: { app: AppDetail; issue: Issue
 
 /** Inline description editing for members and the author. */
 export function BodyForm({ app, issue, onDone }: { app: AppDetail; issue: Issue; onDone: () => void }) {
+  const t = useT()
   const [body, setBody] = useState(issue.body)
   const [busy, setBusy] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -76,14 +79,14 @@ export function BodyForm({ app, issue, onDone }: { app: AppDetail; issue: Issue;
         onBusyChange={setBusy}
         onSubmit={save}
         autoFocus
-        label="Description"
+        label={t("field.description")}
         actions={
           <>
             <Button variant="invisible" onClick={onDone}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" onClick={save} disabled={saving || busy}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("common.saving") : t("common.save")}
             </Button>
           </>
         }

@@ -13,6 +13,9 @@ import { IssuePage } from "./routes/IssuePage"
 import { Issues } from "./routes/Issues"
 import { NewIssue } from "./routes/NewIssue"
 import { loadMarkdown } from "./ui/Markdown"
+import { setLocale } from "./i18n"
+import { resolveLocale } from "./i18n/locale"
+import { LocaleSync } from "./ui/LanguageMenu"
 import { AppLayout, NotFound } from "./ui/Shell"
 import "./styles/theme.css"
 import "./styles/components.css"
@@ -82,22 +85,25 @@ function start() {
   const render = () =>
     createRoot(document.getElementById("root")!).render(
       <StrictMode>
+        <LocaleSync />
         <Suspense fallback={null}>{hostSlug ? <AppRoutes slug={hostSlug} /> : <PathRoutes />}</Suspense>
       </StrictMode>,
     )
+  // The language's catalog comes before the first render, so the first paint is already in that language.
+  const language = setLocale(resolveLocale(boot?.me))
+  const cap = <T,>(p: Promise<T>) => Promise.race([p, new Promise((r) => setTimeout(r, 1500))])
   if (boot) {
     seedBoot(boot)
     warmInitialCode()
     // An issue's first paint is its rendered thread: wait (briefly) for the markdown renderer rather than paint
     // raw text that reflows when it arrives.
-    if (boot.route.kind === "issue") void Promise.race([loadMarkdown(), new Promise((r) => setTimeout(r, 1500))]).finally(render)
-    else render()
+    void cap(Promise.all([language, boot.route.kind === "issue" ? loadMarkdown() : null])).finally(render)
     return
   }
   // Fires first so a brand-new browser mints one bh_guest cookie before the remaining boot fetches go out.
   loadMe().catch(() => {})
   warmInitialRoute()
-  render()
+  void cap(language).finally(render)
 }
 
 /** Production: the subdomain names the app, so routes start at "/". */

@@ -27,6 +27,8 @@ import type { MessageEntry } from "./model"
 import { CommentBody, reasonText, type CommentContext } from "./Moderation"
 import { DiagnosticsChip } from "../../ui/features/Diagnostics"
 import { arrivalRef } from "../../lib/motion"
+import { t, tr, useT } from "../../i18n/core"
+import { formatList } from "../../i18n"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
 export function MessageGroup({
@@ -47,7 +49,7 @@ export function MessageGroup({
   return (
     <section className="group" data-internal={internal || undefined} data-key={`group:${messages[0]!.key}`} ref={arrivalRef(messages[0]!.key)}>
       <header className="group-head">
-        <span className="group-avatar" data-reporter={byAuthor || undefined} title={byAuthor ? `${actorName(author)} opened this issue` : undefined}>
+        <span className="group-avatar" data-reporter={byAuthor || undefined} title={byAuthor ? t("group.reporter", { name: actorName(author) }) : undefined}>
           <ActorAvatar actor={author} size={20} />
         </span>
         <ActorName actor={author} />
@@ -57,7 +59,8 @@ export function MessageGroup({
         {messages[0]!.comment?.via === "email" && <ViaEmail />}
         {internal && (
           <span className="note-label">
-            Internal note<span className="note-label-more"> · only the team and agents see this</span>
+            {t("note.label")}
+            <span className="note-label-more">{t("note.more")}</span>
           </span>
         )}
       </header>
@@ -130,42 +133,68 @@ function IssueLink({ slug, issue }: { slug: string; issue: IssueRef }) {
   )
 }
 
-const closeText: Record<CloseReason, string> = {
-  completed: "closed this as completed",
-  not_planned: "closed this as not planned",
-  duplicate: "closed this as a duplicate",
-}
+type Sentence = (actor: ReactNode) => ReactNode
 
-function statusLine(from: IssueStatus, to: IssueStatus, reason: CloseReason | null): { text: string; tone: string } {
+function statusLine(from: IssueStatus, to: IssueStatus, reason: CloseReason | null): { key: PlainEventKey; tone: string } {
   if (to === "closed") {
     const r = reason ?? "completed"
-    return { text: closeText[r], tone: r === "completed" ? "closed" : "not_planned" }
+    return { key: r === "completed" ? "event.closedCompleted" : r === "not_planned" ? "event.closedNotPlanned" : "event.closedDuplicate", tone: r === "completed" ? "closed" : "not_planned" }
   }
-  if (from === "closed") return { text: "reopened this", tone: "open" }
-  if (to === "in_progress") return { text: "marked this as in progress", tone: "in_progress" }
-  if (to === "waiting") return { text: "marked this as waiting on the reporter", tone: "waiting" }
-  return { text: "moved this back to open", tone: "open" }
+  if (from === "closed") return { key: "event.reopened", tone: "open" }
+  if (to === "in_progress") return { key: "event.inProgress", tone: "in_progress" }
+  if (to === "waiting") return { key: "event.waiting", tone: "waiting" }
+  return { key: "event.backToOpen", tone: "open" }
 }
 
-function relationText(rel: Relation, removed: boolean): string {
+/** Sentences whose only placeholder is {actor}. */
+type PlainEventKey =
+  | "event.closedCompleted"
+  | "event.closedNotPlanned"
+  | "event.closedDuplicate"
+  | "event.reopened"
+  | "event.inProgress"
+  | "event.waiting"
+  | "event.backToOpen"
+  | "event.labeledUnknown"
+  | "event.unlabeledUnknown"
+  | "event.claimed"
+  | "event.unassigned"
+  | "event.selfAssigned"
+  | "event.relationChanged"
+  | "event.unhidComment"
+  | "event.unhid"
+  | "event.madePrivate"
+  | "event.madePublic"
+  | "event.locked"
+  | "event.unlocked"
+  | "event.pinned"
+  | "event.unpinned"
+  | "event.movedHere"
+  | "event.updated"
+const plain =
+  (key: PlainEventKey): Sentence =>
+  (actor) =>
+    tr(key, { actor })
+
+function relationKey(rel: Relation, removed: boolean) {
   const { type, direction } = rel
   if (type === "duplicate_of") {
-    if (direction === "outgoing") return removed ? "unmarked this as a duplicate of" : "marked this as a duplicate of"
-    return removed ? "unmarked as a duplicate of this:" : "marked as a duplicate of this:"
+    if (direction === "outgoing") return removed ? "event.undupOf" : "event.dupOf"
+    return removed ? "event.undupBy" : "event.dupBy"
   }
   if (type === "blocks") {
-    if (direction === "outgoing") return removed ? "removed that this blocks" : "marked this as blocking"
-    return removed ? "removed that this is blocked by" : "marked this as blocked by"
+    if (direction === "outgoing") return removed ? "event.unblocks" : "event.blocks"
+    return removed ? "event.unblockedBy" : "event.blockedBy"
   }
-  return removed ? "removed the link to" : "linked this to"
+  return removed ? "event.unlinked" : "event.linked"
 }
 
-/** What an event says (after the actor's name), its icon and its state tone. */
-export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode; tone?: string; body: ReactNode } {
+/** What an event says, as a sentence around its actor (word order is the language's), its icon and its tone. */
+export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode; tone?: string; say: Sentence } {
   const d = event.data
   let icon: ReactNode = <LinkIcon size={14} />
   let tone: string | undefined
-  let body: ReactNode = null
+  let say: Sentence = plain("event.updated")
 
   switch (event.type) {
     case "status_changed": {
@@ -173,103 +202,94 @@ export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode
       const G = StatusIcon[line.tone as keyof typeof StatusIcon]
       icon = <G size={14} />
       tone = line.tone
-      body = line.text
+      say = plain(line.key)
       break
     }
     case "labeled":
     case "unlabeled": {
       const label = d.label as LabelType | undefined
       icon = <TagIcon size={14} />
-      body = (
-        <>
-          {event.type === "labeled" ? "added" : "removed"} {label ? <Label name={label.name} color={label.color} /> : "a label"}
-        </>
-      )
+      say = label
+        ? (actor) => tr(event.type === "labeled" ? "event.labeled" : "event.unlabeled", { actor, label: <Label name={label.name} color={label.color} /> })
+        : plain(event.type === "labeled" ? "event.labeledUnknown" : "event.unlabeledUnknown")
       break
     }
     case "claimed":
       icon = <PersonIcon size={14} />
-      body = "claimed this"
+      say = plain("event.claimed")
       break
     case "assigned": {
       const to = d.assignee as Actor | null
       icon = <PersonIcon size={14} />
-      body = !to ? "removed the assignee" : to.id === event.actor.id ? "self-assigned this" : (
-        <>
-          assigned <strong>{actorName(to)}</strong>
-        </>
-      )
+      say = !to
+        ? plain("event.unassigned")
+        : to.id === event.actor.id
+          ? plain("event.selfAssigned")
+          : (actor) => tr("event.assigned", { actor, assignee: <strong>{actorName(to)}</strong> })
       break
     }
     case "related":
     case "unrelated": {
       const rel = d.relation as Relation | undefined
       icon = <LinkIcon size={14} />
-      body = rel ? (
-        <>
-          {relationText(rel, event.type === "unrelated")} <IssueLink slug={slug} issue={rel.issue} />
-        </>
-      ) : (
-        "changed a relation"
-      )
+      say = rel ? (actor) => tr(relationKey(rel, event.type === "unrelated"), { actor, issue: <IssueLink slug={slug} issue={rel.issue} /> }) : plain("event.relationChanged")
       break
     }
     case "renamed":
       icon = <PencilGlyph />
-      body = (
-        <>
-          changed the title <del>{String(d.from ?? "")}</del> <span className="event-strong">{String(d.to ?? "")}</span>
-        </>
-      )
+      say = (actor) =>
+        tr("event.renamed", { actor, from: <del>{String(d.from ?? "")}</del>, to: <span className="event-strong">{String(d.to ?? "")}</span> })
       break
     case "hidden":
       icon = <EyeOffIcon size={14} />
-      body = `hid ${d.comment_id ? "a comment" : "this"} as ${reasonText[d.reason as ModerationReason] ?? "spam"}`
+      say = (actor) => tr(d.comment_id ? "event.hidComment" : "event.hid", { actor, reason: reasonText[d.reason as ModerationReason] ?? reasonText.spam })
       break
     case "unhidden":
       icon = <EyeOffIcon size={14} />
-      body = d.comment_id ? "unhid a comment" : "unhid this"
+      say = plain(d.comment_id ? "event.unhidComment" : "event.unhid")
       break
     case "made_private":
       icon = <LockIcon size={14} />
-      body = "made this private"
+      say = plain("event.madePrivate")
       break
     case "made_public":
       icon = <LockIcon size={14} />
-      body = "made this public"
+      say = plain("event.madePublic")
       break
     case "locked":
       icon = <CommentIcon size={14} />
-      body = "locked the conversation to the team"
+      say = plain("event.locked")
       break
     case "unlocked":
       icon = <CommentIcon size={14} />
-      body = "unlocked the conversation"
+      say = plain("event.unlocked")
       break
     case "pinned":
       icon = <PinIcon size={14} />
-      body = "pinned this"
+      say = plain("event.pinned")
       break
     case "unpinned":
       icon = <PinIcon size={14} />
-      body = "unpinned this"
+      say = plain("event.unpinned")
       break
     case "transferred": {
       const from = d.from as { slug?: string; number?: number } | undefined
       icon = <ArrowUpIcon size={14} style={{ transform: "rotate(90deg)" }} />
-      body = from?.slug ? (
-        <>
-          moved this from <span className="mono">{from.slug}</span> #{from.number}
-        </>
-      ) : (
-        "moved this here from another workspace"
-      )
+      say = from?.slug
+        ? (actor) =>
+            tr("event.movedFrom", {
+              actor,
+              place: (
+                <>
+                  <span className="mono">{from.slug}</span> #{from.number}
+                </>
+              ),
+            })
+        : plain("event.movedHere")
       break
     }
-    default:
-      body = "updated this"
   }
-  return { icon, tone, body }
+  return { icon, tone, say }
 }
 
 function PencilGlyph() {
@@ -284,7 +304,8 @@ function PencilGlyph() {
 const ruleOf = (event: IssueEvent) => (event.data.rule as { tier_id: string; tier_name: string } | undefined) ?? null
 
 export function EventLine({ slug, event, authorTier }: { slug: string; event: IssueEvent; authorTier?: ActorTier | null }) {
-  const { icon, tone, body } = eventContent(slug, event)
+  useT()
+  const { icon, tone, say } = eventContent(slug, event)
   const rule = ruleOf(event)
   // The rule's tier is the reporter's (it fired when they opened the issue); its colour comes from there when it
   // still matches, otherwise the badge stays neutral.
@@ -293,16 +314,8 @@ export function EventLine({ slug, event, authorTier }: { slug: string; event: Is
     <div className="event" data-tone={tone} data-rule={rule ? "" : undefined} data-key={event.id} ref={arrivalRef(event.id)}>
       <span className="event-icon">{icon}</span>
       <span className="event-text">
-        {rule ? (
-          <>
-            <TierBadge tier={{ name: rule.tier_name, color }} /> rule {body}
-          </>
-        ) : (
-          <>
-            <ActorName actor={event.actor} badge={false} /> {body}
-          </>
-        )}{" "}
-        · <Time iso={event.created_at} />
+        {say(rule ? tr("event.rule", { tier: <TierBadge tier={{ name: rule.tier_name, color }} /> }) : <ActorName actor={event.actor} badge={false} />)} ·{" "}
+        <Time iso={event.created_at} />
       </span>
     </div>
   )
@@ -310,8 +323,9 @@ export function EventLine({ slug, event, authorTier }: { slug: string; event: Is
 
 /** More than two events in a row fold into one line saying who and when; it expands in place. */
 export function EventBurst({ slug, events, authorTier }: { slug: string; events: IssueEvent[]; authorTier?: ActorTier | null }) {
+  useT()
   const [open, setOpen] = useState(false)
-  const names = [...new Set(events.map((e) => (ruleOf(e) ? `${ruleOf(e)!.tier_name} rule` : actorName(e.actor))))]
+  const names = [...new Set(events.map((e) => (ruleOf(e) ? t("event.rule", { tier: ruleOf(e)!.tier_name }) : actorName(e.actor))))]
   const last = events[events.length - 1]!
   return (
     <div className="burst" data-open={open || undefined}>
@@ -327,7 +341,7 @@ export function EventBurst({ slug, events, authorTier }: { slug: string; events:
           })}
         </span>
         <span className="burst-text">
-          {events.length} updates by {names.join(", ")} · <Time iso={last.created_at} />
+          {t("event.burst", { count: events.length, names: formatList(names) })} · <Time iso={last.created_at} />
         </span>
         <ChevronDownIcon size={12} />
       </button>

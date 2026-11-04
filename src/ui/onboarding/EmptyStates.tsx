@@ -3,6 +3,7 @@ import { IssueOpenIcon, PlusIcon, SearchIcon } from "../icons"
 import { Button, StateIcon } from "../primitives"
 import { SiteLink } from "../SiteLink"
 import "../../styles/onboarding.css"
+import { tr, useT } from "../../i18n/core"
 
 function Empty({ icon, title, children, action }: { icon: ReactNode; title: ReactNode; children?: ReactNode; action?: ReactNode }) {
   return (
@@ -19,88 +20,89 @@ function Empty({ icon, title, children, action }: { icon: ReactNode; title: Reac
 
 /** A workspace with no issues at all, as a visitor sees it. */
 export function NoIssues({ newIssueHref }: { newIssueHref: string }) {
+  const t = useT()
   return (
     <Empty
       icon={<IssueOpenIcon size={20} />}
-      title="No issues yet"
+      title={t("empty.noIssues")}
       action={
         <SiteLink href={newIssueHref} className="btn" data-variant="primary">
           <PlusIcon size={14} />
-          New issue
+          {t("list.newIssue")}
         </SiteLink>
       }
     >
-      Found a bug or have a question? Open the first issue; you don't need an account.
+      {t("empty.noIssuesText")}
     </Empty>
   )
 }
 
 /** The home feed when no workspace is public yet: start one, or sign in to. */
 export function NoPublicWorkspaces({ signedIn }: { signedIn: boolean }) {
+  const t = useT()
   return (
     <Empty
       icon={<IssueOpenIcon size={20} />}
-      title="No public workspaces yet"
+      title={t("empty.noPublic")}
       action={
         <SiteLink href={signedIn ? "/new" : "/signin?next=%2Fnew"} className="btn" data-variant="primary">
-          {signedIn ? "Create a workspace" : "Sign in to create one"}
+          {signedIn ? t("empty.createWorkspace") : t("empty.signInToCreate")}
         </SiteLink>
       }
     >
-      Issues from public workspaces show up here as people report them.
+      {t("empty.noPublicText")}
     </Empty>
   )
 }
 
 /** The home feed's Open tab when everything public is closed. */
 export function NoOpen({ closedHref }: { closedHref: string }) {
+  const t = useT()
   return (
     <Empty
       icon={<StateIcon state="open" size={20} />}
-      title="No open issues"
+      title={t("empty.noOpen")}
       action={
         <SiteLink href={closedHref} className="btn" data-variant="invisible">
-          View closed issues
+          {t("empty.viewClosed")}
         </SiteLink>
       }
     >
-      Everything in public workspaces has been answered.
+      {t("empty.noOpenText")}
     </Empty>
   )
 }
 
 /** A search or label filter that matches nothing. */
 export function NoResults({ query, onClear }: { query: string; onClear: () => void }) {
+  const t = useT()
   return (
     <Empty
       icon={<SearchIcon size={20} />}
-      title={
-        <>
-          No issues match <span className="empty-query">{query}</span>
-        </>
-      }
-      action={<Button onClick={onClear}>Clear search</Button>}
+      title={tr("empty.noMatch", { query: <span className="empty-query">{query}</span> })}
+      action={<Button onClick={onClear}>{t("empty.clearSearch")}</Button>}
     >
-      Try fewer words, or check the closed issues.
+      {t("empty.noMatchText")}
     </Empty>
   )
 }
 
 /** The Closed tab before anything has been closed. */
 export function NoClosed({ openHref }: { openHref?: string }) {
+  const t = useT()
   return (
     <Empty
       icon={<StateIcon state="closed" size={20} />}
-      title="No closed issues"
+      title={t("empty.noClosed")}
       action={
         openHref ? (
           <SiteLink href={openHref} className="btn" data-variant="invisible">
-            View open issues
+            {t("empty.viewOpen")}
           </SiteLink>
         ) : undefined
       }
     >
-      Issues land here once they're resolved or closed.
+      {t("empty.noClosedText")}
     </Empty>
   )
 }

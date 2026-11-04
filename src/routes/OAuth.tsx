@@ -7,6 +7,7 @@ import { AccessEditor, emptyAccess, grantsAnything } from "../ui/agents/AccessEd
 import { Button } from "../ui/primitives"
 import { Header, useMe } from "../ui/Shell"
 import { SignIn } from "./home/SignIn"
+import { tr, useT } from "../i18n/core"
 
 /** Pages an agent sends you to: sign in first, then return here. */
 function SignedIn({ children }: { children: () => ReactNode }) {
@@ -38,16 +39,18 @@ function ConsentLoader({ id }: { id: string }) {
 const gone = (e: unknown) => e instanceof ApiFailure && e.status === 404
 
 function Expired() {
+  const t = useT()
   return (
     <div className="oauth-card oauth-done">
-      <h1 className="oauth-title">This request has expired</h1>
-      <p className="muted-text">It was already answered, timed out, or started in another browser. Start again from your agent.</p>
+      <h1 className="oauth-title">{t("oauth.expired")}</h1>
+      <p className="muted-text">{t("oauth.expiredText")}</p>
     </div>
   )
 }
 
 /** Who's asking, which workspaces to grant, what it can do there, then Allow or Deny. Shared by both pages. */
 export function ConsentForm({ request }: { request: OAuthRequest }) {
+  const t = useT()
   const [access, setAccess] = useState<AgentAccess>(emptyAccess)
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -64,7 +67,7 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
     } catch (e) {
       if (gone(e)) setDone("expired")
       else if (e instanceof ApiFailure && (e.status === 403 || /exceeds/i.test(e.message)))
-        setError("Your role in one of those workspaces changed, so that access is too much. Reload and choose again.")
+        setError(t("oauth.tooMuch"))
       else setError(errorMessage(e))
     } finally {
       setBusy(null)
@@ -75,20 +78,20 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
   if (done)
     return (
       <div className="oauth-card oauth-done">
-        <h1 className="oauth-title">{done === "approved" ? "You're connected" : "Request denied"}</h1>
-        <p className="muted-text">{done === "approved" ? "Return to your agent." : `${request.client_name} didn't get access. You can close this page.`}</p>
+        <h1 className="oauth-title">{done === "approved" ? t("oauth.connected") : t("oauth.denied")}</h1>
+        <p className="muted-text">{done === "approved" ? t("oauth.return") : t("oauth.deniedText", { name: request.client_name })}</p>
       </div>
     )
 
   return (
     <div className="oauth-card">
-      <h1 className="oauth-title">{request.client_name} wants to access your workspaces</h1>
+      <h1 className="oauth-title">{t("oauth.wants", { name: request.client_name })}</h1>
       {request.redirect_host && (
         <p className="oauth-sub">
-          You'll be sent back to <span className="mono">{request.redirect_host}</span>
+          {tr("oauth.sentBack", { host: <span className="mono">{request.redirect_host}</span> })}
         </p>
       )}
-      <p className="oauth-scope">Choose where it can work and what it can do there. It posts as itself, with an AI badge, and you can change this later.</p>
+      <p className="oauth-scope">{t("oauth.scope")}</p>
       <AccessEditor apps={request.apps} value={access} onChange={setAccess} name="consent" />
       {error && (
         <p className="flash" data-tone="danger">
@@ -97,10 +100,10 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
       )}
       <div className="oauth-actions">
         <Button onClick={() => answer(false)} disabled={!!busy}>
-          {busy === "deny" ? "Denying…" : "Deny"}
+          {busy === "deny" ? t("oauth.denying") : t("oauth.deny")}
         </Button>
         <Button variant="primary" onClick={() => answer(true)} disabled={!!busy || !grantsAnything(access)}>
-          {busy === "approve" ? "Allowing…" : "Allow"}
+          {busy === "approve" ? t("oauth.allowing") : t("oauth.allow")}
         </Button>
       </div>
     </div>
@@ -123,12 +126,13 @@ export function Device() {
 }
 
 function DeviceForm({ initial }: { initial: string }) {
+  const t = useT()
   const [code, setCode] = useState(initial)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
   const complete = code.length === 9
-  const invalid = "That isn't a valid code. Codes don't use 0, 1, I or O."
+  const invalid = t("device.invalid")
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -143,7 +147,7 @@ function DeviceForm({ initial }: { initial: string }) {
       // Unknown and expired codes both come back as 404; the Worker doesn't tell them apart.
       setError(
         status === 404
-          ? "No waiting request has that code. It may have expired; check your agent or ask it for a new one."
+          ? t("device.notFound")
           : status === 400
             ? invalid
             : errorMessage(err),
@@ -157,14 +161,14 @@ function DeviceForm({ initial }: { initial: string }) {
 
   return (
     <form className="oauth-card" onSubmit={submit}>
-      <h1 className="oauth-title">Connect an agent</h1>
-      <p className="oauth-sub">Enter the code your agent shows.</p>
+      <h1 className="oauth-title">{t("device.title")}</h1>
+      <p className="oauth-sub">{t("device.sub")}</p>
       <div className="input device-code" data-size="large" data-invalid={error ? "" : undefined}>
         <input
           value={code}
           onChange={(e) => setCode(formatCode(e.target.value))}
           placeholder="XXXX-XXXX"
-          aria-label="Device code"
+          aria-label={t("device.code")}
           aria-invalid={!!error}
           aria-describedby={error ? "device-error" : undefined}
           autoComplete="one-time-code"
@@ -181,7 +185,7 @@ function DeviceForm({ initial }: { initial: string }) {
       )}
       <div className="oauth-actions">
         <Button type="submit" variant="primary" disabled={!complete || busy}>
-          {busy ? "Checking…" : "Continue"}
+          {busy ? t("device.checking") : t("device.continue")}
         </Button>
       </div>
     </form>

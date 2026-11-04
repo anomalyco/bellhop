@@ -1,6 +1,8 @@
 import type { Attachment } from "../../shared/api"
 import { ApiFailure } from "./api"
 import { runHumanCheck } from "./human"
+import { t } from "../i18n/core"
+import { getLocale } from "../i18n"
 
 export interface UploadHandle {
   promise: Promise<Attachment>
@@ -35,11 +37,11 @@ export function upload(slug: string, file: File, onProgress: (fraction: number) 
         const body = req.response as { error?: { code?: string; message?: string } } | null
         const message =
           req.status === 413
-            ? `${file.name} is too large (limit ${limits[kindOf(file.type)]} MB).`
-            : (body?.error?.message ?? `Upload failed (${req.status}).`)
+            ? t("upload.tooLarge", { name: file.name, limit: limits[kindOf(file.type)] })
+            : (body?.error?.message ?? t("upload.failedStatus", { status: req.status }))
         reject(new ApiFailure(req.status, body?.error?.code ?? `http_${req.status}`, message))
       }
-      req.onerror = () => reject(new Error("Upload failed. Check your connection."))
+      req.onerror = () => reject(new Error(t("upload.failed")))
       req.onabort = () => reject(new DOMException("Upload cancelled", "AbortError"))
       req.send(file)
     })
@@ -47,7 +49,7 @@ export function upload(slug: string, file: File, onProgress: (fraction: number) 
   const mb = file.size / 1024 / 1024
   const limit = limits[kindOf(file.type)]
   const promise =
-    mb > limit ? Promise.reject(new Error(`${file.name} is too large (limit ${limit} MB).`)) : send(false)
+    mb > limit ? Promise.reject(new Error(t("upload.tooLarge", { name: file.name, limit }))) : send(false)
   return {
     promise,
     abort() {
@@ -58,7 +60,8 @@ export function upload(slug: string, file: File, onProgress: (fraction: number) 
 }
 
 export function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${(bytes / 1024 / 1024).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
+  const n = (v: number, digits = 0) => v.toLocaleString(getLocale(), { maximumFractionDigits: digits, minimumFractionDigits: digits })
+  if (bytes < 1024) return `${n(bytes)} B`
+  if (bytes < 1024 * 1024) return `${n(Math.round(bytes / 1024))} KB`
+  return `${n(bytes / 1024 / 1024, bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
 }

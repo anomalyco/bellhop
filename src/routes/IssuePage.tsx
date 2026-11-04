@@ -29,6 +29,7 @@ import { IssueView } from "./issue/IssueView"
 import { DeletedIssue, MovedIssue } from "./issue/Moderation"
 import type { IssueModel } from "./issue/model"
 import { relationRequest, type IssueActions, type RelationKind } from "./issue/Properties"
+import { t, useT } from "../i18n/core"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
   useEffect(() => {
@@ -63,6 +64,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const fetcher = useCallback(() => api.issue(slug, number), [slug, number])
   const { data: issue, error } = useResource<Issue>(key, fetcher)
   const { data: me } = useMe()
+  useT()
   const [viewers, setViewers] = useState<number | null>(null)
   const [pending, setPending] = useState<Pending[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
@@ -194,7 +196,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     )
 
   const addRelation = async (kind: RelationKind, other: number) => {
-    if (other === number) throw new Error("An issue can't relate to itself.")
+    if (other === number) throw new Error(t("issue.selfRelation"))
     const { type, outgoing } = relationRequest(kind)
     try {
       if (outgoing) storeIssue(slug, await api.addRelation(slug, number, type, other))
@@ -285,16 +287,16 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       internal: p.internal,
       note: p.error ? (
         <span className="pending-error">
-          Not sent: {p.error}{" "}
+          {t("pending.notSent", { error: p.error })}{" "}
           <button type="button" className="link-button" onClick={() => send(p)}>
-            Retry
+            {t("common.retry")}
           </button>{" "}
           <button type="button" className="link-button" onClick={() => discard(p.id)}>
-            Discard
+            {t("common.discard")}
           </button>
         </span>
       ) : (
-        "Sending…"
+        t("pending.sending")
       ),
     })),
     onComment: postComment,

@@ -16,11 +16,13 @@ import { AssignMenu, LabelMenu, RelationForm, RelationList, StatusMenu, SystemIn
 import { AttachmentList } from "./Timeline"
 import { NotificationsSection } from "./Notifications"
 import { logIds } from "../../ui/features/Diagnostics"
+import { t, useT } from "../../i18n/core"
+import { stateText as stateLabels } from "../../ui/primitives"
 
-const statusText = { open: "Open", in_progress: "In progress", waiting: "Waiting on reporter", closed: "Closed", not_planned: "Not planned" }
 
 /** The desktop sidebar: the editable properties, then who reported it, when, who's involved, files, system info and a link. */
 export function IssueSidebar({ model }: { model: IssueModel }) {
+  useT()
   const ref = useRef<HTMLElement>(null)
   const sticky = useFits(ref)
   return (
@@ -37,6 +39,7 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
 
 /** Phones: status, assignee and labels as small pills under the title, opening the same editors. */
 export function MobileProps({ model }: { model: IssueModel }) {
+  const t = useT()
   const { app, issue, member, actions } = model
   const state = visibleState(issue)
   return (
@@ -46,7 +49,7 @@ export function MobileProps({ model }: { model: IssueModel }) {
           issue={issue}
           onSet={actions.setStatus}
           trigger={(p) => (
-            <button type="button" className="prop" title="Status" {...p}>
+            <button type="button" className="prop" title={t("side.status")} {...p}>
               <StateIcon state={state} size={14} />
               {statusOptions.find((o) => o.status === issue.status)?.label}
               <ChevronDownIcon size={12} />
@@ -54,9 +57,9 @@ export function MobileProps({ model }: { model: IssueModel }) {
           )}
         />
       ) : (
-        <span className="prop" data-static title="Status">
+        <span className="prop" data-static title={t("side.status")}>
           <StateIcon state={state} size={14} />
-          {stateText(issue) ?? statusText[state]}
+          {stateText(issue) ?? stateLabels[state]}
         </span>
       )}
       {member ? (
@@ -65,14 +68,14 @@ export function MobileProps({ model }: { model: IssueModel }) {
           issue={issue}
           onAssign={actions.assign}
           trigger={(p) => (
-            <button type="button" className="prop" title="Assignee" {...p}>
+            <button type="button" className="prop" title={t("side.assignee")} {...p}>
               <AssigneeValue issue={issue} />
             </button>
           )}
         />
       ) : (
         issue.assignee && (
-          <span className="prop" data-static title="Assignee">
+          <span className="prop" data-static title={t("side.assignee")}>
             <AssigneeValue issue={issue} />
           </span>
         )
@@ -83,13 +86,13 @@ export function MobileProps({ model }: { model: IssueModel }) {
           selected={issue.labels.map((l) => l.id)}
           onToggle={actions.toggleLabel}
           trigger={(p) => (
-            <button type="button" className="prop" data-labels={issue.labels.length || undefined} title="Labels" {...p}>
+            <button type="button" className="prop" data-labels={issue.labels.length || undefined} title={t("side.labels")} {...p}>
               {issue.labels.length ? (
                 issue.labels.map((l) => <Label key={l.id} name={l.name} color={l.color} />)
               ) : (
                 <>
                   <TagIcon size={14} />
-                  Add labels
+                  {t("side.addLabels")}
                 </>
               )}
             </button>
@@ -97,7 +100,7 @@ export function MobileProps({ model }: { model: IssueModel }) {
         />
       ) : (
         issue.labels.length > 0 && (
-          <span className="prop" data-static data-labels title="Labels">
+          <span className="prop" data-static data-labels title={t("side.labels")}>
             {issue.labels.map((l) => (
               <Label key={l.id} name={l.name} color={l.color} />
             ))}
@@ -110,11 +113,12 @@ export function MobileProps({ model }: { model: IssueModel }) {
 
 /** Phones: everything else from the sidebar, folded after the report so it's reachable before the thread. */
 export function MobileDetails({ model }: { model: IssueModel }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   return (
     <section className="mobile-details" data-open={open || undefined}>
       <button type="button" className="mobile-details-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        Details
+        {t("side.details")}
         <ChevronDownIcon size={14} />
       </button>
       {open && (
@@ -151,7 +155,7 @@ function StatusSection({ model }: { model: IssueModel }) {
   const { issue, member, actions } = model
   const state = visibleState(issue)
   return (
-    <Section title="Status">
+    <Section title={t("side.status")}>
       {member && issue.status !== "closed" ? (
         <StatusMenu
           issue={issue}
@@ -167,7 +171,7 @@ function StatusSection({ model }: { model: IssueModel }) {
       ) : (
         <div className="side-value">
           <StateIcon state={state} size={14} />
-          {stateText(issue) ?? statusText[state]}
+          {stateText(issue) ?? stateLabels[state]}
         </div>
       )}
     </Section>
@@ -180,7 +184,7 @@ function AssigneeValue({ issue }: { issue: Issue }) {
     return (
       <>
         <PersonIcon size={14} />
-        Unassigned
+        {t("side.unassigned")}
       </>
     )
   return (
@@ -195,7 +199,7 @@ function AssigneeSection({ model }: { model: IssueModel }) {
   const { app, issue, me, member, actions } = model
   const user = me?.user
   return (
-    <Section title="Assignee" action={member ? <AssignMenu app={app} issue={issue} onAssign={actions.assign} trigger={edit("Assign")} /> : undefined}>
+    <Section title={t("side.assignee")} action={member ? <AssignMenu app={app} issue={issue} onAssign={actions.assign} trigger={edit(t("side.assign"))} /> : undefined}>
       {issue.assignee ? (
         <div className="side-value">
           <ActorAvatar actor={issue.assignee} size={20} />
@@ -203,12 +207,12 @@ function AssigneeSection({ model }: { model: IssueModel }) {
         </div>
       ) : (
         <div className="side-empty">
-          No one
+          {t("side.noOne")}
           {member && user && (
             <>
               {" · "}
               <button type="button" className="link-button" onClick={() => actions.assign({ type: "member", id: user.id, name: user.name, avatar_url: user.avatar_url })}>
-                assign yourself
+                {t("side.assignYourself")}
               </button>
             </>
           )}
@@ -222,8 +226,8 @@ function LabelsSection({ model }: { model: IssueModel }) {
   const { app, issue, member, actions } = model
   return (
     <Section
-      title="Labels"
-      action={member ? <LabelMenu app={app} selected={issue.labels.map((l) => l.id)} onToggle={actions.toggleLabel} trigger={edit("Edit labels")} /> : undefined}
+      title={t("side.labels")}
+      action={member ? <LabelMenu app={app} selected={issue.labels.map((l) => l.id)} onToggle={actions.toggleLabel} trigger={edit(t("side.editLabels"))} /> : undefined}
     >
       {issue.labels.length ? (
         <div className="side-labels">
@@ -239,7 +243,7 @@ function LabelsSection({ model }: { model: IssueModel }) {
           ))}
         </div>
       ) : (
-        <div className="side-empty">None yet</div>
+        <div className="side-empty">{t("side.noneYet")}</div>
       )}
     </Section>
   )
@@ -249,10 +253,10 @@ function RelationsSection({ model }: { model: IssueModel }) {
   const { app, issue, member, actions } = model
   return (
     <Section
-      title="Relationships"
+      title={t("side.relationships")}
       action={
         member ? (
-          <Menu align="end" width={260} trigger={edit("Add relationship", <PlusIcon size={14} />)}>
+          <Menu align="end" width={260} trigger={edit(t("side.addRelationship"), <PlusIcon size={14} />)}>
             {(close) => <RelationForm onAdd={actions.addRelation} onDone={close} />}
           </Menu>
         ) : undefined
@@ -274,15 +278,15 @@ function InfoSections({ model }: { model: IssueModel }) {
   return (
     <>
       <Section
-        title="Reporter"
+        title={t("side.reporter")}
         action={
           member && canHaveTier(issue.author) ? (
             <Button
               iconOnly
               size="small"
               variant="ghost-muted"
-              aria-label="Set tier"
-              title="Set tier"
+              aria-label={t("side.setTier")}
+              title={t("side.setTier")}
               aria-expanded={settingTier}
               icon={<SettingsIcon size={14} />}
               onClick={() => setSettingTier(!settingTier)}
@@ -297,8 +301,8 @@ function InfoSections({ model }: { model: IssueModel }) {
           {issue.author.type !== "agent" && issue.author.tier && <TierBadge tier={issue.author.tier} />}
         </div>
         {issue.author.type !== "agent" && issue.author.tier && !issue.author.tier.agents_reply && (
-          <p className="side-humans" title={`${issue.author.tier.name}: agents can only leave internal notes here`}>
-            Humans only: agents leave internal notes, a person replies
+          <p className="side-humans" title={t("side.humansOnlyTitle", { tier: issue.author.tier.name })}>
+            {t("side.humansOnly")}
           </p>
         )}
         {settingTier && (
@@ -311,13 +315,13 @@ function InfoSections({ model }: { model: IssueModel }) {
         )}
         <dl className="side-times">
           <div>
-            <dt>Opened</dt>
+            <dt>{t("side.opened")}</dt>
             <dd>
               <Time iso={issue.created_at} />
             </dd>
           </div>
           <div>
-            <dt>Last activity</dt>
+            <dt>{t("side.lastActivity")}</dt>
             <dd>
               <Time iso={lastActivity(issue)} />
             </dd>
@@ -325,10 +329,10 @@ function InfoSections({ model }: { model: IssueModel }) {
         </dl>
       </Section>
 
-      <Section title={people.length === 1 ? "1 participant" : `${people.length} participants`}>
+      <Section title={t("side.participants", { count: people.length })}>
         <div className="side-people">
           {people.map((a) => (
-            <span key={`${a.type}:${a.id}`} className="side-person" title={a.type === "agent" ? `${actorName(a)} (AI)` : actorName(a)}>
+            <span key={`${a.type}:${a.id}`} className="side-person" title={a.type === "agent" ? t("side.agentName", { name: actorName(a) }) : actorName(a)}>
               <ActorAvatar actor={a} size={22} />
               {a.type === "agent" && <AiBadge />}
             </span>
@@ -337,7 +341,7 @@ function InfoSections({ model }: { model: IssueModel }) {
       </Section>
 
       {files.length > 0 && (
-        <Section title="Attachments">
+        <Section title={t("side.attachments")}>
           <AttachmentList attachments={files} />
         </Section>
       )}
@@ -352,9 +356,9 @@ function InfoSections({ model }: { model: IssueModel }) {
 
 function ReporterKind({ actor }: { actor: Actor }) {
   if (actor.type === "agent") return <AiBadge />
-  if (actor.type === "guest") return <span className="guest-marker">Guest</span>
-  if (actor.role) return <span className="role-badge">{actor.role === "owner" ? "Owner" : "Member"}</span>
-  return <span className="guest-marker">Account</span>
+  if (actor.type === "guest") return <span className="guest-marker">{t("actor.guest")}</span>
+  if (actor.role) return <span className="role-badge">{actor.role === "owner" ? t("role.owner") : t("role.member")}</span>
+  return <span className="guest-marker">{t("side.account")}</span>
 }
 
 function SystemInfo({ info }: { info: Exclude<Issue["system_info"], null | "hidden"> }) {
@@ -362,7 +366,7 @@ function SystemInfo({ info }: { info: Exclude<Issue["system_info"], null | "hidd
   return (
     <div className="side-sysinfo">
       <button type="button" className="side-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-        System info
+        {t("side.systemInfo")}
         <ChevronDownIcon size={12} />
       </button>
       {open && <SystemInfoList info={info} />}
@@ -384,7 +388,7 @@ function CopyLink({ number }: { number: number }) {
   return (
     <button type="button" className="side-copy" onClick={copy}>
       <LinkIcon size={14} />
-      {copied ? "Copied" : "Copy link"}
+      {copied ? t("common.copied") : t("side.copyLink")}
       <span className="mono side-copy-number">#{number}</span>
     </button>
   )

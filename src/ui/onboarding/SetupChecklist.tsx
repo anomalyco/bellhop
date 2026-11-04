@@ -10,6 +10,7 @@ import { AgentSetup } from "./AgentSetup"
 import { CopyField } from "./Snippet"
 import { iconTypes, useIconUpload } from "./useIconUpload"
 import "../../styles/onboarding.css"
+import { useT } from "../../i18n/core"
 
 type StepId = "icon" | "agent" | "team" | "share" | "try"
 
@@ -47,6 +48,7 @@ export function useSetupChecklistSettled(app: AppDetail) {
  * dismissed, and on its own once everything is done (with a short "ready" moment if that happened just now).
  */
 export function SetupChecklist({ app }: { app: AppDetail }) {
+  const t = useT()
   const slug = app.slug
   const admin = app.role === "owner" || app.role === "admin"
   const [dismissed, setDismissed] = useState(() => read(flag(slug, "dismissed")) || read(flag(slug, "complete")))
@@ -112,8 +114,8 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
           <Check />
         </span>
         <div>
-          <p className="setup-done-title">Your workspace is ready</p>
-          <p className="setup-done-sub">Reports will show up here, and your agent will pick them up.</p>
+          <p className="setup-done-title">{t("setup.ready")}</p>
+          <p className="setup-done-sub">{t("setup.readyText")}</p>
         </div>
       </section>
     )
@@ -128,39 +130,39 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
   }
 
   const steps: { id: StepId; title: string; summary?: string; body: ReactNode }[] = [
-    { id: "icon", title: "Add an icon", summary: "Shown as the tab icon and logo", body: <IconStep app={app} /> },
+    { id: "icon", title: t("setup.icon"), summary: t("setup.iconSummary"), body: <IconStep app={app} /> },
     {
       id: "agent",
-      title: "Connect your agent",
-      summary: done.agent ? agents.data?.find((a) => a.apps.some((x) => x.slug === slug))?.client_name : "Answers issues as they come in",
+      title: t("setup.agent"),
+      summary: done.agent ? agents.data?.find((a) => a.apps.some((x) => x.slug === slug))?.client_name : t("setup.agentSummary"),
       body: <AgentSetup />,
     },
     {
       id: "team",
-      title: "Invite your team",
-      summary: done.team ? `${settings.data!.members.length} people` : "They step in when the agent needs help",
+      title: t("setup.team"),
+      summary: done.team ? t("setup.teamCount", { count: settings.data!.members.length }) : t("setup.teamSummary"),
       body: <InviteStep slug={slug} />,
     },
     {
       id: "share",
-      title: "Share your support link",
-      summary: "Where people report issues",
+      title: t("setup.share"),
+      summary: t("setup.shareSummary"),
       body: (
         <div className="setup-body-stack">
           <CopyField value={appUrl(slug)} onCopied={markShared} />
-          <p className="setup-hint">Link it from your app's Help menu or README.</p>
+          <p className="setup-hint">{t("setup.shareHint")}</p>
         </div>
       ),
     },
     {
       id: "try",
-      title: "Try it",
-      summary: done.try ? "Issues are coming in" : "See what reporters see",
+      title: t("setup.try"),
+      summary: done.try ? t("setup.tryComing") : t("setup.trySummary"),
       body: (
         <div className="setup-body-row">
-          <p className="setup-hint">Open an issue the way a reporter would, then watch your agent pick it up.</p>
+          <p className="setup-hint">{t("setup.tryHint")}</p>
           <SiteLink href={appPath(slug, "/new")} className="btn" data-variant="default" data-size="small">
-            File a test issue
+            {t("setup.tryButton")}
           </SiteLink>
         </div>
       ),
@@ -171,13 +173,11 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
     <section className="setup" aria-labelledby={`setup-${slug}`}>
       <header className="setup-head">
         <h2 id={`setup-${slug}`} className="setup-title">
-          Get your workspace ready
+          {t("setup.title")}
         </h2>
-        <span className="setup-count">
-          {count} of {order.length}
-        </span>
+        <span className="setup-count">{t("setup.count", { done: count, total: order.length })}</span>
         <span className="spacer" />
-        <Button iconOnly size="small" variant="ghost-muted" aria-label="Hide setup" title="Hide setup" icon={<XIcon size={14} />} onClick={dismiss} />
+        <Button iconOnly size="small" variant="ghost-muted" aria-label={t("setup.hide")} title={t("setup.hide")} icon={<XIcon size={14} />} onClick={dismiss} />
       </header>
       <div className="setup-progress" aria-hidden="true">
         {order.map((id) => (
@@ -201,7 +201,7 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
                 </span>
                 <span className="setup-step-title">{step.title}</span>
                 {step.summary && <span className="setup-step-summary">{step.summary}</span>}
-                <span className="sr-only">{done[step.id] ? "(done)" : ""}</span>
+                <span className="sr-only">{done[step.id] ? t("setup.done") : ""}</span>
                 <ChevronDownIcon size={14} />
               </button>
               {isOpen && (
@@ -227,6 +227,7 @@ function Check() {
 
 function IconStep({ app }: { app: AppDetail }) {
   const input = useRef<HTMLInputElement>(null)
+  const t = useT()
   const { upload, busy, error } = useIconUpload(app)
   return (
     <div className="setup-body-stack">
@@ -234,9 +235,9 @@ function IconStep({ app }: { app: AppDetail }) {
         <AppIcon src={app.icon_url} size={40} />
         <div className="setup-icon-main">
           <Button size="small" onClick={() => input.current?.click()} disabled={busy}>
-            {busy ? "Uploading…" : app.icon_url ? "Replace icon" : "Upload icon"}
+            {busy ? t("setup.uploading") : app.icon_url ? t("setup.replaceIcon") : t("setup.uploadIcon")}
           </Button>
-          <span className="setup-hint">PNG, JPEG or WebP up to 1 MB. Square works best.</span>
+          <span className="setup-hint">{t("setup.iconHint")}</span>
         </div>
         <input
           ref={input}
@@ -255,6 +256,7 @@ function IconStep({ app }: { app: AppDetail }) {
 }
 
 function InviteStep({ slug }: { slug: string }) {
+  const t = useT()
   const [email, setEmail] = useState("")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -286,19 +288,19 @@ function InviteStep({ slug }: { slug: string }) {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="teammate@example.com"
-            aria-label="Email to invite"
+            aria-label={t("setup.inviteEmail")}
             autoComplete="off"
           />
         </div>
         <Button type="submit" size="small" disabled={!email.trim() || busy}>
-          {busy ? "Inviting…" : "Invite"}
+          {busy ? t("setup.inviting") : t("setup.invite")}
         </Button>
       </div>
       {error ? (
         <p className="field-error">{error}</p>
       ) : (
         <p className="setup-hint">
-          {invited.length ? `Invited ${invited.join(", ")}. They join once they accept the invitation.` : "They'll get an invitation to join as members."}
+          {invited.length ? t("setup.invited", { emails: invited.join(", ") }) : t("setup.inviteHint")}
         </p>
       )}
     </form>

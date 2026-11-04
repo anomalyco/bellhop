@@ -8,6 +8,7 @@ import { ImageIcon, PaperclipIcon, RecordIcon, VideoIcon, XIcon } from "./icons"
 import { Markdown, loadMarkdown } from "./Markdown"
 import { ActorAvatar } from "./Actor"
 import { AiBadge, Button } from "./primitives"
+import { useT } from "../i18n/core"
 
 interface Chip {
   id: number
@@ -38,7 +39,7 @@ export function Editor({
   onAttachment,
   onSubmit,
   onBusyChange,
-  placeholder = "Write a reply…",
+  placeholder,
   autoFocus,
   minHeight = 120,
   label,
@@ -67,6 +68,8 @@ export function Editor({
   /** The team: `@` suggests members and agents to mention. Guests get plain text. */
   mentions?: boolean
 }) {
+  const t = useT()
+  placeholder ??= t("editor.placeholder")
   const [tab, setTab] = useState<"write" | "preview">("write")
   const [chips, setChips] = useState<Chip[]>([])
   const [dragging, setDragging] = useState(false)
@@ -92,7 +95,7 @@ export function Editor({
   // Agents that share a name ("OpenCode" twice) get what tells them apart: how they connect and whose they are.
   const qualifier = (p: Mentionable) => {
     if (p.type !== "agent" || (people ?? []).filter((x) => x.name === p.name).length < 2) return null
-    const kind = p.agent_kind === "oauth" ? "Connected app" : p.agent_kind === "token" ? "Token agent" : null
+    const kind = p.agent_kind === "oauth" ? t("editor.connectedApp") : p.agent_kind === "token" ? t("editor.tokenAgent") : null
     return [kind, p.owner_name].filter(Boolean).join(" · ") || null
   }
   const listId = `mentions-${slug}-${variant ?? "page"}`
@@ -172,7 +175,7 @@ export function Editor({
     }
     for (const file of files) {
       const id = ++seq
-      const placeholderText = `[Uploading ${file.name.replace(/[[\]]/g, "")} (${id})…]()`
+      const placeholderText = `[${t("editor.uploadingFile", { name: file.name.replace(/[[\]]/g, "") })} (${id})…]()`
       insert(placeholderText)
       const handle = upload(slug, file, (progress) => patch(id, { progress }))
       setChips((cs) => [...cs, { id, name: file.name, type: file.type, progress: 0, handle }])
@@ -275,16 +278,16 @@ export function Editor({
       <Button
         variant="ghost-muted"
         iconOnly
-        aria-label="Attach file"
-        title="Attach file"
+        aria-label={t("editor.attach")}
+        title={t("editor.attach")}
         icon={<PaperclipIcon />}
         onClick={() => fileInput.current?.click()}
       />
       <Button
         variant="ghost-muted"
         iconOnly
-        aria-label="Add image or video"
-        title="Add image or video"
+        aria-label={t("editor.media")}
+        title={t("editor.media")}
         icon={<ImageIcon />}
         onClick={() => mediaInput.current?.click()}
       />
@@ -292,8 +295,8 @@ export function Editor({
         <Button
           variant="ghost-muted"
           iconOnly
-          aria-label="Record screen"
-          title="Record screen"
+          aria-label={t("editor.record")}
+          title={t("editor.record")}
           icon={<RecordIcon />}
           disabled={!!recording}
           onClick={record}
@@ -302,11 +305,11 @@ export function Editor({
       <Button
         variant="ghost-muted"
         aria-pressed={tab === "preview"}
-        title={tab === "preview" ? "Back to writing" : "Preview markdown"}
+        title={tab === "preview" ? t("editor.backToWriting") : t("editor.previewMarkdown")}
         onMouseEnter={() => loadMarkdown()}
         onClick={() => setTab(tab === "write" ? "preview" : "write")}
       >
-        {tab === "write" ? "Preview" : "Write"}
+        {tab === "write" ? t("editor.preview") : t("editor.write")}
       </Button>
       <input ref={fileInput} type="file" multiple hidden onChange={(e) => pick(e.currentTarget)} />
       <input ref={mediaInput} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => pick(e.currentTarget)} />
@@ -322,7 +325,7 @@ export function Editor({
           style={{ minHeight }}
           value={value}
           placeholder={placeholder}
-          aria-label={label ?? "Markdown"}
+          aria-label={label ?? t("editor.markdown")}
           autoFocus={autoFocus}
           aria-autocomplete={mentions ? "list" : undefined}
           aria-controls={suggesting ? listId : undefined}
@@ -346,12 +349,12 @@ export function Editor({
         />
       ) : (
         <div className="editor-preview" style={{ minHeight }}>
-          {value.trim() ? <Markdown source={value} slug={slug} /> : <p className="muted-text">Nothing to preview.</p>}
+          {value.trim() ? <Markdown source={value} slug={slug} /> : <p className="muted-text">{t("editor.nothing")}</p>}
         </div>
       )}
 
       {suggesting && (
-        <div className="mention-menu" id={listId} role="listbox" aria-label="People to mention" data-place={variant === "chat" ? "above" : "below"}>
+        <div className="mention-menu" id={listId} role="listbox" aria-label={t("editor.mention")} data-place={variant === "chat" ? "above" : "below"}>
           {suggestions.map((p, i) => {
             const actor: Actor = p.type === "agent" ? { type: "agent", id: p.id, name: p.name } : { type: "member", id: p.id, name: p.name, avatar_url: p.avatar_url }
             return (
@@ -405,6 +408,7 @@ export function Editor({
 }
 
 function UploadChip({ chip, onCancel }: { chip: Chip; onCancel: () => void }) {
+  const t = useT()
   const kind = kindOf(chip.type)
   return (
     <span className="upload-chip" data-error={chip.error ? "" : undefined} title={chip.error ?? chip.name}>
@@ -420,7 +424,7 @@ function UploadChip({ chip, onCancel }: { chip: Chip; onCancel: () => void }) {
           <span className="mono upload-chip-pct">{Math.round(chip.progress * 100)}%</span>
         </>
       )}
-      <button type="button" className="upload-chip-x" aria-label={chip.error ? "Dismiss" : `Cancel ${chip.name}`} onClick={onCancel}>
+      <button type="button" className="upload-chip-x" aria-label={chip.error ? t("common.dismiss") : t("editor.cancelUpload", { name: chip.name })} onClick={onCancel}>
         <XIcon size={12} />
       </button>
     </span>
@@ -428,21 +432,22 @@ function UploadChip({ chip, onCancel }: { chip: Chip; onCancel: () => void }) {
 }
 
 function RecordingBar({ started, onStop }: { started: number; onStop: () => void }): ReactNode {
+  const t = useT()
   const [now, setNow] = useState(Date.now())
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 500)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(timer)
   }, [])
   const s = Math.floor((now - started) / 1000)
   return (
     <div className="recording" role="status">
       <span className="recording-dot" aria-hidden="true" />
-      Recording
+      {t("editor.recording")}
       <span className="mono">
         {Math.floor(s / 60)}:{String(s % 60).padStart(2, "0")}
       </span>
       <Button size="small" variant="danger" onClick={onStop}>
-        Stop
+        {t("editor.stop")}
       </Button>
     </div>
   )

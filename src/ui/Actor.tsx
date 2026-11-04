@@ -1,6 +1,7 @@
 import { useState, type CSSProperties } from "react"
 import type { Actor } from "../../shared/api"
 import { AgentAvatar, AiBadge, Avatar } from "./primitives"
+import { useT } from "../i18n/core"
 
 /** A guest's chosen name, else their handle; everyone else's name. */
 export function actorName(actor: Actor) {
@@ -33,12 +34,13 @@ export function ActorAvatar({ actor, size = 20 }: { actor: Actor; size?: number 
 /** The name, then (with `badge`) the AI badge for agents, Owner/Member from the account's role, or a quiet
  *  "Guest" after a named guest. A bare handle already reads as a guest. */
 export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boolean }) {
+  const t = useT()
   return (
     <>
       <strong className="actor-name">{actorName(actor)}</strong>
       {badge && actor.type === "agent" && <AiBadge />}
-      {badge && actor.type === "member" && actor.role && <span className="role-badge">{actor.role === "owner" ? "Owner" : "Member"}</span>}
-      {badge && actor.type === "guest" && actor.name && <span className="guest-marker">Guest</span>}
+      {badge && actor.type === "member" && actor.role && <span className="role-badge">{actor.role === "owner" ? t("role.owner") : t("role.member")}</span>}
+      {badge && actor.type === "guest" && actor.name && <span className="guest-marker">{t("actor.guest")}</span>}
       {badge && actor.type !== "agent" && actor.tier && <TierBadge tier={actor.tier} />}
     </>
   )
@@ -46,8 +48,9 @@ export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boole
 
 /** A person's tier (VIP, Pro…): its colour as a dot on a faint tint of it, with the name. Only the team gets tiers. */
 export function TierBadge({ tier }: { tier: { name: string; color: string } }) {
+  const t = useT()
   return (
-    <span className="tier-badge" style={{ "--tier": `#${tier.color}` } as CSSProperties} title={`Tier: ${tier.name}`}>
+    <span className="tier-badge" style={{ "--tier": `#${tier.color}` } as CSSProperties} title={t("actor.tier", { name: tier.name })}>
       <span className="tier-dot" aria-hidden="true" />
       {tier.name}
     </span>

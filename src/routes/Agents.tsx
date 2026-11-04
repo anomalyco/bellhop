@@ -13,6 +13,7 @@ import { SecretReveal } from "../ui/agents/SecretReveal"
 import { AgentSetup } from "../ui/onboarding/AgentSetup"
 import { SignIn } from "./home/SignIn"
 import "../styles/agents.css"
+import { tr, useT } from "../i18n/core"
 
 /** The account's agents (/agents on the home domain): OAuth connections and token agents, their access, secrets. */
 export function AgentsPage() {
@@ -30,6 +31,7 @@ export function AgentsPage() {
 }
 
 function Agents() {
+  const t = useT()
   const { data: agents, error } = useResource<ConnectedAgent[]>(keys.agents, api.agents, 5_000)
   const { data: apps } = useResource<App[]>(keys.apps, api.apps, 10_000)
   const [creating, setCreating] = useState(false)
@@ -42,14 +44,14 @@ function Agents() {
   return (
     <div className="agents-page">
       <div className="agents-head">
-        <h1 className="page-title agents-title">Agents</h1>
+        <h1 className="page-title agents-title">{t("agents.title")}</h1>
         {!creating && (
           <Button variant="primary" icon={<PlusIcon size={14} />} onClick={() => setCreating(true)}>
-            New token agent
+            {t("agents.newToken")}
           </Button>
         )}
       </div>
-      <p className="agents-intro">Agents act for your account, only in the workspaces you choose and never above your own role there.</p>
+      <p className="agents-intro">{t("agents.intro")}</p>
 
       {secret && <SecretReveal agent={secret.agent} rotated={secret.rotated} onDone={() => setSecret(null)} />}
 
@@ -78,7 +80,7 @@ function Agents() {
       )}
       {agents?.length === 0 && !creating && (
         <div className="agents-empty">
-          <p className="muted-text">No agents yet. Connect one over MCP, or create a token agent for scripts and CI.</p>
+          <p className="muted-text">{t("agents.none")}</p>
           <AgentSetup />
         </div>
       )}
@@ -105,6 +107,7 @@ function Agents() {
 }
 
 function NewTokenAgent({ apps, onCreated, onCancel }: { apps: AccessApp[]; onCreated: (a: NewAgentToken) => void; onCancel: () => void }) {
+  const t = useT()
   const [name, setName] = useState("")
   const [access, setAccess] = useState<AgentAccess>(emptyAccess)
   const [busy, setBusy] = useState(false)
@@ -126,18 +129,18 @@ function NewTokenAgent({ apps, onCreated, onCancel }: { apps: AccessApp[]; onCre
 
   return (
     <form className="agent-create" onSubmit={create}>
-      <h2 className="agent-create-title">New token agent</h2>
-      <p className="agents-intro">For scripts, CI or any agent you configure with a secret. It posts under this name, with an AI badge.</p>
+      <h2 className="agent-create-title">{t("agents.newToken")}</h2>
+      <p className="agents-intro">{t("agents.tokenIntro")}</p>
       <div className="field">
         <label className="field-label" htmlFor="agent-name">
-          Name
+          {t("agents.name")}
         </label>
         <div className="input">
-          <input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Release bot" maxLength={100} autoFocus autoComplete="off" />
+          <input id="agent-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("agents.namePlaceholder")} maxLength={100} autoFocus autoComplete="off" />
         </div>
       </div>
       <div className="field">
-        <span className="field-label">Access</span>
+        <span className="field-label">{t("agents.access")}</span>
         <AccessEditor apps={apps} value={access} onChange={setAccess} name="new-agent" />
       </div>
       {error && (
@@ -147,10 +150,10 @@ function NewTokenAgent({ apps, onCreated, onCancel }: { apps: AccessApp[]; onCre
       )}
       <div className="agent-actions">
         <Button variant="invisible" onClick={onCancel}>
-          Cancel
+          {t("common.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={!ready || busy}>
-          {busy ? "Creating…" : "Create agent"}
+          {busy ? t("agents.creating") : t("agents.create")}
         </Button>
       </div>
     </form>
@@ -172,6 +175,7 @@ function AgentItem({
   onRemoved: () => void
   onRotated: (a: NewAgentToken) => void
 }) {
+  const t = useT()
   const [mode, setMode] = useState<Mode>(null)
   const [access, setAccess] = useState<AgentAccess>(() => accessOf(agent))
   const [name, setName] = useState(agent.client_name)
@@ -213,13 +217,13 @@ function AgentItem({
               }}
             >
               <div className="input" data-size="small">
-                <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Agent name" maxLength={100} autoFocus />
+                <input value={name} onChange={(e) => setName(e.target.value)} aria-label={t("agents.nameLabel")} maxLength={100} autoFocus />
               </div>
               <Button type="submit" size="small" variant="primary" disabled={busy || !name.trim()}>
-                Save
+                {t("common.save")}
               </Button>
               <Button size="small" variant="invisible" onClick={() => setMode(null)}>
-                Cancel
+                {t("common.cancel")}
               </Button>
             </form>
           ) : (
@@ -228,54 +232,51 @@ function AgentItem({
               <span className="agent-kind">
                 {token ? (
                   <>
-                    Token agent{agent.preview && <span className="mono agent-preview"> {agent.preview}</span>}
+                    {t("editor.tokenAgent")}
+                    {agent.preview && <span className="mono agent-preview"> {agent.preview}</span>}
                   </>
                 ) : (
-                  "Connected app"
+                  t("editor.connectedApp")
                 )}
               </span>
             </div>
           )}
           <div className="agent-access">{accessSummary(agent)}</div>
           <div className="agent-meta">
-            {agent.create_workspaces && "Can create workspaces · "}Added <Time iso={agent.created_at} /> ·{" "}
-            {agent.last_used_at ? (
-              <>
-                last used <Time iso={agent.last_used_at} />
-              </>
-            ) : (
-              "not used yet"
-            )}
+            {agent.create_workspaces && `${t("agents.canCreate")} · `}
+            {tr("agents.added", { time: <Time iso={agent.created_at} /> })} ·{" "}
+            {agent.last_used_at ? tr("agents.lastUsed", { time: <Time iso={agent.last_used_at} /> }) : t("agents.notUsed")}
           </div>
           {error && <p className="field-error">{error}</p>}
         </div>
 
         {mode === "revoke" || mode === "rotate" ? (
           <div className="agent-confirm-inline">
-            <span className="agent-confirm-text">{mode === "revoke" ? (token ? "Revoke it? It stops working at once." : "Disconnect it? It loses access at once.") : "The current secret stops working at once."}</span>
+            <span className="agent-confirm-text">{mode === "revoke" ? (token ? t("agents.revokeConfirm") : t("agents.disconnectConfirm")) : t("agents.rotateConfirm")}</span>
             <Button size="small" variant="invisible" onClick={() => setMode(null)} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             {mode === "revoke" ? (
               <Button size="small" variant="danger" disabled={busy} onClick={() => run(async () => (await api.disconnectAgent(agent.id), onRemoved()))}>
-                {busy ? "…" : token ? "Revoke" : "Disconnect"}
+                {busy ? "…" : token ? t("agents.revoke") : t("agents.disconnect")}
               </Button>
             ) : (
               <Button size="small" variant="danger" disabled={busy} onClick={() => run(async () => onRotated(await api.rotateAgent(agent.id)))}>
-                {busy ? "…" : "Rotate secret"}
+                {busy ? "…" : t("agents.rotate")}
               </Button>
             )}
           </div>
         ) : (
           mode !== "rename" && (
             <div className="agent-row-actions">
-              <Button size="small" onClick={() => open(mode === "edit" ? null : "edit")} aria-expanded={mode === "edit"} aria-label={`Edit access for ${agent.client_name}`}>
-                Edit<span className="wide-only"> access</span>
+              <Button size="small" onClick={() => open(mode === "edit" ? null : "edit")} aria-expanded={mode === "edit"} aria-label={t("agents.editAccessFor", { name: agent.client_name })}>
+                <span className="wide-only">{t("agents.editAccess")}</span>
+                <span className="narrow-only">{t("common.edit")}</span>
               </Button>
               <Menu
                 align="end"
                 width={220}
-                trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`More for ${agent.client_name}`} icon={<KebabIcon />} {...p} />}
+                trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("agents.moreFor", { name: agent.client_name })} icon={<KebabIcon />} {...p} />}
               >
                 {(close) => (
                   <>
@@ -286,18 +287,18 @@ function AgentItem({
                           open("rename")
                         }}
                       >
-                        Rename
+                        {t("agents.rename")}
                       </MenuItem>
                     )}
                     {token && (
                       <MenuItem
-                        description="Get a new secret; the old one stops"
+                        description={t("agents.rotateText")}
                         onSelect={() => {
                           close()
                           open("rotate")
                         }}
                       >
-                        Rotate secret
+                        {t("agents.rotate")}
                       </MenuItem>
                     )}
                     <MenuItem
@@ -307,7 +308,7 @@ function AgentItem({
                         open("revoke")
                       }}
                     >
-                      {token ? "Revoke" : "Disconnect"}
+                      {token ? t("agents.revoke") : t("agents.disconnect")}
                     </MenuItem>
                   </>
                 )}
@@ -320,13 +321,13 @@ function AgentItem({
       {mode === "edit" && (
         <div className="agent-panel">
           <AccessEditor apps={apps} value={access} onChange={setAccess} name={`agent-${agent.id}`} />
-          {!grantsAnything(access) && <p className="agent-warning">With nothing chosen it can't work anywhere until you give it access again.</p>}
+          {!grantsAnything(access) && <p className="agent-warning">{t("agents.nothingWarning")}</p>}
           <div className="agent-actions">
             <Button variant="invisible" onClick={() => setMode(null)}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button variant="primary" disabled={busy} onClick={() => run(async () => onChange(await api.patchAgent(agent.id, access)))}>
-              {busy ? "Saving…" : "Save access"}
+              {busy ? t("common.saving") : t("agents.saveAccess")}
             </Button>
           </div>
         </div>

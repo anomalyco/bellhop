@@ -3,6 +3,7 @@ import { agentRoleLabel, roleLabel } from "../../lib/roles"
 import { ChevronDownIcon } from "../icons"
 import { Menu, MenuItem } from "../Menu"
 import "../../styles/agents.css"
+import { useT } from "../../i18n/core"
 
 export interface RoleOption<T extends string> {
   value: T
@@ -29,6 +30,7 @@ export function RoleSelect<T extends string>({
   disabled?: boolean
   align?: "start" | "end"
 }) {
+  useT()
   const current = options.find((o) => o.value === value)
   return (
     <Menu
@@ -72,10 +74,12 @@ export function RoleSelect<T extends string>({
 
 /** A team role as a quiet badge. */
 export function RoleBadge({ role }: { role: Role }) {
+  useT()
   return <span className="role-badge">{roleLabel[role]}</span>
 }
 
 /** An agent role as a quiet badge. */
 export function AgentRoleBadge({ role }: { role: AgentRole }) {
+  useT()
   return <span className="role-badge">{agentRoleLabel[role]}</span>
 }

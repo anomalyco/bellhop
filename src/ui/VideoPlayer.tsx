@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
 import "../styles/video.css"
+import { useT } from "../i18n/core"
 
 const speeds = [0.5, 1, 1.25, 1.5, 2]
 
@@ -19,6 +20,7 @@ export function VideoPlayer({ src }: { src: string }) {
   const playedBar = useRef<HTMLSpanElement>(null)
   const thumb = useRef<HTMLSpanElement>(null)
   const idle = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const t = useT()
   const [playing, setPlaying] = useState(false)
   const [started, setStarted] = useState(false)
   const [time, setTime] = useState(0)
@@ -149,9 +151,9 @@ export function VideoPlayer({ src }: { src: string }) {
   if (failed)
     return (
       <div className="video" data-failed>
-        <p>This video can't be played here.</p>
+        <p>{t("video.failed")}</p>
         <a className="btn" href={src} download>
-          Download
+          {t("log.download")}
         </a>
       </div>
     )
@@ -203,7 +205,7 @@ export function VideoPlayer({ src }: { src: string }) {
       />
 
       {!started && (
-        <button type="button" className="video-big" aria-label="Play video" onClick={toggle}>
+        <button type="button" className="video-big" aria-label={t("video.play")} onClick={toggle}>
           <PlayGlyph />
         </button>
       )}
@@ -214,7 +216,7 @@ export function VideoPlayer({ src }: { src: string }) {
           className="video-track"
           role="slider"
           tabIndex={0}
-          aria-label="Seek"
+          aria-label={t("video.seek")}
           aria-valuemin={0}
           aria-valuemax={Math.round(duration) || 0}
           aria-valuenow={Math.round(time)}
@@ -250,13 +252,13 @@ export function VideoPlayer({ src }: { src: string }) {
         </div>
 
         <div className="video-row">
-          <button type="button" className="video-btn" aria-label={playing ? "Pause" : "Play"} onClick={toggle}>
+          <button type="button" className="video-btn" aria-label={playing ? t("video.pause") : t("video.playShort")} onClick={toggle}>
             {playing ? <PauseGlyph /> : <PlayGlyph />}
           </button>
           <button
             type="button"
             className="video-btn"
-            aria-label={muted ? "Unmute" : "Mute"}
+            aria-label={muted ? t("video.unmute") : t("video.mute")}
             onClick={() => (v().muted = !v().muted)}
           >
             {muted ? <MutedGlyph /> : <VolumeGlyph />}
@@ -267,14 +269,14 @@ export function VideoPlayer({ src }: { src: string }) {
           <span className="video-spacer" />
           <SpeedMenu speed={speed} onPick={(s) => (v().playbackRate = s)} />
           {canPip && (
-            <button type="button" className="video-btn" aria-label="Picture in picture" onClick={() => void pip()}>
+            <button type="button" className="video-btn" aria-label={t("video.pip")} onClick={() => void pip()}>
               <PipGlyph />
             </button>
           )}
-          <a className="video-btn" href={src} download aria-label="Download">
+          <a className="video-btn" href={src} download aria-label={t("log.download")}>
             <DownloadGlyph />
           </a>
-          <button type="button" className="video-btn" aria-label={full ? "Exit full screen" : "Full screen"} onClick={fullscreen}>
+          <button type="button" className="video-btn" aria-label={full ? t("video.exitFullscreen") : t("video.fullscreen")} onClick={fullscreen}>
             {full ? <ShrinkGlyph /> : <ExpandGlyph />}
           </button>
         </div>
@@ -284,6 +286,7 @@ export function VideoPlayer({ src }: { src: string }) {
 }
 
 function SpeedMenu({ speed, onPick }: { speed: number; onPick: (s: number) => void }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -299,7 +302,7 @@ function SpeedMenu({ speed, onPick }: { speed: number; onPick: (s: number) => vo
       <button
         type="button"
         className="video-btn video-btn-text"
-        aria-label="Playback speed"
+        aria-label={t("video.speed")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}

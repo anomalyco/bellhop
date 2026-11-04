@@ -19,6 +19,9 @@ import { NoClosed, NoIssues, NoResults } from "../ui/onboarding/EmptyStates"
 import { SetupChecklist, useSetupChecklistSettled } from "../ui/onboarding/SetupChecklist"
 import { MineFilter } from "../ui/features/QuickLinks"
 import { FilterMenu } from "../ui/features/FilterMenu"
+import { tKey, tr, useT, type PlainKey } from "../i18n/core"
+import { formatNumber } from "../i18n"
+import { sorts } from "../ui/features/FilterMenu"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -29,6 +32,7 @@ export function Issues({ slug }: { slug: string }) {
 }
 
 function IssuesLoading({ slug }: { slug: string }) {
+  const t = useT()
   const search = useSearch()
   const q = new URLSearchParams(search).get("q") ?? "is:open"
   const filter = parseQuery(q)
@@ -39,40 +43,40 @@ function IssuesLoading({ slug }: { slug: string }) {
   return (
     <Page>
       <div className="list-toolbar">
-        <nav className="segmented list-states" aria-label="Issue state">
+        <nav className="segmented list-states" aria-label={t("list.states")}>
           <AppLink slug={slug} href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
             <StateIcon state="open" size={14} />
-            Open
+            {t("state.open")}
           </AppLink>
           <AppLink slug={slug} href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
             <StateIcon state="closed" size={14} />
-            Closed
+            {t("state.closed")}
           </AppLink>
         </nav>
         <div className="input list-search">
           <SearchIcon size={14} />
-          <input aria-label="Search issues" defaultValue={q} placeholder="Search issues" spellCheck={false} readOnly />
+          <input aria-label={t("list.search")} defaultValue={q} placeholder={t("list.search")} spellCheck={false} readOnly />
         </div>
         <div className="list-label">
           <MineFilter filter={filter} disabled />
           <FilterMenu query={q} disabled />
           <button type="button" className="btn list-sort" data-variant="default" disabled>
             <SortIcon size={14} />
-            <span className="filter-text list-sort-text">{sortLabel[filter.sort ?? "newest"]}</span>
+            <span className="filter-text list-sort-text">{tKey(sortLabel[filter.sort ?? "newest"])}</span>
             <ChevronDownIcon size={14} />
           </button>
           <button type="button" className="btn" data-variant="default" data-active={filter.label ? "" : undefined} disabled>
             <TagIcon size={14} />
-            <span className="filter-text">{filter.label || "Label"}</span>
+            <span className="filter-text">{filter.label || t("list.label")}</span>
             <ChevronDownIcon size={14} />
           </button>
         </div>
-        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
+        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary" aria-label={t("list.newIssue")}>
           <PlusIcon size={14} />
-          New issue
+          <span className="list-new-text">{t("list.newIssue")}</span>
         </AppLink>
       </div>
-      <section className="issue-list" aria-label="Issues">
+      <section className="issue-list" aria-label={t("list.issues")}>
         <SkeletonRows />
       </section>
     </Page>
@@ -82,7 +86,7 @@ function IssuesLoading({ slug }: { slug: string }) {
 export function SearchBox({
   query,
   filtered,
-  placeholder = "Search issues",
+  placeholder,
   onSubmit,
   onClear,
 }: {
@@ -92,6 +96,8 @@ export function SearchBox({
   onSubmit: (draft: string) => void
   onClear: () => void
 }) {
+  const t = useT()
+  placeholder ??= t("list.search")
   const [draft, setDraft] = useState(query)
   useEffect(() => setDraft(query), [query])
 
@@ -111,7 +117,7 @@ export function SearchBox({
         spellCheck={false}
       />
       {filtered && (
-        <button type="button" className="input-clear" aria-label="Clear filters" onClick={onClear}>
+        <button type="button" className="input-clear" aria-label={t("list.clearFilters")} onClick={onClear}>
           <XIcon size={14} />
         </button>
       )}
@@ -127,6 +133,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
 }
 
 function IssuesList({ app }: { app: AppDetail }) {
+  const t = useT()
   const slug = app.slug
   const search = useSearch()
   const [, navigate] = useLocation()
@@ -214,16 +221,16 @@ function IssuesList({ app }: { app: AppDetail }) {
     <Page>
       <SetupChecklist app={app} />
       <div className="list-toolbar">
-        <nav className="segmented list-states" aria-label="Issue state">
+        <nav className="segmented list-states" aria-label={t("list.states")}>
           <AppLink slug={slug} href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
             <StateIcon state="open" size={14} />
-            Open
-            {counts && <span className="segmented-count">{counts.open}</span>}
+            {t("state.open")}
+            {counts && <span className="segmented-count">{formatNumber(counts.open)}</span>}
           </AppLink>
           <AppLink slug={slug} href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
             <StateIcon state="closed" size={14} />
-            Closed
-            {counts && <span className="segmented-count">{counts.closed}</span>}
+            {t("state.closed")}
+            {counts && <span className="segmented-count">{formatNumber(counts.closed)}</span>}
           </AppLink>
         </nav>
         <SearchBox
@@ -238,16 +245,16 @@ function IssuesList({ app }: { app: AppDetail }) {
           <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
-        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
+        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary" aria-label={t("list.newIssue")}>
           <PlusIcon size={14} />
-          New issue
+          <span className="list-new-text">{t("list.newIssue")}</span>
         </AppLink>
       </div>
 
       <section
         ref={listEl}
         className="issue-list"
-        aria-label="Issues"
+        aria-label={t("list.issues")}
         data-pending={pending || undefined}
         data-reveal={(hadSkeleton.current && !!shown) || undefined}
         aria-busy={pending || undefined}
@@ -271,7 +278,7 @@ function IssuesList({ app }: { app: AppDetail }) {
         {shown?.next_cursor && (
           <div className="list-footer">
             <Button onClick={loadMore} disabled={loadingMore || pending}>
-              {loadingMore ? "Loading…" : "Load more"}
+              {loadingMore ? t("common.loading") : t("common.loadMore")}
             </Button>
             {moreError && <span className="field-error">{moreError}</span>}
           </div>
@@ -298,6 +305,7 @@ export function SkeletonRows() {
 }
 
 function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; onChange: (label: string) => void }) {
+  const t = useT()
   const [query, setQuery] = useState("")
   const shown = app.labels.filter((l) => l.name.toLowerCase().includes(query.toLowerCase()))
   return (
@@ -311,11 +319,11 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
           className="btn"
           data-variant="default"
           data-active={value ? "" : undefined}
-          aria-label={value ? `Label: ${value}` : "Filter by label"}
+          aria-label={value ? t("list.labelIs", { label: value }) : t("list.filterByLabel")}
           {...props}
         >
           <TagIcon size={14} />
-          <span className="filter-text">{value ? value : "Label"}</span>
+          <span className="filter-text">{value ? value : t("list.label")}</span>
           <ChevronDownIcon size={14} />
         </button>
       )}
@@ -324,7 +332,7 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
         <>
           <div className="menu-filter">
             <div className="input" data-size="small">
-              <input placeholder="Filter labels" value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Filter labels" />
+              <input placeholder={t("list.filterLabels")} value={query} onChange={(e) => setQuery(e.target.value)} aria-label={t("list.filterLabels")} />
             </div>
           </div>
           <div className="menu-scroll">
@@ -335,7 +343,7 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
                   close()
                 }}
               >
-                Clear label filter
+                {t("list.clearLabel")}
               </MenuItem>
             )}
             {shown.map((label) => (
@@ -352,7 +360,7 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
                 {label.name}
               </MenuItem>
             ))}
-            {shown.length === 0 && <div className="menu-empty">No labels.</div>}
+            {shown.length === 0 && <div className="menu-empty">{t("list.noLabels")}</div>}
           </div>
         </>
       )}
@@ -372,6 +380,7 @@ export const IssueRow = memo(function IssueRow({
   onLabel?: (name: string) => void
   workspace?: { name: string; icon_url: string | null }
 }) {
+  const t = useT()
   const active = useUntil(issue.activity?.expires_at)
   const href = appPath(slug, `/issues/${issue.number}`)
   return (
@@ -401,33 +410,40 @@ export const IssueRow = memo(function IssueRow({
           )}
         </div>
         <div className="issue-meta">
-          <span className="mono">#{issue.number}</span> · {actorName(issue.author)}
-          {issue.author.type !== "agent" && issue.author.tier && (
-            <>
-              {" "}
-              <TierBadge tier={issue.author.tier} />
-            </>
-          )}{" "}
-          opened <Time iso={issue.created_at} />
+          {tr("row.meta", {
+            number: <span className="mono">#{issue.number}</span>,
+            author: (
+              <>
+                {actorName(issue.author)}
+                {issue.author.type !== "agent" && issue.author.tier && (
+                  <>
+                    {" "}
+                    <TierBadge tier={issue.author.tier} />
+                  </>
+                )}
+              </>
+            ),
+            time: <Time iso={issue.created_at} />,
+          })}
           {issue.private && (
-            <span className="row-flag" title="Only the team and the reporter can see it">
+            <span className="row-flag" title={t("row.privateTitle")}>
               <LockIcon size={12} />
-              Private
+              {t("row.private")}
             </span>
           )}
           {issue.hidden && (
-            <span className="row-flag" title="Hidden by a moderator; only the team can see it">
+            <span className="row-flag" title={t("row.hiddenTitle")}>
               <EyeOffIcon size={12} />
-              Hidden
+              {t("row.hidden")}
             </span>
           )}
         </div>
       </div>
       <div className="issue-row-side">
         {(issue.votes ?? 0) > 0 && (
-          <span className="issue-row-votes" title={`${issue.votes} ${issue.votes === 1 ? "person has" : "people have"} this too`}>
+          <span className="issue-row-votes" title={t("row.votes", { count: issue.votes ?? 0 })}>
             <ThumbIcon size={14} />
-            <span className="mono-num">{issue.votes}</span>
+            <span className="mono-num">{formatNumber(issue.votes ?? 0)}</span>
           </span>
         )}
         {active && issue.activity && (
@@ -437,7 +453,7 @@ export const IssueRow = memo(function IssueRow({
           </span>
         )}
         {issue.assignee && (
-          <span title={`Assigned to ${actorName(issue.assignee)}`} className="issue-row-assignee">
+          <span title={t("row.assigned", { name: actorName(issue.assignee) })} className="issue-row-assignee">
             <ActorAvatar actor={issue.assignee} size={20} />
           </span>
         )}
@@ -445,35 +461,30 @@ export const IssueRow = memo(function IssueRow({
           slug={slug}
           href={href}
           className="issue-row-comments"
-          aria-label={`${issue.comment_count} comments`}
+          aria-label={t("row.comments", { count: issue.comment_count })}
           data-zero={issue.comment_count === 0 || undefined}
         >
           <CommentIcon size={14} />
-          <span className="mono-num">{issue.comment_count}</span>
+          <span className="mono-num">{formatNumber(issue.comment_count)}</span>
         </AppLink>
       </div>
     </div>
   )
 })
 
-const sortLabel: Record<IssueSort, string> = {
-  newest: "Newest",
-  oldest: "Oldest",
-  votes: "Most votes",
-  updated: "Recently updated",
-  comments: "Most comments",
-}
+const sortLabel: Record<IssueSort, PlainKey> = Object.fromEntries(sorts) as Record<IssueSort, PlainKey>
 
 /** How the list is ordered; the choice lives in the query as `sort:votes` and friends. */
 function SortMenu({ value, onChange }: { value: IssueSort; onChange: (sort: IssueSort) => void }) {
+  const t = useT()
   return (
     <Menu
       align="end"
       width={220}
       trigger={(props) => (
-        <button type="button" className="btn list-sort" data-variant="default" aria-label={`Sort: ${sortLabel[value]}`} {...props}>
+        <button type="button" className="btn list-sort" data-variant="default" aria-label={t("list.sortBy", { sort: tKey(sortLabel[value]) })} {...props}>
           <SortIcon size={14} />
-          <span className="filter-text list-sort-text">{sortLabel[value]}</span>
+          <span className="filter-text list-sort-text">{tKey(sortLabel[value])}</span>
           <ChevronDownIcon size={14} />
         </button>
       )}
@@ -488,7 +499,7 @@ function SortMenu({ value, onChange }: { value: IssueSort; onChange: (sort: Issu
               if (s !== value) onChange(s)
             }}
           >
-            {sortLabel[s]}
+            {tKey(sortLabel[s])}
           </MenuItem>
         ))
       }
@@ -498,8 +509,9 @@ function SortMenu({ value, onChange }: { value: IssueSort; onChange: (sort: Issu
 
 /** Up to three pinned issues, compact, above the rows. */
 function PinStrip({ slug, issues }: { slug: string; issues: IssueSummary[] }) {
+  const t = useT()
   return (
-    <nav className="pin-strip" aria-label="Pinned issues">
+    <nav className="pin-strip" aria-label={t("list.pinned")}>
       {issues.map((issue) => (
         <AppLink key={issue.id} slug={slug} href={appPath(slug, `/issues/${issue.number}`)} className="pin-card">
           <span className="pin-card-top">
