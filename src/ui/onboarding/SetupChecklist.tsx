@@ -177,7 +177,7 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
           {count} of {order.length}
         </span>
         <span className="spacer" />
-        <Button iconOnly size="small" variant="invisible" aria-label="Hide setup" title="Hide setup" icon={<XIcon size={14} />} onClick={dismiss} />
+        <Button iconOnly size="small" variant="ghost-muted" aria-label="Hide setup" title="Hide setup" icon={<XIcon size={14} />} onClick={dismiss} />
       </header>
       <div className="setup-progress" aria-hidden="true">
         {order.map((id) => (

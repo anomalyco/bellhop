@@ -846,7 +846,7 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
             <Menu
               align="end"
               width={220}
-              trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label={`More for ${agent.client_name}`} icon={<KebabIcon />} {...p} />}
+              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`More for ${agent.client_name}`} icon={<KebabIcon />} {...p} />}
             >
               {(close) => (
                 <MenuItem
@@ -1219,7 +1219,7 @@ function MemberRow({
             <Menu
               align="end"
               width={240}
-              trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label={`More for ${who}`} icon={<KebabIcon />} {...p} />}
+              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`More for ${who}`} icon={<KebabIcon />} {...p} />}
             >
               {(close) => (
                 <>

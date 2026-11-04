@@ -273,7 +273,7 @@ export function Editor({
   const tools = (
     <div className="editor-tools">
       <Button
-        variant="invisible"
+        variant="ghost-muted"
         iconOnly
         aria-label="Attach file"
         title="Attach file"
@@ -281,7 +281,7 @@ export function Editor({
         onClick={() => fileInput.current?.click()}
       />
       <Button
-        variant="invisible"
+        variant="ghost-muted"
         iconOnly
         aria-label="Add image or video"
         title="Add image or video"
@@ -290,7 +290,7 @@ export function Editor({
       />
       {canRecord && (
         <Button
-          variant="invisible"
+          variant="ghost-muted"
           iconOnly
           aria-label="Record screen"
           title="Record screen"
@@ -300,7 +300,7 @@ export function Editor({
         />
       )}
       <Button
-        variant="invisible"
+        variant="ghost-muted"
         aria-pressed={tab === "preview"}
         title={tab === "preview" ? "Back to writing" : "Preview markdown"}
         onMouseEnter={() => loadMarkdown()}

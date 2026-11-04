@@ -30,10 +30,10 @@ import {
 
 const swatches: [string, string, string][] = [
   ["Deep", "--bg-deep", "#050505"],
-  ["Base", "--bg", "#0a0a0a"],
-  ["Layer 1", "--layer-1", "#131313"],
-  ["Layer 2", "--layer-2", "#1b1b1b"],
-  ["Layer 3", "--layer-3", "#262626"],
+  ["Base", "--bg", "#161616"],
+  ["Layer 1", "--layer-1", "#242424"],
+  ["Layer 2", "--layer-2", "#2e2e2e"],
+  ["Layer 3", "--layer-3", "#3a3a3a"],
   ["Primary", "--primary-bg", "#f2f2f2"],
   ["Hover", "--hover", "white 6%"],
   ["Border", "--border", "white 10%"],

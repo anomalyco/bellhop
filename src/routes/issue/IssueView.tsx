@@ -191,7 +191,7 @@ function IssueMenu({
     <Menu
       align="end"
       width={260}
-      trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label="Issue actions" icon={<KebabIcon />} {...p} />}
+      trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label="Issue actions" icon={<KebabIcon />} {...p} />}
     >
       {(close) => {
         const pick = (fn: () => unknown) => () => {

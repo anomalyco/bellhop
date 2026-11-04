@@ -484,8 +484,8 @@
   min-width: 0;
   padding: 10px 12px;
   color: var(--fg);
-  border-radius: 10px;
-  box-shadow: inset 0 0 0 0.5px var(--border);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
 }
 .pin-card:hover {
   color: var(--fg);

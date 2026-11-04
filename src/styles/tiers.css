@@ -33,7 +33,7 @@
   color: var(--fg);
   background: none;
   border: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-small);
   box-shadow: inset 0 0 0 0.5px var(--border-strong);
   cursor: pointer;
 }

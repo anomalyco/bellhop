@@ -140,7 +140,7 @@ type TriggerProps = Parameters<Parameters<typeof Menu>[0]["trigger"]>[0]
 
 const edit = (label: string, icon: ReactNode = <SettingsIcon size={14} />) =>
   function EditTrigger(p: TriggerProps) {
-    return <Button iconOnly size="small" variant="invisible" aria-label={label} title={label} icon={icon} {...p} />
+    return <Button iconOnly size="small" variant="ghost-muted" aria-label={label} title={label} icon={icon} {...p} />
   }
 
 function StatusSection({ model }: { model: IssueModel }) {
@@ -274,7 +274,7 @@ function InfoSections({ model }: { model: IssueModel }) {
             <Button
               iconOnly
               size="small"
-              variant="invisible"
+              variant="ghost-muted"
               aria-label="Set tier"
               title="Set tier"
               aria-expanded={settingTier}

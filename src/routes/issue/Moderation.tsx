@@ -197,7 +197,7 @@ export function CommentBody({ ctx, comment, children }: { ctx: CommentContext; c
       <Menu
         align="end"
         width={240}
-        trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label={`Actions for ${actorName(author)}'s comment`} icon={<KebabIcon />} {...p} />}
+        trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`Actions for ${actorName(author)}'s comment`} icon={<KebabIcon />} {...p} />}
       >
         {(close) => {
           const pick = (fn: () => void) => () => {

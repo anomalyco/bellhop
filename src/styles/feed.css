@@ -60,11 +60,13 @@
   position: sticky;
   top: 24px;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 28px;
   min-width: 0;
 }
 .rail-section {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   min-width: 0;
 }
@@ -78,11 +80,15 @@
 .rail-title {
   margin: 0;
   color: var(--fg-muted);
-  font-size: var(--text-small);
-  font-weight: var(--weight-medium);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  letter-spacing: 0;
 }
 .rail-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   margin: 0 -8px;
   padding: 0;
   list-style: none;
@@ -116,8 +122,8 @@
 .rail-count {
   flex: none;
   color: var(--fg-faint);
-  font-family: var(--font-mono);
   font-size: 12px;
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
 }
 .rail-more {

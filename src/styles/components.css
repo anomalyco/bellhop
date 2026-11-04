@@ -1,6 +1,7 @@
-/* Buttons: every button is a pill (icon-only ones are circles); fields, menus and labels keep the 6 px corner.
-   data-variant: primary (flat white) | default (neutral) | danger | outline | invisible (ghost).
-   data-size: small (24) | medium (30, default) | large (36). data-demo forces a state on the design page. */
+/* Buttons, after OpenCode: 6 px rectangles (4 px at small), icon-only ones square.
+   data-variant: primary (flat near-white) | default (neutral, lifted edge) | danger | outline | invisible (ghost)
+   | ghost-muted (a quieter ghost for toolbars and row actions).
+   data-size: small (24) | medium (28, default) | large (32). data-demo forces a state on the design page. */
 .btn {
   position: relative;
   display: inline-flex;
@@ -8,7 +9,7 @@
   justify-content: center;
   gap: 6px;
   height: var(--control-medium);
-  padding: 0 14px;
+  padding: 0 11px;
   min-width: max-content;
   font: inherit;
   font-size: var(--text-ui);
@@ -18,7 +19,7 @@
   color: var(--fg);
   background-color: var(--bg-neutral);
   border: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius);
   box-shadow: var(--elevation-neutral);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -39,12 +40,12 @@ a.btn:hover {
 }
 .btn:hover:not(:disabled),
 .btn[data-demo="hover"] {
-  background-color: rgb(255 255 255 / 0.09);
+  background-color: rgb(255 255 255 / 0.12);
 }
 .btn:active:not(:disabled),
 .btn[aria-expanded="true"],
 .btn[data-demo="active"] {
-  background-color: rgb(255 255 255 / 0.13);
+  background-color: rgb(255 255 255 / 0.16);
 }
 .btn:focus-visible,
 .btn[data-demo="focus"] {
@@ -59,15 +60,16 @@ a.btn:hover {
 
 .btn[data-size="small"] {
   height: var(--control-small);
-  padding: 0 10px;
+  padding: 0 9px;
   gap: 4px;
+  border-radius: var(--radius-small);
 }
 .btn[data-size="large"] {
   height: var(--control-large);
-  padding: 0 18px;
+  padding: 0 15px;
 }
 
-/* Primary: flat white with dark text, the one main action on a screen */
+/* Primary: flat near-white with dark text, the one main action on a screen */
 .btn[data-variant="primary"] {
   color: var(--primary-fg);
   background-color: var(--primary-bg);
@@ -98,7 +100,7 @@ a.btn[data-variant="primary"]:hover {
 
 .btn[data-variant="outline"] {
   background-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--border-strong);
+  box-shadow: inset 0 0 0 1px var(--border-muted);
 }
 .btn[data-variant="outline"]:hover:not(:disabled),
 .btn[data-variant="outline"][data-demo="hover"] {
@@ -109,23 +111,36 @@ a.btn[data-variant="primary"]:hover {
   background-color: var(--pressed);
 }
 
-.btn[data-variant="invisible"] {
-  color: var(--fg-muted);
+.btn[data-variant="invisible"],
+.btn[data-variant="ghost-muted"] {
+  color: var(--fg);
   background-color: transparent;
   box-shadow: none;
 }
-.btn[data-variant="invisible"] .icon {
+.btn[data-variant="ghost-muted"] {
+  color: var(--fg-muted);
+  font-weight: var(--weight-regular);
+}
+.btn[data-variant="ghost-muted"] .icon {
   color: inherit;
 }
 .btn[data-variant="invisible"]:hover:not(:disabled),
-.btn[data-variant="invisible"][data-demo="hover"] {
-  color: var(--fg);
+.btn[data-variant="invisible"][data-demo="hover"],
+.btn[data-variant="ghost-muted"]:hover:not(:disabled),
+.btn[data-variant="ghost-muted"][data-demo="hover"] {
   background-color: var(--hover);
+}
+.btn[data-variant="ghost-muted"]:hover:not(:disabled) {
+  color: var(--fg);
 }
 .btn[data-variant="invisible"]:active:not(:disabled),
 .btn[data-variant="invisible"][aria-pressed="true"],
 .btn[data-variant="invisible"][aria-expanded="true"],
-.btn[data-variant="invisible"][data-demo="active"] {
+.btn[data-variant="invisible"][data-demo="active"],
+.btn[data-variant="ghost-muted"]:active:not(:disabled),
+.btn[data-variant="ghost-muted"][aria-pressed="true"],
+.btn[data-variant="ghost-muted"][aria-expanded="true"],
+.btn[data-variant="ghost-muted"][data-demo="active"] {
   color: var(--fg);
   background-color: var(--pressed);
 }
@@ -141,11 +156,11 @@ a.btn[data-variant="primary"]:hover {
   width: var(--control-large);
 }
 
-/* Split button: an action and its menu sharing one neutral pill */
+/* Split button: an action and its menu sharing one neutral button */
 .split,
 .btn-group {
   display: inline-flex;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius);
   box-shadow: var(--elevation-neutral);
 }
 .split .btn,
@@ -156,13 +171,13 @@ a.btn[data-variant="primary"]:hover {
 .split > .btn:first-child,
 .btn-group > .btn:first-child {
   padding-right: 10px;
-  border-radius: var(--radius-full) 0 0 var(--radius-full);
+  border-radius: var(--radius) 0 0 var(--radius);
 }
 .split .menu-root .btn,
 .btn-group > .btn:last-child {
-  width: 30px;
-  padding-right: 2px;
-  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  width: 28px;
+  padding: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
   box-shadow: inset 0.5px 0 0 var(--border-strong);
 }
 .split .btn:focus-visible,
@@ -176,9 +191,9 @@ a.btn[data-variant="primary"]:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   font-size: 11px;
   font-weight: var(--weight-button);
   line-height: 1;
@@ -186,7 +201,7 @@ a.btn[data-variant="primary"]:hover {
   color: var(--fg-muted);
   background: var(--layer-2);
   box-shadow: inset 0 0 0 0.5px var(--border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-small);
   font-variant-numeric: tabular-nums;
 }
 
@@ -207,7 +222,8 @@ a.btn[data-variant="primary"]:hover {
   }
 }
 
-/* Issue state pill, tinted from OpenCode's state tokens */
+/* Issue state pill, tinted from OpenCode's state tokens. It stays round on purpose: next to 6 px buttons it reads
+   as a status, not an action. */
 .state {
   --state-fg: var(--neutral);
   --state-bg: var(--neutral-bg);
@@ -223,7 +239,7 @@ a.btn[data-variant="primary"]:hover {
   white-space: nowrap;
   color: var(--state-fg);
   background: var(--state-bg);
-  box-shadow: inset 0 0 0 1px var(--state-border);
+  box-shadow: inset 0 0 0 0.5px var(--state-border);
   border-radius: var(--radius-full);
 }
 .state[data-size="small"] {
@@ -274,25 +290,37 @@ a.btn[data-variant="primary"]:hover {
   color: inherit;
 }
 
-/* Issue label: tinted from its own colour (--label) */
+/* Issue label: a neutral chip with the label's colour (--label) as a dot, so a row of mixed colours stays calm */
 .label {
   --label: #808080;
   display: inline-flex;
   align-items: center;
+  gap: 5px;
   height: 20px;
-  padding: 0 7px;
+  padding: 0 7px 0 6px;
   font-size: var(--text-small);
   font-weight: var(--weight-medium);
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   white-space: nowrap;
-  color: color-mix(in oklab, var(--label) 45%, var(--fg));
-  background: color-mix(in oklab, var(--label) 16%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--label) 32%, transparent);
-  border-radius: var(--radius);
+  color: var(--fg);
+  background: var(--layer-2);
+  box-shadow: inset 0 0 0 0.5px var(--border);
+  border-radius: var(--radius-small);
+}
+.label-chip-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  background: var(--label);
+  border-radius: 50%;
+}
+/* Very dark label colours would vanish on the chip: give their dot a ring */
+.label[data-dark] .label-chip-dot {
+  box-shadow: 0 0 0 0.5px var(--border-strong);
 }
 
-/* AI badge and role badges, after OpenCode's menu badge */
+/* AI badge and role badges, after OpenCode's tag */
 .ai-badge,
 .role-badge {
   display: inline-flex;
@@ -308,14 +336,14 @@ a.btn[data-variant="primary"]:hover {
 }
 .ai-badge {
   color: var(--fg);
-  background: var(--layer-3);
-  box-shadow: inset 0 0 0 0.5px var(--border-strong);
+  background: var(--layer-2);
+  box-shadow: inset 0 0 0 0.5px var(--border);
 }
 .role-badge {
   color: var(--fg-muted);
   box-shadow: inset 0 0 0 0.5px var(--border-strong);
 }
-/* A person's tier: a faint tint of its colour and a dot, in the role badge's size */
+/* A person's tier: a neutral tag with its colour as a dot, in the role badge's size */
 .tier-badge {
   display: inline-flex;
   align-items: center;
@@ -329,9 +357,9 @@ a.btn[data-variant="primary"]:hover {
   line-height: 1;
   letter-spacing: 0;
   white-space: nowrap;
-  background: color-mix(in oklab, var(--tier) 16%, transparent);
+  background: var(--layer-2);
   border-radius: var(--radius-small);
-  box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--tier) 45%, transparent);
+  box-shadow: inset 0 0 0 0.5px var(--border);
 }
 .tier-dot {
   flex: none;
@@ -350,7 +378,7 @@ a.btn[data-variant="primary"]:hover {
 
 /* Avatars: OpenCode's project-avatar palette, round for people, square with the bell for agents */
 .avatar {
-  --avatar-bg: #5c5c5c;
+  --avatar-bg: var(--grey-700);
   --avatar-border: #aeaeae;
   display: inline-grid;
   place-items: center;
@@ -360,8 +388,7 @@ a.btn[data-variant="primary"]:hover {
   font-weight: var(--weight-button);
   line-height: 1;
   letter-spacing: 0;
-  color: #fff;
-  text-shadow: 0 0 4px rgb(0 0 0 / 0.2);
+  color: var(--fg-contrast);
   background: var(--avatar-bg);
   box-shadow: inset 0 0 0 0.5px var(--avatar-border);
   border-radius: 50%;
@@ -408,7 +435,7 @@ img.avatar[data-photo] {
 .avatar[data-agent] {
   color: var(--brand-on-dark);
   background: var(--layer-3);
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  box-shadow: inset 0 0 0 0.5px var(--border-strong);
 }
 .avatar[data-agent] svg {
   width: 100%;
@@ -428,9 +455,11 @@ img.avatar[data-photo] {
 }
 .logo-word {
   color: var(--fg);
-  font-size: 15px;
-  font-weight: var(--weight-semibold);
-  letter-spacing: -0.015em;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: -0.01em;
 }
 .logo-mark {
   display: inline-flex;
@@ -467,15 +496,20 @@ img.avatar[data-photo] {
   outline: 1px solid transparent;
   transition:
     outline-color 85ms ease-out,
-    box-shadow 85ms ease-out;
+    background-color 85ms ease-out;
 }
 .input:hover:not(:focus-within) {
-  background: var(--bg-neutral);
+  background: color-mix(in srgb, var(--bg-field), white 6%);
 }
 .input:focus-within,
 .input[data-demo="focus"] {
   outline-color: var(--focus);
   box-shadow: none;
+}
+.input[data-invalid],
+.input:has(input[aria-invalid="true"]) {
+  outline-color: var(--danger);
+  caret-color: var(--danger);
 }
 .input input {
   flex: 1;
@@ -507,14 +541,15 @@ img.avatar[data-photo] {
   color: var(--fg-muted);
 }
 
-/* Segmented control: a pill track with the selected option raised as a pill */
+/* Segmented control, after OpenCode: a 6 px track with the selected option set into it at page tone */
 .segmented {
   display: inline-flex;
   align-items: center;
   height: var(--control-medium);
   background: var(--layer-1);
-  border-radius: var(--radius-full);
-  box-shadow: 0 0 0 0.5px var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  font-variant-numeric: tabular-nums;
 }
 .segmented > button,
 .segmented > a {
@@ -523,15 +558,15 @@ img.avatar[data-photo] {
   justify-content: center;
   gap: 6px;
   height: var(--control-medium);
-  padding: 0 13px;
+  padding: 0 12px;
   font: inherit;
   font-size: var(--text-ui);
-  font-weight: var(--weight-medium);
+  font-weight: var(--weight-regular);
   color: var(--fg-muted);
   white-space: nowrap;
   background: transparent;
   border: 0;
-  border-radius: var(--radius-full);
+  border-radius: var(--radius);
   cursor: pointer;
   transition: color 85ms ease-out;
 }
@@ -543,15 +578,22 @@ img.avatar[data-photo] {
 .segmented > [aria-pressed="true"],
 .segmented > [aria-current="page"] {
   color: var(--fg);
+  font-weight: var(--weight-medium);
   background: var(--bg);
-  box-shadow: 0 0 0 0.5px var(--border-strong);
+  box-shadow: var(--hairline-strong);
 }
 .segmented > :not([aria-pressed="true"], [aria-current="page"]) .state-icon {
   color: var(--icon-muted);
 }
 .segmented-count {
   color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
   font-variant-numeric: tabular-nums;
+}
+.segmented > [aria-pressed="true"] .segmented-count,
+.segmented > [aria-current="page"] .segmented-count {
+  color: var(--fg-muted);
 }
 
 /* Agent working: typing dots */
@@ -602,13 +644,15 @@ img.avatar[data-photo] {
   z-index: 100;
   display: flex;
   flex-direction: column;
+  min-width: 160px;
   max-width: calc(100vw - 16px);
-  padding: 4px;
+  padding: 2px;
   overflow-y: auto;
   overscroll-behavior: contain;
   font-size: var(--text-ui);
+  font-variant-numeric: tabular-nums;
   background: var(--layer-1);
-  border-radius: var(--radius-large);
+  border-radius: var(--radius);
   box-shadow: var(--elevation-floating);
   animation: menu-in 120ms ease-out;
 }
@@ -621,6 +665,7 @@ img.avatar[data-photo] {
   padding: 6px;
   border-radius: var(--radius-xl);
   box-shadow: var(--elevation-overlay);
+  font-size: var(--text-body);
   animation: sheet-in 180ms var(--ease);
 }
 .menu-scrim {
@@ -660,7 +705,7 @@ img.avatar[data-photo] {
   gap: 8px;
   width: 100%;
   min-height: 28px;
-  padding: 4px 8px;
+  padding: 4px 12px;
   font: inherit;
   font-size: var(--text-ui);
   text-align: left;
@@ -670,9 +715,13 @@ img.avatar[data-photo] {
   border-radius: var(--radius-small);
   cursor: pointer;
 }
+.menu-item:has(.menu-check) {
+  padding-left: 8px;
+}
 .menu[data-sheet] .menu-item {
-  min-height: 40px;
-  padding: 10px;
+  min-height: 44px;
+  padding: 12px;
+  font-size: var(--text-body);
   border-radius: var(--radius);
 }
 .menu-item:hover,
@@ -686,6 +735,13 @@ img.avatar[data-photo] {
 }
 .menu-item[data-danger] {
   color: var(--danger);
+}
+.menu-item[aria-checked="true"] {
+  color: var(--fg-accent);
+  font-weight: var(--weight-medium);
+}
+.menu-item[aria-checked="true"] .menu-check {
+  color: var(--fg-accent);
 }
 .menu-check {
   display: inline-flex;
@@ -716,7 +772,7 @@ img.avatar[data-photo] {
   display: grid;
   flex: none;
   gap: 2px;
-  margin: -4px -4px 4px;
+  margin: -2px -2px 2px;
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-muted);
 }
@@ -725,8 +781,8 @@ img.avatar[data-photo] {
 }
 .menu-filter {
   flex: none;
-  margin: -4px -4px 4px;
-  padding: 4px;
+  margin: -2px -2px 2px;
+  padding: 2px;
   border-bottom: 1px solid var(--border-muted);
 }
 .menu-filter .input {
@@ -756,5 +812,55 @@ img.avatar[data-photo] {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.12);
+  box-shadow: inset 0 0 0 0.5px var(--border-strong);
+}
+
+/* Checkboxes, after OpenCode: a 16 px square with a hairline, white when ticked with a dark check. A faint fill
+   keeps the empty box findable on the dark page. */
+input[type="checkbox"] {
+  flex: none;
+  display: inline-grid;
+  place-content: center;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  background: var(--bg-neutral);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-small);
+  appearance: none;
+  cursor: pointer;
+  transition:
+    background-color 85ms ease-out,
+    border-color 85ms ease-out;
+}
+input[type="checkbox"]::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  background: var(--bg);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'%3E%3Cpath d='M1.5 5.2 4 7.6 8.5 2.6' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+  transform: scale(0.9);
+  opacity: 0;
+  transition:
+    opacity 85ms ease-out,
+    transform 120ms var(--ease-out);
+}
+input[type="checkbox"]:hover:not(:disabled) {
+  border-color: rgb(255 255 255 / 0.32);
+}
+input[type="checkbox"]:checked {
+  background: var(--fg);
+  border-color: var(--fg);
+}
+input[type="checkbox"]:checked::before {
+  opacity: 1;
+  transform: none;
+}
+input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

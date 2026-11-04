@@ -1,12 +1,16 @@
-/* Bellhop theme: a flat off-black page, OpenCode's white-alpha borders and overlays, flat controls with a white
-   primary. No gradients anywhere. Inter for text, OpenTUI Mono for issue numbers and code. Dark only. */
+/* Bellhop theme, after OpenCode's oc-2 dark tokens: a neutral grey ramp with surfaces one step apart, white-alpha
+   borders and overlays, flat controls with a near-white primary. No gradients or gloss anywhere. OpenTUI Mono for
+   Bellhop's own titles, numbers and code; Inter at -0.01em for everything else. Dark only. */
 
+/* Inter is "optional": preloaded, it's almost always there for the first paint; when it isn't (a cold, slow visit),
+   the page keeps the system face (SF Pro, Segoe UI) for that visit instead of reflowing body text when it lands.
+   OpenTUI Mono swaps, but behind a fallback with the same advance and line metrics, so a swap moves nothing. */
 @font-face {
   font-family: "Inter";
   src: url("/fonts/InterVariable-Latin.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
     U+2122, U+2190-2193, U+21B5, U+2212, U+2215, U+2318, U+FEFF, U+FFFD;
@@ -16,7 +20,7 @@
   src: url("/fonts/InterVariable-Ext.woff2") format("woff2");
   font-weight: 100 900;
   font-style: normal;
-  font-display: swap;
+  font-display: optional;
   unicode-range:
     U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02D9, U+02DB, U+02DD-0303, U+0305-0307, U+0309-0328,
     U+032A-052F, U+0E3F, U+1D00-1FFE, U+2070-20AB, U+20AD-2121, U+2123-218F, U+2194-21B4, U+21B6-2211, U+2213-2214,
@@ -27,7 +31,7 @@
   src: url("/fonts/InterVariable-Italic-Latin.woff2") format("woff2");
   font-weight: 100 900;
   font-style: italic;
-  font-display: swap;
+  font-display: optional;
   unicode-range:
     U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC,
     U+2122, U+2190-2193, U+21B5, U+2212, U+2215, U+2318, U+FEFF, U+FFFD;
@@ -37,7 +41,7 @@
   src: url("/fonts/InterVariable-Italic-Ext.woff2") format("woff2");
   font-weight: 100 900;
   font-style: italic;
-  font-display: swap;
+  font-display: optional;
   unicode-range:
     U+0100-0130, U+0132-0151, U+0154-02BA, U+02BD-02C5, U+02C7-02D9, U+02DB, U+02DD-0303, U+0305-0307, U+0309-0328,
     U+032A-052F, U+0E3F, U+1D00-1FFE, U+2070-20AB, U+20AD-2121, U+2123-218F, U+2194-21B4, U+21B6-2211, U+2213-2214,
@@ -47,15 +51,57 @@
   font-family: "OpenTUI Mono";
   src: url("/fonts/OpenTUIMono-Regular.woff2") format("woff2");
   font-weight: 400;
+  font-style: normal;
   font-display: swap;
 }
 @font-face {
   font-family: "OpenTUI Mono";
   src: url("/fonts/OpenTUIMono-Bold.woff2") format("woff2");
   font-weight: 700;
+  font-style: normal;
   font-display: swap;
 }
-
+/* Metric-matched stand-ins while the faces load, so a late swap never reflows text. Each local font is scaled to the
+   real face's advance and its vertical metrics overridden (overrides are divided by size-adjust, as the browser
+   multiplies them back).
+   OpenTUI Mono: 0.6 em advance, ascent 0.965, descent 0.22, gap 0.065. Menlo and DejaVu Sans Mono advance 0.602 em;
+   Consolas 0.55 em. */
+@font-face {
+  font-family: "OpenTUI Mono Fallback";
+  src: local("Menlo"), local("DejaVu Sans Mono"), local("Liberation Mono");
+  font-weight: 400;
+  size-adjust: 99.66%;
+  ascent-override: 96.83%;
+  descent-override: 22.08%;
+  line-gap-override: 6.52%;
+}
+@font-face {
+  font-family: "OpenTUI Mono Fallback";
+  src: local("Menlo Bold"), local("Menlo-Bold"), local("DejaVu Sans Mono Bold"), local("Liberation Mono Bold");
+  font-weight: 700;
+  size-adjust: 99.66%;
+  ascent-override: 96.83%;
+  descent-override: 22.08%;
+  line-gap-override: 6.52%;
+}
+@font-face {
+  font-family: "OpenTUI Mono Fallback Consolas";
+  src: local("Consolas");
+  font-weight: 400;
+  size-adjust: 109.13%;
+  ascent-override: 88.43%;
+  descent-override: 20.16%;
+  line-gap-override: 5.96%;
+}
+@font-face {
+  font-family: "OpenTUI Mono Fallback Consolas";
+  src: local("Consolas Bold"), local("Consolas-Bold");
+  font-weight: 700;
+  size-adjust: 109.13%;
+  ascent-override: 88.43%;
+  descent-override: 20.16%;
+  line-gap-override: 5.96%;
+}
 :root {
   color-scheme: dark;
 
@@ -74,24 +120,29 @@
   --grey-1100: #161616;
   --grey-1200: #080808;
 
-  /* Surfaces: off-black, with neutral layers a step apart */
-  --bg: #0a0a0a;
-  --bg-deep: #050505;
-  --layer-1: #131313;
-  --layer-2: #1b1b1b;
-  --layer-3: #262626;
-  --bg-neutral: rgb(255 255 255 / 0.05);
-  --bg-field: rgb(255 255 255 / 0.03);
+  /* Surfaces: OpenCode's grey ramp, each raised level one step lighter (no borders needed between them) */
+  --bg: var(--grey-1100);
+  --bg-deep: var(--grey-1200);
+  --layer-1: var(--grey-1000);
+  --layer-2: var(--grey-900);
+  --layer-3: var(--grey-800);
+  --layer-4: var(--grey-700);
+  --bg-neutral: rgb(255 255 255 / 0.06);
+  /* Fields sit at page tone, so inside a raised panel they read as wells */
+  --bg-field: var(--bg);
 
   /* Brand: the jacket mark's blue (on the white tile), and a lighter tint for marks on dark */
   --brand: #3b5cf6;
   --brand-on-dark: #7698fd;
 
-  /* Primary action: flat white with dark text */
-  --primary-bg: #f2f2f2;
-  --primary-hover: #dfdfdf;
-  --primary-pressed: #cbcbcb;
-  --primary-fg: #0a0a0a;
+  /* Brand blue as a fill: checked switches, progress, unread dots */
+  --accent: var(--brand);
+
+  /* Primary action: OpenCode's submit button, flattened (no gloss) */
+  --primary-bg: #ebebeb;
+  --primary-hover: #d9d9d9;
+  --primary-pressed: #c4c4c4;
+  --primary-fg: var(--grey-1100);
 
   /* Text and icons */
   --fg: var(--grey-100);
@@ -100,8 +151,11 @@
   --fg-contrast: var(--grey-50);
   --icon: var(--grey-400);
   --icon-muted: var(--grey-600);
+  --icon-faint: var(--grey-700);
   --fg-link: #a2bcff;
   --fg-link-hover: #c3d4fd;
+  --fg-accent: #a2bcff;
+  --caret: #7698fd;
 
   /* Borders and overlays */
   --border-muted: rgb(255 255 255 / 0.08);
@@ -111,6 +165,10 @@
   --pressed: rgb(255 255 255 / 0.1);
   --scrim: rgb(0 0 0 / 0.6);
   --focus: #7698fd;
+  --hairline: 0 0 0 0.5px var(--border);
+  --hairline-strong: 0 0 0 0.5px var(--border-strong);
+  --scroll-thumb: var(--border-muted);
+  --scroll-thumb-hover: var(--border-strong);
 
   /* Issue states (OpenCode state tokens; closed uses the v2 purple scale) */
   --open: #6bd586;
@@ -142,8 +200,8 @@
   --elevation-overlay:
     0 16px 32px 0 rgb(0 0 0 / 0.3), 0 8px 16px 0 rgb(0 0 0 / 0.3), 0 0 0 0.5px rgb(255 255 255 / 0.16),
     0 -0.5px 0 0 rgb(255 255 255 / 0.06);
-  /* Flat controls: a hairline instead of a raised edge */
-  --elevation-neutral: inset 0 0 0 1px rgb(255 255 255 / 0.08);
+  /* Neutral controls: OpenCode's lifted edge (a shadow, a hairline ring and a faint top light) */
+  --elevation-neutral: 0 1px 2px 0 rgb(0 0 0 / 0.4), 0 0 0 0.5px rgb(255 255 255 / 0.2), 0 -0.5px 0 0 rgb(255 255 255 / 0.1);
 
   /* Geometry */
   --radius-small: 4px;
@@ -152,22 +210,28 @@
   --radius-xl: 12px;
   --radius-full: 999px;
   --control-small: 24px;
-  --control-medium: 30px;
-  --control-large: 36px;
+  --control-medium: 28px;
+  --control-large: 32px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-exit: 100ms;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-mono: "OpenTUI Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-mono: "OpenTUI Mono", "OpenTUI Mono Fallback", "OpenTUI Mono Fallback Consolas", ui-monospace, monospace;
+  /* Bellhop's own titles: issue and page titles, section heads, the header crumb, empty states */
+  --font-display: var(--font-mono);
   --text-small: 12px;
   --text-ui: 13px;
   --text-body: 14px;
   --text-title: 16px;
   --text-heading: 20px;
-  --weight-regular: 400;
-  --weight-medium: 500;
+  /* Inter at OpenCode's fractional weights; OpenTUI Mono has only 400 and 700 */
+  --weight-regular: 440;
+  --weight-medium: 530;
   --weight-button: 530;
   --weight-semibold: 600;
-  --weight-bold: 670;
+  --weight-bold: 700;
 }
 
 *,
@@ -184,6 +248,10 @@ html {
      scrollbar-gutter alone is ignored by Chrome with our custom scrollbar; an always-on (transparent) track works. */
   overflow-y: scroll;
   scrollbar-gutter: stable;
+}
+html {
+  /* Only the faces that exist: no faux bold mono, no faux italics */
+  font-synthesis: none;
 }
 html,
 body {
@@ -215,50 +283,64 @@ a:hover {
   outline-offset: 2px;
 }
 
+input,
+textarea,
+[contenteditable] {
+  caret-color: var(--caret);
+}
+
 code,
 kbd,
 pre,
 .mono {
   font-family: var(--font-mono);
-  font-feature-settings: "calt" 0;
+  font-feature-settings: normal;
   letter-spacing: 0;
 }
 
-/* Scrollbars: a thin flat pill on a clear track, for the page and every scroll area. Safari and Chromium take the
-   ::-webkit-scrollbar rules (they allow the hover state); Firefox, which has no such selector, takes the standard
-   properties. Chromium ignores ::-webkit-scrollbar once scrollbar-color is set, hence the split. */
+/* Scrollbars, after OpenCode: invisible until the scroll area is hovered, then a quiet thumb that brightens under
+   the pointer. Only for fine pointers with hover; touch keeps the system's overlay bars. Firefox, which has no
+   ::-webkit-scrollbar, gets the standard properties (set only there: they switch the custom thumb off in Chromium). */
 @supports not selector(::-webkit-scrollbar) {
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+    scrollbar-color: var(--scroll-thumb) transparent;
   }
 }
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-  background: transparent;
-}
-::-webkit-scrollbar-track,
-::-webkit-scrollbar-corner {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background-color: rgb(255 255 255 / 0.18);
-  background-clip: padding-box;
-  border: 2px solid transparent;
-  border-radius: 999px;
-  min-height: 32px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgb(255 255 255 / 0.3);
-}
-::-webkit-scrollbar-thumb:active {
-  background-color: rgb(255 255 255 / 0.36);
-}
-::-webkit-scrollbar-button {
-  display: none;
+@media (hover: hover) and (pointer: fine) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-track {
+    margin: 4px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: transparent;
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    min-height: 32px;
+  }
+  :hover::-webkit-scrollbar-thumb,
+  html:hover::-webkit-scrollbar-thumb {
+    background-color: var(--scroll-thumb);
+  }
+  ::-webkit-scrollbar-thumb:hover,
+  ::-webkit-scrollbar-thumb:active {
+    background-color: var(--scroll-thumb-hover);
+  }
+  ::-webkit-scrollbar-button {
+    display: none;
+  }
 }
 
 ::selection {
-  background: rgb(255 255 255 / 0.2);
+  color: inherit;
+  background: rgb(118 152 253 / 0.32);
 }

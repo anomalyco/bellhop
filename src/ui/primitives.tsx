@@ -2,8 +2,9 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react"
 import { jacketPath, jacketTransform } from "./mark"
 import { StatusIcon } from "./icons"
 
-/** primary: OpenCode's "contrast" button. default: "neutral". invisible: ghost. */
-export type ButtonVariant = "default" | "primary" | "danger" | "invisible" | "outline"
+/** primary: OpenCode's "submit" button, flat. default: "neutral". invisible: ghost. ghost-muted: a quieter ghost for
+ *  toolbars and row actions. */
+export type ButtonVariant = "default" | "primary" | "danger" | "invisible" | "ghost-muted" | "outline"
 export type ButtonSize = "small" | "medium" | "large"
 
 export function Button({
@@ -74,9 +75,19 @@ export function StateIcon({ state, size = 16 }: { state: VisibleState; size?: nu
   )
 }
 
+/** Relative luminance of a 6-digit hex colour, 0 (black) to 1 (white). */
+function luminance(hex: string) {
+  const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16)
+  if (Number.isNaN(n)) return 0.5
+  const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  return 0.2126 * lin(((n >> 16) & 255) / 255) + 0.7152 * lin(((n >> 8) & 255) / 255) + 0.0722 * lin((n & 255) / 255)
+}
+
+/** A label: a neutral chip with its colour as a dot. Very dark colours get a ring so the dot stays visible. */
 export function Label({ name, color }: { name: string; color: string }) {
   return (
-    <span className="label" style={{ "--label": `#${color}` } as CSSProperties}>
+    <span className="label" data-dark={luminance(color) < 0.04 || undefined} style={{ "--label": `#${color}` } as CSSProperties}>
+      <span className="label-chip-dot" aria-hidden="true" />
       {name}
     </span>
   )
