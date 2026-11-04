@@ -114,8 +114,14 @@
 // Search engines, answered by the Worker per host:
 //   GET    /robots.txt    home and public workspaces: allow all, with a Sitemap line; private workspaces: Disallow: /
 //   GET    /sitemap.xml   home: a sitemap index of the public workspaces; a public workspace: its issue URLs (lastmod)
-//   Page requests (HTML) go through the Worker, which serves the SPA's index.html unchanged except for status and
-//   headers: private workspaces get X-Robots-Tag: noindex, and an unknown workspace subdomain answers 404.
+//   Page requests (HTML) go through the Worker, which serves the SPA's index.html with a per-page <head> (title,
+//   description, canonical, Open Graph/Twitter tags, theme-color, the workspace's icon) and the right status:
+//   private workspaces get X-Robots-Tag: noindex, and an unknown workspace subdomain or issue answers 404.
+// Link preview images (1200x630 PNG, cached forever per version):
+//   GET    /og/home.png                                  the home card
+//   GET    /og/app.png?v=<hash>                          a workspace card (on its host)
+//   GET    /og/issues/:number.png?v=<hash>               an issue card; private, hidden or deleted issues get the
+//                                                        workspace card
 //   GET    /auth/google  ->  Google OAuth  ->  /auth/google/callback  (then redirect to ?next= or /)
 //   GET    /auth/dev?email=<email>&next=<path>           only when DEV_LOGIN=1
 //   POST   /auth/logout

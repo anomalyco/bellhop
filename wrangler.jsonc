@@ -11,6 +11,7 @@
   },
   "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
+  "services": [{ "binding": "OG", "service": "bellhop-og" }],
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   "queues": {
@@ -46,6 +47,7 @@
         }
       ],
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
+      "services": [{ "binding": "OG", "service": "bellhop-og" }],
       "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
       "queues": {
         "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],

@@ -16,7 +16,7 @@ import { oauth } from "./oauth"
 import { agents } from "./agents"
 import { tierRoutes } from "./tiers"
 import { queue } from "./webhooks"
-import { page, robots, sitemap } from "./pages"
+import { ogImage, page, robots, sitemap } from "./pages"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -137,6 +137,7 @@ api.get("/api/live/feed", async (c) => {
 api.route("/", mcp)
 api.get("/robots.txt", robots)
 api.get("/sitemap.xml", sitemap)
+api.get("/og/*", ogImage)
 api.get("*", (c) => {
   // Never turn unknown API/protocol routes into successful SPA documents.
   const path = c.req.path
@@ -148,6 +149,7 @@ api.get("*", (c) => {
   )
     return c.notFound()
   if (!c.env.APP_DOMAIN) {
+    if (/^\/[^/]+\/og\//.test(path)) return ogImage(c)
     if (/^\/(?:@|src\/|node_modules\/)/.test(path)) return c.env.ASSETS.fetch(c.req.raw)
     const meta = /^\/([a-z0-9-]+)\/(robots\.txt|sitemap\.xml)$/.exec(path)
     if (meta && !reservedSlugs.has(meta[1]!)) return meta[2] === "robots.txt" ? robots(c) : sitemap(c)
