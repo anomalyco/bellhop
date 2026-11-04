@@ -22,13 +22,14 @@ import { claimContactGuest } from "./guest-history"
 import { clientIP, enforce } from "./rate-limits"
 import { requestLocale } from "./locale"
 import { issueCode, redeemCode, expireCodes } from "./email-codes"
-import { contactCols, proofCols, verification, type ProofRow } from "./helpdesk-data"
+import { contactCols, proofCols, verification, requesterActor, type ProofRow } from "./helpdesk-data"
 import { listIssues, issueNumber, issueSummary } from "./issues"
 import { actorIds, owns, visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { authenticate } from "./mcp"
 import { enqueueWebhooks } from "./webhooks"
 import { esc, mailOrigin, sendMail } from "./mail-provider"
 import { accountCopy } from "./mail-copy"
+import { signalContact } from "./v1/signals"
 
 export const helpdesk = new Hono<Bindings>(),
   base = "/api/apps/:slug"
@@ -221,7 +222,8 @@ export async function requestVerification(
   n: number,
   address: unknown,
   actor: Actor,
-  v: Viewer
+  v: Viewer,
+  serverKey?: string
 ): Promise<Verification> {
   const i = await requestTarget(c.env, app.id, n, v)
   if (c.var.desk && !v.team && !c.var.contact) fail(401, "contact_required", "Sign in to request verification")
@@ -234,8 +236,10 @@ export async function requestVerification(
     i.reporter_locale ?? requestLocale(c).locale,
     actor,
     actorIds(v),
-    v.team
+    v.team,
+    serverKey
   )
+  c.executionCtx.waitUntil(signalContact(c.env, app.id, i.reporter, { issue: i.id, created: ["request:" + id] }))
   return verification(
     (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
   )
@@ -293,13 +297,12 @@ helpdesk.post(route + "/:id/confirm", async (c) => {
   } finally {
     c.executionCtx.waitUntil(dispatchProof(c.env, id))
   }
-  return c.json(
-    verification(
-      (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
-    )
+  const proof = verification(
+    (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
   )
+  return c.json(v.team ? proof : { ...proof, requested_by: requesterActor(proof.requested_by) })
 })
-async function dispatchProof(env: Env, id: string) {
+export async function dispatchProof(env: Env, id: string) {
   const row = await sql(
     env,
     `SELECT ${proofCols},o.destination_hash,a.id app_id,a.name,a.slug,i.number,i.author FROM verification_outbox o JOIN email_codes v ON v.id=o.id JOIN apps a ON a.id=v.app_id JOIN issues i ON i.id=v.issue_id AND i.app_id=a.id WHERE o.id=?`,
@@ -315,6 +318,10 @@ async function dispatchProof(env: Env, id: string) {
     }
   >()
   if (!row) return
+  await signalContact(env, row.app_id, (JSON.parse(row.author) as Actor).id, {
+    issue: row.issue_id,
+    created: row.state === "verified" ? ["verified:" + id] : []
+  })
   if (!row.destination_hash) {
     const app = { id: row.app_id, name: row.name, slug: row.slug },
       actor: Actor = row.state === "verified" ? JSON.parse(row.author) : { type: "agent", id: "system", name: row.name }

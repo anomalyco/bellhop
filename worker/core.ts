@@ -43,7 +43,7 @@ export const reservedSlugs = new Set(
 )
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 410 | 413 | 415 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 410 | 413 | 415 | 416 | 422 | 426 | 428 | 429 | 500 | 501 | 502 | 503
 export class ApiFailure extends Error {
   constructor(
     readonly status: ErrorStatus,
@@ -103,6 +103,14 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("request_type_changed"))
+    return new ApiFailure(409, "request_type_changed", "Request type or permissions changed; reload the form")
+  if (message.includes("api_nonce_limit"))
+    return new ApiFailure(429, "idempotency_limit", "Too many active idempotency keys")
+  if (message.includes("api_upload_quota"))
+    return new ApiFailure(413, "upload_byte_quota", "Daily upload byte budget exhausted")
+  if (/api_session_required|v1 credential unavailable/.test(message))
+    return new ApiFailure(401, "invalid_credential", "Invalid or expired credential")
   if (message.includes("code_limit")) return new ApiFailure(429, "code_limit", "Too many code requests; try later")
   if (message.includes("verified contact required"))
     return new ApiFailure(401, "contact_required", "Sign in to submit a request")

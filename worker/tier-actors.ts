@@ -21,7 +21,7 @@ function mapActors<T>(value: T, fn: (a: Human) => Human): T {
   if (value && typeof value === "object") {
     let copy: Record<string, unknown> | undefined
     for (const [k, v] of Object.entries(value)) {
-      if (k === "system_info") continue
+      if (k === "system_info" || k === "fields") continue
       const next = mapActors(v, fn)
       if (next !== v) {
         copy ??= Object.assign(Array.isArray(value) ? [] : {}, value) as Record<string, unknown>

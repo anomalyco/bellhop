@@ -6,6 +6,11 @@ import { reportActors } from "./guest-history"
 import { helpdesk, processVerifications } from "./helpdesk"
 import { handoff } from "./identity"
 import { identityKeys } from "./identity-keys"
+import { requestTypes } from "./request-type-routes"
+import { publicApi } from "./v1"
+import { sweepUploads } from "./v1/uploads"
+import { sweepStreams } from "./v1/realtime"
+import { apiKeys } from "./v1/keys"
 import { hostWorkspace } from "./contact-session"
 import { clientIP, enforce, workspaceLimit } from "./rate-limits"
 import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
@@ -15,7 +20,7 @@ import { icons } from "./icons"
 import { feed, feedApps, getIssue, issueNumber, listIssues, myAuthorFilter } from "./issues"
 import { bySlug } from "./read-scope"
 import { issues } from "./mutations"
-import { media } from "./media"
+import { media, endUserMedia } from "./media"
 import { mcp, authenticate } from "./mcp"
 import { sees } from "./visibility"
 import { oauth } from "./oauth"
@@ -36,9 +41,12 @@ import { expireReports } from "./report-data"
 import { imports, wakeImports } from "./github-import"
 import { exportWorkspace } from "./workspace-export"
 import { docs } from "./docs"
+import { widget } from "./widget"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
+api.route("/v1", publicApi())
+api.on(["OPTIONS", "GET"], "/media/:id/:name", endUserMedia)
 // This is the only report route callable cross-origin. It has no cookie authority and
 // handles its own streaming byte limit before the general browser/JSON middleware.
 api.on(["OPTIONS", "POST"], "/api/apps/:slug/metadata", uploadReport)
@@ -194,6 +202,8 @@ api.use("/api/apps/:slug/*", async (c, next) => {
 api.route("/", auth)
 api.route("/", helpdesk)
 api.route("/", identityKeys)
+api.route("/", requestTypes)
+api.route("/", apiKeys)
 api.route("/", mailRoutes)
 api.route("/", oauth)
 api.route("/", agents)
@@ -254,6 +264,7 @@ api.get("/issues/:number/feed.atom", (c) =>
     : c.notFound()
 )
 api.route("/", docs)
+api.route("/", widget)
 api.get("/og/*", ogImage)
 api.get("*", (c) => {
   // Never turn unknown API/protocol routes into successful SPA documents.
@@ -295,8 +306,17 @@ export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(pruneAudit(env))
+    ctx.waitUntil(sql(env, "DELETE FROM mail_sent WHERE provider_id IN(SELECT provider_id FROM mail_sent WHERE sent_at<unixepoch()-30*86400 ORDER BY sent_at LIMIT 1000)").run())
+    ctx.waitUntil(sweepUploads(env))
+    ctx.waitUntil(sweepStreams(env))
     ctx.waitUntil(processVerifications(env))
     ctx.waitUntil(sql(env, "DELETE FROM identity_uses WHERE expires<=unixepoch()").run())
+    ctx.waitUntil(
+      env.DB.batch([
+        sql(env, "DELETE FROM api_sessions WHERE expires<=unixepoch()"),
+        sql(env, "DELETE FROM api_replays WHERE expires<=unixepoch()")
+      ])
+    )
     ctx.waitUntil(expireReports(env))
     ctx.waitUntil(wakeImports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))

@@ -110,6 +110,14 @@ export function Composer({ model }: { model: IssueModel }) {
   // stays put between posts, and everything about the box says which one it is.
   const [internal, setInternal] = useState(false)
   const note = member && internal
+  const typingAt = useRef(0)
+  function editReply(value: string) {
+    setBody(value)
+    if (app.mode === "helpdesk" && member && app.role !== "viewer" && !note && value.trim() && Date.now() - typingAt.current >= 3000) {
+      typingAt.current = Date.now()
+      void api.typing(app.slug, issue.number).catch(() => {})
+    }
+  }
   const hasText = !!body.trim()
   // "Add to #34 instead" from a new report lands here with ?metadata=md_…: the next post carries those diagnostics.
   const [, navigate] = useLocation()
@@ -296,7 +304,7 @@ export function Composer({ model }: { model: IssueModel }) {
           mentions={member}
           slug={app.slug}
           value={body}
-          onChange={setBody}
+          onChange={editReply}
           member={member}
           onAttachment={(a) => setAttachments((l) => [...l, a])}
           onBusyChange={setBusy}

@@ -6,13 +6,16 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "binding": "ASSETS",
-    "not_found_handling": "single-page-application",
-    "run_worker_first": ["/*", "!/assets/*", "!/fonts/*", "!/favicon.svg", "!/apple-touch-icon.png"]
+    "not_found_handling": "none",
+    "run_worker_first": ["/*", "!/fonts/*", "!/favicon.svg", "!/apple-touch-icon.png"]
   },
   "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
   "services": [{ "binding": "OG", "service": "bellhop-og" }],
   "ratelimits": [
+    { "name": "RL_V1_IP", "namespace_id": "741307", "simple": { "limit": 600, "period": 60 } },
+    { "name": "RL_V1_READ", "namespace_id": "741308", "simple": { "limit": 300, "period": 60 } },
+    { "name": "RL_V1_SECRET", "namespace_id": "741309", "simple": { "limit": 6000, "period": 60 } },
     { "name": "RL_UPLOAD", "namespace_id": "741301", "simple": { "limit": 10, "period": 60 } },
     { "name": "RL_HUMAN", "namespace_id": "741302", "simple": { "limit": 6, "period": 60 } },
     { "name": "RL_WRITE", "namespace_id": "741303", "simple": { "limit": 15, "period": 60 } },
@@ -60,6 +63,9 @@
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
       "services": [{ "binding": "OG", "service": "bellhop-og" }],
       "ratelimits": [
+        { "name": "RL_V1_IP", "namespace_id": "741407", "simple": { "limit": 600, "period": 60 } },
+        { "name": "RL_V1_READ", "namespace_id": "741408", "simple": { "limit": 300, "period": 60 } },
+        { "name": "RL_V1_SECRET", "namespace_id": "741409", "simple": { "limit": 6000, "period": 60 } },
         { "name": "RL_UPLOAD", "namespace_id": "741401", "simple": { "limit": 10, "period": 60 } },
         { "name": "RL_HUMAN", "namespace_id": "741402", "simple": { "limit": 6, "period": 60 } },
         { "name": "RL_WRITE", "namespace_id": "741403", "simple": { "limit": 15, "period": 60 } },

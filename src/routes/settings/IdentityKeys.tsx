@@ -149,6 +149,7 @@ function Signing({ app, keyId, secret }: { app: AppDetail; keyId: string; secret
         ))}
       </div>
       <Snippet code={lang === "node" ? node : python} label={lang === "node" ? "Node / TypeScript" : "Python"} />
+      <p className="api-hint">{tr("keys.linkExisting", { code: <code>{lang === "node" ? "link_existing: true" : '"link_existing": True'}</code> })}</p>
       <h2 className="section-title">{t("keys.using")}</h2>
       <ul className="identity-use">
         <li>{tr("keys.usePost", { path: <code>POST {identify}</code>, body: <code>{"{ token }"}</code> })}</li>

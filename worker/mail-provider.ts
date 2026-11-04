@@ -79,35 +79,52 @@ export const emailConfigured = (env: Env) =>
     ? /^os_test_[a-f0-9]{64}$/i.test(secrets(env).OPENSEND_API_KEY!)
     : (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY === "live")
 export async function sendMail(env: Env, id: string, letter: Letter, redactCode?: string) {
-  const body = {
-    ...letter,
-    fromName: cleanSender(letter.fromName),
-    from: "notifications@mail.blhp.app",
-    kind: "transactional",
-    tracking: false,
-    screen: true
+  // Reserve the address before sending. An erasure while the provider is acknowledging
+  // the message removes this row, so a late acknowledgement cannot put the address back.
+  const pending = "pending:" + crypto.randomUUID()
+  await sql(env, "INSERT INTO mail_sent(provider_id,address) VALUES(?,?)", pending, letter.to).run()
+  try {
+    const body = {
+      ...letter,
+      fromName: cleanSender(letter.fromName),
+      from: "notifications@mail.blhp.app",
+      kind: "transactional",
+      tracking: false,
+      screen: true
+    }
+    let providerId: string
+    if (!secrets(env).OPENSEND_API_KEY && env.DEV_LOGIN === "1" && !env.APP_DOMAIN) {
+      console.log(
+        "bellhop.dev_mail",
+        redactCode ? JSON.stringify(body).replaceAll(redactCode, "[redacted]") : JSON.stringify(body)
+      )
+      providerId = "logged_" + id
+    } else if (env.APP_DOMAIN && (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY !== "live") {
+      // Production holds outgoing mail until Ryan turns delivery on (MAIL_DELIVERY=live). Held mail counts as sent, so
+      // turning it on later doesn't release a backlog.
+      console.log("bellhop.mail_held", id)
+      providerId = "held_" + id
+    } else {
+      const r = await provider<{ id: string; status: string; simulated: boolean }>(env, "/v1/emails/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Idempotency-Key": id },
+        body: JSON.stringify(body)
+      })
+      if (!r.id || r.status !== "queued" || (devMail(env) && !r.simulated))
+        throw Error("Unexpected OpenSend acknowledgement")
+      providerId = r.id
+    }
+    await env.DB.batch([
+      sql(
+        env,
+        "INSERT OR IGNORE INTO mail_sent(provider_id,address) SELECT ?,address FROM mail_sent WHERE provider_id=?",
+        providerId,
+        pending
+      ),
+      sql(env, "DELETE FROM mail_sent WHERE provider_id=?", pending)
+    ])
+  } catch (e) {
+    await sql(env, "DELETE FROM mail_sent WHERE provider_id=?", pending).run()
+    throw e
   }
-  let providerId: string
-  if (!secrets(env).OPENSEND_API_KEY && env.DEV_LOGIN === "1" && !env.APP_DOMAIN) {
-    console.log(
-      "bellhop.dev_mail",
-      redactCode ? JSON.stringify(body).replaceAll(redactCode, "[redacted]") : JSON.stringify(body)
-    )
-    providerId = "logged_" + id
-  } else if (env.APP_DOMAIN && (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY !== "live") {
-    // Production holds outgoing mail until Ryan turns delivery on (MAIL_DELIVERY=live). Held mail counts as sent, so
-    // turning it on later doesn't release a backlog.
-    console.log("bellhop.mail_held", id)
-    providerId = "held_" + id
-  } else {
-    const r = await provider<{ id: string; status: string; simulated: boolean }>(env, "/v1/emails/send", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": id },
-      body: JSON.stringify(body)
-    })
-    if (!r.id || r.status !== "queued" || (devMail(env) && !r.simulated))
-      throw Error("Unexpected OpenSend acknowledgement")
-    providerId = r.id
-  }
-  await sql(env, "INSERT OR IGNORE INTO mail_sent(provider_id,address) VALUES(?,?)", providerId, letter.to).run()
 }

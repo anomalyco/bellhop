@@ -14,6 +14,8 @@ import { missing, now, rows, sql, str } from "./core"
 import { readPresence, visibleIssues } from "./issues"
 import { enqueueWebhooks, type Hook } from "./webhooks"
 import { projectTiers } from "./tier-actors"
+import { signalContact } from "./v1/signals"
+import type { TypeInfo } from "./request-types"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
 export interface Change {
@@ -27,6 +29,7 @@ export interface Change {
   deletedComment?: string
   removed?: Comment
   ruleItems?: TimelineItem[]
+  teamForm?: TypeInfo
   internalOnly?: boolean
   liveOnly?: boolean
   mentioned?: Actor[]
@@ -97,6 +100,27 @@ export function emit(env: Env, ctx: Work, change: Change) {
     timeline.push({ type: "comment.deleted", issue_id: issue.id, comment_id: change.deletedComment })
   const affected = [...(change.comments ?? []), ...items.flatMap((i) => (i.kind === "comment" ? [i.comment] : []))]
   const internalOnly = change.internalOnly === true || (affected.length > 0 && affected.every((c) => c.internal))
+  if (!internalOnly && !issue.hidden) {
+    const created = items.flatMap((x) =>
+      x.kind === "comment"
+        ? [x.comment.id]
+        : !x.event.data.rule && ["assigned", "claimed", "status_changed"].includes(x.event.type)
+          ? [x.event.id]
+          : []
+    )
+    if (type === "issue.opened") created.unshift(issue.id)
+    const edited = (change.comments ?? []).filter((c) => !c.hidden && !c.internal).map((c) => c.id)
+    if (change.changes?.includes("body")) edited.push(issue.id)
+    if (
+      created.length ||
+      edited.length ||
+      change.deletedComment ||
+      change.changes?.some((x) =>
+        ["title", "status", "close_reason", "assignee", "labels", "hidden", "comment.hidden"].includes(x)
+      )
+    )
+      ctx.waitUntil(signalContact(env, app.id, issue.author.id, { issue: issue.id, created, edited }))
+  }
   ctx.waitUntil(
     Promise.all([
       appRoom(env, app.id).publishConversation([list], { app: app.id, internalOnly }),
@@ -124,7 +148,10 @@ export function emit(env: Env, ctx: Work, change: Change) {
   }
   const edit = change.changes?.includes("comment.edited")
   if (!(change.actor.type === "agent" && (type === "comment.created" || edit))) {
-    if (!comments.length) hooks.push(payload)
+    if (!comments.length) {
+      const route=type==='issue.opened'&&change.teamForm?change.ruleItems?.find(i=>i.kind==='event'&&i.event.type==='routed'):undefined
+      hooks.push(route?.kind==='event'?{...payload,transition:{assignee:route.event.data.assignee as Actor|null}}:payload)
+    }
     else
       for (const c of comments) {
         const comment = { ...c, viewer_is_author: false, viewer_helpful: false }
@@ -156,13 +183,13 @@ export function emit(env: Env, ctx: Work, change: Change) {
       else if (data.from === "closed")
         hooks.push({ type: "issue.reopened", transition: { status: data.to as IssueStatus, close_reason: null } })
     } else if (t === "labeled" || t === "unlabeled") hooks.push({ type: `issue.${t}`, label: data.label as Label })
-    else if (t === "assigned" || t === "claimed")
+    else if (t === "assigned" || t === "claimed" || (t === "routed" && data.assignee))
       hooks.push({
         type: "issue.assigned",
         transition: { assignee: t === "claimed" ? item.event.actor : (data.assignee as Actor | null) }
       })
   }
-  ctx.waitUntil(enqueueWebhooks(env, origin, app, change.actor, issue, hooks))
+  ctx.waitUntil(enqueueWebhooks(env, origin, app, change.actor, issue, hooks, change.teamForm))
 }
 export async function setActivity(
   env: Env,
@@ -170,12 +197,13 @@ export async function setActivity(
   issueId: string,
   actor: Actor,
   text: string | null = null,
-  clear = false
+  clear = false,
+  seconds = 60
 ) {
   if (text !== null) str(text, "activity", 240, true)
   const activity: Activity | null = clear
     ? null
-    : { actor, text, expires_at: new Date(Date.now() + 60000).toISOString() }
+    : { actor, text, expires_at: new Date(Date.now() + seconds * 1000).toISOString() }
   // Clearing after an agent posts must not erase another agent's newer presence.
   const result = await sql(
     env,
@@ -189,7 +217,7 @@ export async function setActivity(
     if (clear) return
     missing()
   }
-  await issueRoom(env, issueId).refreshConversationPresence(appId, issueId)
+  await issueRoom(env, issueId).refreshConversationPresence(appId, issueId, clear ? actor : undefined)
 }
 // Refresh from D1 rather than broadcasting the caller's snapshot: overlapping requests can
 // reach a Room in a different order than their commits. The Room serializes refresh and expiry.
@@ -199,13 +227,16 @@ export async function refreshActivity(
   appId: string,
   issueId: string,
   publish: (event: LiveEvent) => Promise<void>,
-  schedule: (at: number | null) => Promise<void>
+  schedule: (at: number | null, actor?: Actor) => Promise<void>,
+  clear?: Actor
 ) {
   const presence = await readPresence(env, issueId, appId),
     activity = presence?.activity ?? null
   if (!presence) return // A delayed source-room refresh must not cancel a transferred issue's target alarm.
   const event: LiveEvent = { type: "activity", issue_id: issueId, activity }
-  await schedule(activity ? Date.parse(activity.expires_at) : null)
+  await schedule(activity ? Date.parse(activity.expires_at) : null, activity?.actor)
+  if ((activity?.actor ?? clear)?.type && (activity?.actor ?? clear)?.type !== "guest")
+    ctx.waitUntil(signalContact(env, appId, presence.gate.reporter, { issue: issueId, presence: true, clear }))
   await publish(event)
   if (presence?.public) ctx.waitUntil(feedRoom(env).refreshConversationFeed(issueId, "activity"))
   await appRoom(env, appId).publishConversation([event], { app: appId })
@@ -216,17 +247,20 @@ export async function expireActivity(
   ctx: Work,
   appId: string,
   issueId: string,
-  publish: (event: LiveEvent) => Promise<void>
+  publish: (event: LiveEvent) => Promise<void>,
+  previous?: Actor
 ) {
   const cleared = await sql(
     env,
     `UPDATE issues SET activity=NULL WHERE id=? AND app_id=? AND json_extract(activity,'$.expires_at')<=?
-     RETURNING ((SELECT public FROM apps WHERE id=issues.app_id) AND private=0 AND hidden IS NULL) public`,
+     RETURNING json_extract(author,'$.id') reporter,((SELECT public FROM apps WHERE id=issues.app_id) AND private=0 AND hidden IS NULL) public`,
     issueId,
     appId,
     now()
-  ).first<{ public: number }>()
+  ).first<{ public: number; reporter: string }>()
   if (cleared) {
+    if (previous?.type === "agent")
+      ctx.waitUntil(signalContact(env, appId, cleared.reporter, { issue: issueId, presence: true, clear: previous }))
     const event: LiveEvent = { type: "activity", issue_id: issueId, activity: null }
     await publish(event)
     if (cleared.public) ctx.waitUntil(feedRoom(env).refreshConversationFeed(issueId, "activity"))

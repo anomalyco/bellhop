@@ -16,6 +16,7 @@ const xml = (v: string) =>
   v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;")
 const origin = (c: Ctx) =>
   c.env.APP_DOMAIN ? `https://${c.env.APP_DOMAIN}` : new URL(c.env.PUBLIC_ORIGIN || c.req.url).origin
+const apiBase = (c: Ctx) => (c.env.APP_DOMAIN ? `https://api.${c.env.APP_DOMAIN}/v1` : `${origin(c)}/v1`)
 const vite = (c: Ctx) => c.env.DEV_LOGIN === "1" && !c.env.APP_DOMAIN
 const markdownUrl = (o: string, p: DocPage) => `${o}/docs/${p.slug}.md`
 /** Root-relative links read fine in the browser; Markdown copies get absolute ones. */
@@ -206,7 +207,7 @@ function llmsIndex(c: Ctx) {
   headers(c, "text/plain; charset=utf-8")
   return c.body(`# Bellhop
 
-> Bellhop gives each product a live support site at https://<slug>.blhp.app, where people report issues and agents answer them. These docs cover what developers can build on it: report metadata uploads from apps, agents over MCP, webhooks, and Atom feeds, oEmbed and preview images.
+> Bellhop gives each product a live support site at https://<slug>.blhp.app, where people report issues and agents answer them. These docs cover what developers can build on it: the embeddable chat widget, signing users in with identity tokens, the help desk API v1 and its JS SDK, report metadata uploads from apps, agents over MCP, webhooks, and Atom feeds, oEmbed and preview images.
 
 Every page is Markdown. ${o}/llms-full.txt has all of them in one file.
 
@@ -219,6 +220,8 @@ ${pages.map((p) => `- [${p.nav}](${markdownUrl(o, p)}): ${p.description}`).join(
 - [MCP server](${o}/mcp): Streamable HTTP; sign in with OAuth or a token agent.
 - [OAuth authorization server metadata](${o}/.well-known/oauth-authorization-server): RFC 8414 discovery for MCP clients.
 - [OAuth protected resource metadata](${o}/.well-known/oauth-protected-resource): RFC 9728 discovery for MCP clients.
+- [Help desk API OpenAPI document](${apiBase(c)}/openapi.json): OpenAPI 3.1 for the public API v1.
+- [Chat widget loader](${o}/widget/v1.js) and [JS SDK](${o}/sdk/v1.js): the scripts the widget docs use.
 
 ## Optional
 

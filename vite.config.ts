@@ -1,7 +1,8 @@
 import { cloudflare } from "@cloudflare/vite-plugin"
 import react from "@vitejs/plugin-react"
+import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
-import { defineConfig, type Manifest, type Plugin } from "vite"
+import { build, defineConfig, type Manifest, type Plugin, type Rolldown } from "vite"
 
 /** Keeps Vite's injected stylesheet and entry module ahead of font preloads in <head>. */
 const fontsAfterAssets: Plugin = {
@@ -14,6 +15,34 @@ const fontsAfterAssets: Plugin = {
       return ""
     })
     return fonts.length ? stripped.replace("</head>", `    ${fonts.join("\n    ")}\n  </head>`) : html
+  },
+}
+
+// The embeddable chat widget and the public SDK are standalone bundles (no chunks shared with the app): the widget
+// as a classic script any site can load, the SDK as one ES module. Built here, emitted into the client's assets with
+// content hashes, and announced to the Worker (worker/widget.ts) through the same index.html hints as below.
+const embeds: Record<string, string> = {}
+const embedBundles: Plugin = {
+  name: "bellhop-embed-bundles",
+  apply: "build",
+  applyToEnvironment: (env) => env.name === "client",
+  async generateBundle() {
+    for (const [name, entry, format] of [
+      ["widget", "src/widget/main.ts", "iife"],
+      ["sdk", "src/sdk/index.ts", "es"],
+    ] as const) {
+      const out = (await build({
+        configFile: false,
+        logLevel: "warn",
+        plugins: [],
+        build: { write: false, minify: true, emptyOutDir: false, lib: { entry, formats: [format], name: "BellhopEmbed", fileName: name } },
+      })) as Rolldown.RolldownOutput[]
+      const chunk = out.flatMap((o) => o.output).find((o) => o.type === "chunk")
+      if (!chunk || chunk.type !== "chunk") throw new Error(`No ${name} bundle`)
+      const fileName = `assets/${name}-${createHash("sha256").update(chunk.code).digest("base64url").slice(0, 10)}.js`
+      this.emitFile({ type: "asset", fileName, source: chunk.code })
+      embeds[name] = fileName
+    }
   },
 }
 
@@ -42,6 +71,9 @@ const routePreloadHints: Plugin = {
         // Server-rendered docs (worker/docs.ts) link these directly.
         hint("docs-script", manifest["src/docs/main.ts"]?.file),
         hint("docs-style", manifest["src/styles/docs.css"]?.file),
+        // worker/widget.ts serves the stable loader URLs from these.
+        hint("widget-script", embeds.widget),
+        hint("sdk-script", embeds.sdk),
       ]
       html.source = html.source.replace("</head>", hints.join("") + "</head>")
     },
@@ -64,7 +96,7 @@ const productionConfig: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [react(), cloudflare(), fontsAfterAssets, routePreloadHints, productionConfig],
+  plugins: [react(), cloudflare(), fontsAfterAssets, embedBundles, routePreloadHints, productionConfig],
   environments: {
     client: {
       build: {

@@ -23,7 +23,7 @@ curl -X POST https://blhp.app/mcp \
     "content": [
       {
         "type": "text",
-        "text": "{\"issues\":[{\"id\":\"6b47ebb0-3421-4694-84b3-291b78042565\",\"number\":41,\"title\":\"Curl upload from the new key\",\"status\":\"open\",\"close_reason\":null,\"created_at\":\"2026-11-04T08:02:28.239Z\",\"updated_at\":\"2026-11-04T08:02:28.239Z\",\"comment_count\":0,\"votes\":0,\"viewer_voted\":false,\"pinned\":false,\"locked\":false,\"private\":false,\"hidden\":null,\"author\":{\"type\":\"guest\",\"id\":\"def39ae8ef11979748ed8741dd2b145a\",\"handle\":\"guest-def3\",\"name\":\"Dana (Desktop)\",\"tier\":null,\"display_name\":\"Dana (Desktop) (guest-def3)\"},\"assignee\":null,\"activity\":null,\"labels\":[{\"id\":\"a5e92ff4-9315-4b65-8e92-ded9f11f58ba\",\"name\":\"bug\",\"color\":\"d73a4a\",\"description\":\"Something isn’t working\"}],\"reporter_locale\":null}],\"pinned\":[],\"counts\":{\"open\":10,\"closed\":8},\"next_cursor\":\"41\"}"
+        "text": "{\"issues\":[{\"id\":\"6b47ebb0-3421-4694-84b3-291b78042565\",\"number\":41,\"title\":\"Curl upload from the new key\",\"status\":\"open\",\"close_reason\":null,\"created_at\":\"2026-11-04T08:02:28.239Z\",\"updated_at\":\"2026-11-04T08:02:28.239Z\",\"comment_count\":0,\"votes\":0,\"viewer_voted\":false,\"pinned\":false,\"locked\":false,\"private\":false,\"hidden\":null,\"author\":{\"type\":\"guest\",\"id\":\"def39ae8ef11979748ed8741dd2b145a\",\"handle\":\"guest-def3\",\"name\":\"Dana (Desktop)\",\"tier\":null,\"display_name\":\"Dana (Desktop) (guest-def3)\"},\"assignee\":null,\"activity\":null,\"labels\":[{\"id\":\"a5e92ff4-9315-4b65-8e92-ded9f11f58ba\",\"name\":\"bug\",\"color\":\"d73a4a\",\"description\":\"Something isn’t working\"}],\"reporter_locale\":null,\"contact\":null,\"request_type\":null,\"fields\":{},\"verifications\":[]}],\"pinned\":[],\"counts\":{\"open\":10,\"closed\":8},\"next_cursor\":\"41\"}"
       }
     ]
   }
@@ -190,6 +190,17 @@ Agents see a workspace the way its team does:
 An agent's comments are public replies unless it sends `internal: true`. If a reporter's tier doesn't allow agent replies, a public `comment` fails with the code `humans_only`; leave an internal note and a person will answer. Comments an agent writes don't trigger `comment.created` or `comment.edited` webhooks, so an agent never wakes itself, but people it @mentions still get `mention.created`.
 
 `list_issues`, `search_issues` and `get_issue` include `reporter_locale`, the reporter's interface language when they opened the issue: one of {{locales}}, or `null` for older issues. Reply in it unless the conversation shows otherwise.
+
+### Help desks
+
+In a workspace in help desk mode, every issue is a private request from a contact, and agents get a few more things:
+
+- `get_issue` and `list_issues` carry the requester's `contact` (their verified email, your app's `external_id` for them, and how they verified) and the request's email `verifications`.
+- `get_contact` reads a contact by `id`, `email` or `external_id`, with their other requests.
+- `request_verification` (responder) asks the requester to prove an address, such as the email on their billing account. Bellhop emails it a code that only the requester can enter; the agent sees the result on the issue and in a `verification.completed` [webhook](/docs/webhooks), never the code.
+- `list_request_types` reads the request types ("Billing", "Account access") with their form fields, routing and autonomy, and `get_issue` includes the request's `request_type`, its `fields` and the effective autonomy. `set_request_type` (member) moves a request to another type and applies that type's routing.
+
+People reach a help desk through its site, the [chat widget](/docs/widget) or the [public API](/docs/api), and replies from agents reach them there.
 
 ## Tools
 

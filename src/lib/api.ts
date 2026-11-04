@@ -59,6 +59,7 @@ import type {
 import { load, peek } from "./cache"
 import { runHumanCheck } from "./human"
 import { t } from "../i18n/core"
+import type { ApiKey, NewApiKey } from "../../shared/v1"
 
 export class ApiFailure extends Error {
   constructor(
@@ -248,6 +249,7 @@ export const api = {
   blocks: (slug: string) => get<Block[]>(`${app(slug)}/blocks`),
   block: (slug: string, actorId: string, hideContent: boolean) => request<Block>("POST", `${app(slug)}/blocks`, { actor_id: actorId, hide_content: hideContent }),
   unblock: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/blocks/${enc(id)}`),
+  typing: (slug: string, number: number) => request<{ ok: true }>("POST", `${app(slug)}/issues/${number}/typing`, {}),
   comment: (slug: string, number: number, input: NewComment) =>
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments`, input),
   addRelation: (slug: string, number: number, type: RelationType, other: number) =>
@@ -329,6 +331,13 @@ export const api = {
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications`, { email }),
   confirmVerification: (slug: string, number: number, id: string, code: string) =>
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications/${enc(id)}/confirm`, { code }),
+  // Public API v1 keys (Settings → API keys)
+  apiKeys: (slug: string) => get<ApiKey[]>(`${app(slug)}/api-keys`),
+  createApiKey: (slug: string, input: { name: string; kind: ApiKey["kind"]; allowed_origins?: string[] }) =>
+    request<NewApiKey>("POST", `${app(slug)}/api-keys`, input),
+  patchApiKey: (slug: string, id: string, input: { name?: string; allowed_origins?: string[] }) =>
+    request<ApiKey>("PATCH", `${app(slug)}/api-keys/${enc(id)}`, input),
+  deleteApiKey: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/api-keys/${enc(id)}`),
   // Account sign-in by email code (blhp.app)
   emailStart: (email: string) => request<{ ok: true }>("POST", "/auth/email/start", { email }),
   emailVerify: (email: string, code: string) => request<{ ok: true }>("POST", "/auth/email/verify", { email, code }),
@@ -373,6 +382,7 @@ export const keys = {
   contacts: (slug: string, q = "") => `contacts:${slug}:${q}`,
   contact: (slug: string, id: string) => `contact:${slug}:${id}`,
   identityKeys: (slug: string) => `identity-keys:${slug}`,
+  apiKeys: (slug: string) => `api-keys:${slug}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

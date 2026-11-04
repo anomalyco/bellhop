@@ -51,6 +51,7 @@ import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
 import { mentionables } from "./conversation"
 import { activeContact, contactActor, hostWorkspace } from "./contact-session"
+import { autonomy } from "./request-types"
 const originScopes = `(SELECT json_group_array(DISTINCT mv.from_app) FROM issue_moves mv WHERE mv.current_app=a.id)`
 const aliasesFor = (cookie: string | null, origins: string) =>
   Promise.all((cookie ? (JSON.parse(origins) as string[]) : []).map((id) => scopedGuestId(cookie!, id)))
@@ -181,6 +182,8 @@ export async function detail(
         nudge_days: number | null
         mode: AppDetail["mode"]
         require_verified_email: number
+        allow_anonymous: number
+        default_autonomy: AppDetail["helpdesk"]["default_autonomy"]
         trusted: number
       }
     ]
@@ -199,7 +202,7 @@ export async function detail(
       ),
       sql(
         c.env,
-        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,trusted FROM apps WHERE id=?",
+        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,allow_anonymous,default_autonomy,trusted FROM apps WHERE id=?",
         scope
       )
     ],
@@ -214,7 +217,11 @@ export async function detail(
     nudge_days: v.nudge_days,
     mode: v.mode,
     ...(can(target.role, "setup") && { trusted: !!v.trusted }),
-    helpdesk: { require_verified_email: !!v.require_verified_email },
+    helpdesk: {
+      require_verified_email: !!v.require_verified_email,
+      allow_anonymous: !!v.allow_anonymous,
+      default_autonomy: v.default_autonomy
+    },
     visibility: {
       default: v.default_private || v.mode === "helpdesk" ? "private" : "public",
       reporter_can_choose: v.mode === "tracker" && !!v.reporter_can_choose
@@ -230,7 +237,7 @@ export function webhookDeliveries(env: Env, id: string) {
     )
   )
 }
-export async function settings(c: Ctx): Promise<AppSettings> {
+export async function settings(c: Ctx, revealSecret = false): Promise<AppSettings> {
   const id = c.var.app.id
   // Members need the roster to assign issues, but not the signing key or token configuration.
   // Re-read after a member mutation: the caller may just have removed or demoted themselves.
@@ -238,14 +245,20 @@ export async function settings(c: Ctx): Promise<AppSettings> {
     Member["role"]
   >("role")
   const mcp_url = new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
-  if (!can(current, "setup"))
+  if (!revealSecret || !can(current, "setup"))
     return {
       webhook: { url: null, secret: "", events: [], deliveries: [] },
       members: can(current, "triage") ? await roster(c.env, id) : [],
       mcp_url
     }
   const [hook, deliveries, members] = await Promise.all([
-    sql(c.env, "SELECT url,secret,events FROM webhook_settings WHERE app_id=?", id).first<{
+    sql(
+      c.env,
+      `SELECT url,secret,events FROM webhook_settings WHERE app_id=? AND EXISTS(SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin'))`,
+      id,
+      id,
+      c.var.user!.id
+    ).first<{
       events: string
       url: string | null
       secret: string
@@ -393,8 +406,15 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   if (b.trusted !== undefined) bad("trusted is read-only")
   const mode = b.mode === undefined ? null : choice(b.mode, ["tracker", "helpdesk"] as const, "mode"),
     desk = b.helpdesk === undefined ? null : input(b.helpdesk)
-  if (desk && typeof desk.require_verified_email !== "boolean") bad("Invalid require_verified_email")
+  if (desk)
+    for (const k of ["require_verified_email", "allow_anonymous"])
+      if (desk[k] !== undefined && typeof desk[k] !== "boolean") bad(`Invalid ${k}`)
   const v = b.visibility === undefined ? null : input(b.visibility)
+  if (
+    desk?.default_autonomy !== undefined &&
+    (mode ?? (await sql(env, "SELECT mode FROM apps WHERE id=?", app.id).first<string>("mode"))) !== "helpdesk"
+  )
+    fail(403, "helpdesk_only", "Help desk workspace required")
   const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
   if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
   const days = b.nudge_days
@@ -407,10 +427,12 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const change = sql(
     env,
-    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
-    WHERE id=? RETURNING name,description,public`,
+    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),allow_anonymous=coalesce(?,allow_anonymous),default_autonomy=coalesce(?,default_autonomy),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
+    WHERE id=? AND (?=0 OR (coalesce(?,mode)='helpdesk' AND EXISTS(SELECT 1 FROM members m WHERE m.app_id=apps.id AND m.user_id=? AND m.role IN ('owner','admin')))) RETURNING name,description,public`,
     mode,
-    desk ? Number(desk.require_verified_email) : null,
+    desk?.require_verified_email !== undefined ? Number(desk.require_verified_email) : null,
+    desk?.allow_anonymous !== undefined ? Number(desk.allow_anonymous) : null,
+    desk?.default_autonomy !== undefined ? autonomy(desk.default_autonomy) : null,
     Number(days !== undefined),
     days ?? null,
     def === null ? null : Number(def === "private"),
@@ -419,7 +441,10 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
     b.description === undefined ? null : str(b.description, "description", 4000, true),
     mode,
     b.public === undefined ? null : Number(publicFlag(b.public)),
-    app.id
+    app.id,
+    Number(desk?.default_autonomy !== undefined),
+    mode,
+    actor.id
   )
   const changed = (
     await recorded<{ name: string; description: string; public: number }>(
@@ -445,7 +470,7 @@ apps.patch("/api/apps/:slug", async (c) => {
 })
 apps.get("/api/apps/:slug/settings", async (c) => {
   requireTeam(c, "triage")
-  return c.json(await settings(c))
+  return c.json(await settings(c, true))
 })
 apps.put("/api/apps/:slug/webhook", async (c) => {
   requireTeam(c, "setup")

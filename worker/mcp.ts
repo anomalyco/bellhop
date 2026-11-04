@@ -26,7 +26,17 @@ import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { getReport, reportLog } from "./report-data"
-import { addComment, editComment, moderate, relate, removeLabel, transferIssue, updateIssue } from "./mutations"
+import {
+  addComment,
+  editComment,
+  moderate,
+  relate,
+  removeLabel,
+  transferIssue,
+  updateIssue,
+  setRequestType
+} from "./mutations"
+import { types as requestTypes } from "./request-types"
 import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
@@ -45,6 +55,8 @@ export const toolRoles = {
   list_saved_replies: "read",
   get_analytics: "triage",
   get_contact: "read",
+  list_request_types: "read",
+  set_request_type: "triage",
   request_verification: "respond",
   set_tier: "triage",
   list_mentionables: "read",
@@ -119,6 +131,17 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool(
+    "list_request_types",
+    "Read this help desk’s request types, field schemas, routing and autonomy (including archived types).",
+    {}
+  ),
+  tool(
+    "set_request_type",
+    "Change a request type by ID or unique name, or null to clear. Keep matching answers, validate replacements and re-apply routing.",
+    { number, request_type: { type: ["string", "null"] }, fields: { type: "object", additionalProperties: text } },
+    ["number", "request_type"]
+  ),
   tool("get_contact", "Read a workspace contact and their requests. Supply exactly one identifier.", {
     id: text,
     email: text,
@@ -358,6 +381,16 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "list_request_types":
+    case "set_request_type": {
+      if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND mode='helpdesk'", app.id).first()))
+        fail(403, "helpdesk_only", "Help desk workspace required")
+      return textResult(
+        name === "list_request_types"
+          ? await requestTypes(env, app.id, true)
+          : await setRequestType(a, c, n(), b.request_type, b.fields)
+      )
+    }
     case "get_contact":
       return textResult(await getContact(env, app.id, b))
     case "request_verification":

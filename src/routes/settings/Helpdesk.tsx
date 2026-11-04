@@ -115,6 +115,19 @@ export function HelpdeskSettings({ app }: { app: AppDetail }) {
               <span className="visibility-hint">{app.helpdesk.require_verified_email ? t("settings.requireText") : t("settings.requireOff")}</span>
             </span>
           </label>
+          <label className="visibility" htmlFor="desk-anonymous">
+            <input
+              id="desk-anonymous"
+              type="checkbox"
+              checked={!!app.helpdesk.allow_anonymous}
+              disabled={!admin || busy}
+              onChange={(e) => void patch({ helpdesk: { allow_anonymous: e.target.checked } })}
+            />
+            <span className="visibility-text">
+              <span className="visibility-title">{t("settings.anonymous")}</span>
+              <span className="visibility-hint">{t("settings.anonymousText")}</span>
+            </span>
+          </label>
           {admin && app.trusted === false && <p className="desk-trust-note">{t("settings.trustedNote", { workspace: app.name })}</p>}
         </section>
       )}

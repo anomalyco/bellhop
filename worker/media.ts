@@ -1,4 +1,4 @@
-import { Hono } from "hono"
+import { Hono, type MiddlewareHandler } from "hono"
 import type { Attachment } from "../shared/api"
 import { allowWrite } from "./auth"
 import { viewerApp } from "./apps"
@@ -11,6 +11,9 @@ import { attachment } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { reportLog } from "./report-data"
 import type { Ctx } from "./core"
+import { authorize, checkHost, cors, preflightAllowed } from "./v1/access"
+import { signedFile } from "./v1/signed-media"
+import { clientIP, enforce } from "./rate-limits"
 
 const MiB = 1024 * 1024
 function tooLarge(): never {
@@ -18,7 +21,15 @@ function tooLarge(): never {
 }
 
 // R2 put needs a fixed-length stream. For chunked requests, bound memory to one multipart part.
-async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8Array>, mime: string, limit: number) {
+export async function chunked(
+  bucket: R2Bucket,
+  key: string,
+  body: ReadableStream<Uint8Array>,
+  mime: string,
+  limit: number,
+  digest?: WritableStreamDefaultWriter<ArrayBuffer | ArrayBufferView>,
+  admit?: (part: Uint8Array) => Promise<void>
+) {
   const options = { httpMetadata: { contentType: mime } },
     reader = body.getReader(),
     buffer = new Uint8Array(5 * MiB),
@@ -32,12 +43,14 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
       if (done) break
       size += value.byteLength
       if (size > limit) tooLarge()
+      if (digest) await digest.write(value)
       for (let i = 0; i < value.length; ) {
         const n = Math.min(buffer.length - used, value.length - i)
         buffer.set(value.subarray(i, i + n), used)
         used += n
         i += n
         if (used === buffer.length) {
+          if (admit) await admit(buffer)
           upload ??= await bucket.createMultipartUpload(key, options)
           parts.push(await upload.uploadPart(parts.length + 1, buffer))
           used = 0
@@ -45,13 +58,16 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
       }
     }
     if (!size) bad("Empty upload")
+    if (used && admit) await admit(buffer.subarray(0, used))
     if (upload) {
       if (used) parts.push(await upload.uploadPart(parts.length + 1, buffer.subarray(0, used)))
       await upload.complete(parts)
     } else await bucket.put(key, buffer.subarray(0, used), options)
+    if (digest) await digest.close()
     return size
   } catch (e) {
     await reader.cancel().catch(() => {})
+    if (digest) await digest.abort().catch(() => {})
     if (upload) await upload.abort()
     throw e
   } finally {
@@ -59,14 +75,17 @@ async function chunked(bucket: R2Bucket, key: string, body: ReadableStream<Uint8
   }
 }
 export const media = new Hono<Bindings>()
-media.post("/api/apps/:slug/uploads", async (c) => {
-  await allowWrite(c)
-  const name = str(c.req.query("name"), "file name", 255).trim()
+export function uploadSpec(filename: unknown, contentType: string) {
+  const name = str(filename, "file name", 255).trim()
   if (/[\/\\\x00-\x1f\x7f]/.test(name) || name === "." || name === "..") bad("Invalid file name")
-  const raw = c.req.header("content-type")?.split(";")[0]?.trim().toLowerCase() ?? ""
+  const raw = contentType.split(";")[0]?.trim().toLowerCase() ?? ""
   const mime = /^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/.test(raw) ? raw : "application/octet-stream"
   const kind: Attachment["kind"] = mime.startsWith("image/") ? "image" : mime.startsWith("video/") ? "video" : "file"
-  const limit = (kind === "image" ? 10 : kind === "video" ? 100 : 25) * MiB,
+  return { name, mime, kind, limit: (kind === "image" ? 10 : kind === "video" ? 100 : 25) * MiB }
+}
+media.post("/api/apps/:slug/uploads", async (c) => {
+  await allowWrite(c)
+  const { name, mime, kind, limit } = uploadSpec(c.req.query("name"), c.req.header("Content-Type") ?? ""),
     len = c.req.header("content-length"),
     body = c.req.raw.body
   if (!body) bad("Empty upload")
@@ -115,6 +134,49 @@ media.post("/api/apps/:slug/uploads", async (c) => {
   }
   return c.json(attachment({ id, name, mime, size, kind }), 201)
 })
+// Uploads remain on their existing route. Widgets can fetch the regular media
+// URL with their bearer (never a credential in an <img> URL or query string).
+export const endUserMedia:MiddlewareHandler<Bindings>=async(c,next)=>{
+  const id=c.req.param('id')!,name=c.req.param('name')!
+  if (/^Bearer bh_sk_/i.test(c.req.header("Authorization") ?? "")) {
+    await enforce(c, "RL_V1_IP", "v1:media:" + clientIP(c))
+    const s = await authorize(c, "server")
+    const file =
+      (await sql(
+        c.env,
+        "SELECT f.name,f.mime,f.kind,f.size,f.object_key FROM attachments f JOIN attachment_links l ON l.attachment_id=f.id JOIN issues i ON i.id=l.issue_id AND i.app_id=f.app_id WHERE f.app_id=? AND f.id=? AND f.name=?",
+        s.app,
+        id,
+        name
+      ).first<AttachmentRow & { object_key: string }>()) ?? missing()
+    return serveFile(c, file, true)
+  }
+  if ((c.req.method === "GET" || c.req.method === "HEAD") && c.req.query("sig") !== undefined) {
+    c.header("Referrer-Policy", "no-referrer")
+    c.header("Cache-Control", "private, max-age=0, must-revalidate")
+    await enforce(c, "RL_V1_IP", "v1:media:" + clientIP(c))
+    const r = await serveFile(c, await signedFile(c, id, name), true)
+    r.headers.set("Referrer-Policy", "no-referrer")
+    r.headers.set("Cache-Control", "private, max-age=0, must-revalidate")
+    return r
+  }
+  if(c.req.method==='OPTIONS'){
+    checkHost(c)
+    const origin = c.req.header("Origin")
+    if(!origin||c.req.header('Access-Control-Request-Method')!=='GET')missing()
+    if (!(await preflightAllowed(c, origin))) missing()
+    cors(c, origin)
+    c.header("Access-Control-Allow-Headers", "Authorization, Range, If-None-Match")
+    c.header("Access-Control-Allow-Methods", "GET")
+    c.header("Access-Control-Max-Age", "86400")
+    return c.body(null, 204)
+  }
+  if(!/^Bearer bh_us_/i.test(c.req.header('Authorization')??''))return next()
+  await enforce(c, "RL_V1_IP", "v1:media:" + clientIP(c))
+  const s = await authorize(c, "session")
+  const file=await sql(c.env,`SELECT f.name,f.mime,f.kind,f.size,f.object_key FROM attachments f JOIN attachment_links l ON l.attachment_id=f.id JOIN issues i ON i.id=l.issue_id AND i.app_id=f.app_id LEFT JOIN comments m ON m.id=l.comment_id AND m.issue_id=i.id WHERE f.app_id=? AND f.id=? AND f.name=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND (l.comment_id IS NULL OR (m.internal=0 AND m.hidden IS NULL))`,s.app,id,name,s.user!.id).first<AttachmentRow&{object_key:string}>()??missing()
+  const r=await serveFile(c,file,true);if(s.origin){r.headers.set('Access-Control-Allow-Origin',s.origin);r.headers.set('Vary','Origin')}return r
+}
 function range(value: string, size: number) {
   const m = /^bytes=(\d*)-(\d*)$/i.exec(value.trim())
   if (!m || (!m[1] && !m[2])) return null

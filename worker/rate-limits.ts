@@ -2,7 +2,16 @@ import { fail, type Ctx } from "./core"
 
 // CF supplies this at ingress. Never use a caller-provided forwarding chain or guest cookie.
 export const clientIP = (c: Ctx) => c.req.header("CF-Connecting-IP") || "unknown"
-type Bucket = "RL_UPLOAD" | "RL_HUMAN" | "RL_WRITE" | "RL_IP" | "RL_TEAM" | "RL_AGENT"
+type Bucket =
+  | "RL_UPLOAD"
+  | "RL_HUMAN"
+  | "RL_WRITE"
+  | "RL_IP"
+  | "RL_TEAM"
+  | "RL_AGENT"
+  | "RL_V1_IP"
+  | "RL_V1_READ"
+  | "RL_V1_SECRET"
 export async function allowed(c: Ctx, bucket: Bucket, key: string) {
   if (!c.env.APP_DOMAIN && c.env.DEV_LOGIN === "1" && c.env.RATE_LIMIT_TEST_BYPASS === "1") return true
   return (await c.env[bucket].limit({ key })).success

@@ -38,7 +38,8 @@ import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
-import { contactQuery, proofQuery, verification, type ContactRow, type ProofRow } from "./helpdesk-data"
+import { contactQuery, proofQuery, verification, requesterActor, type ContactRow, type ProofRow } from "./helpdesk-data"
+import { requestJson, typeInfo } from "./request-types"
 
 const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
@@ -347,9 +348,10 @@ export async function listIssues(
       cursorArgs = [sort === "updated" ? parts[1] : Number(parts[1]), issueNumber(parts[2])]
     }
   }
+  const formCols = options.requesterDetails && viewer.team ? `,${requestJson(true)} request_info` : ""
   const list = sql(
     env,
-    `WITH ${viewerCTE} SELECT * FROM (SELECT ${fields(viewer.team)}${base} ${options.allStates ? "" : `AND i.status${state === "open" ? "!=" : "="}'closed'`}) WHERE 1 ${boundary} ORDER BY ${metric} ${asc ? "ASC" : "DESC"}${metric === "number" ? "" : ",number DESC"} LIMIT ?`,
+    `WITH ${viewerCTE} SELECT * FROM (SELECT ${fields(viewer.team)}${formCols}${base} ${options.allStates ? "" : `AND i.status${state === "open" ? "!=" : "="}'closed'`}) WHERE 1 ${boundary} ORDER BY ${metric} ${asc ? "ASC" : "DESC"}${metric === "number" ? "" : ",number DESC"} LIMIT ?`,
     ...viewerArgs(viewer),
     ...values,
     ...cursorArgs,
@@ -366,7 +368,7 @@ export async function listIssues(
       teamQuery(env, scope),
       sql(
         env,
-        `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
+        `WITH ${viewerCTE} SELECT ${fields(viewer.team)}${formCols} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
         ...viewerArgs(viewer),
         appKey(scope),
         ...(mine ? filter.values : actorBindings(viewer)),
@@ -389,7 +391,11 @@ export async function listIssues(
     for (const { issue_id, ...c } of cs!.results as ContactRow[]) extra.get(issue_id)!.contact = c
     for (const v of vs!.results as ProofRow[]) extra.get(v.issue_id)!.verifications.push(verification(v))
   }
-  const item = (r: StoredSummary) => ({ ...project(r, roles), ...extra.get(r.id) })
+  const item = (r: StoredSummary & { request_info?: string | null }) => ({
+    ...project(r, roles),
+    ...extra.get(r.id),
+    ...(options.requesterDetails && viewer.team ? typeInfo(r.request_info ?? null) : {})
+  })
   return {
     issues: visible.map(item),
     pinned: pins.map(item),
@@ -569,6 +575,7 @@ export async function getIssue(
   } = await readBatch<
     [
       StoredSummary & {
+        request_info: string | null
         body: string
         github_repo: string | null
         github_number: number | null
@@ -614,7 +621,7 @@ export async function getIssue(
     [
       sql(
         env,
-        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.github_repo,i.github_number,i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},${requestJson(v.team)} request_info,i.github_repo,i.github_number,i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
         ...viewerArgs(v),
         key,
         number
@@ -646,12 +653,13 @@ export async function getIssue(
          v.team
            ? `UNION ALL SELECT e.id,e.type,i.author,e.data,i.created_at,${tierBag("i.app_id", ["i.author", "json_extract(e.data,'$.assignee')"])},NULL,NULL,NULL
          FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target})
-         UNION ALL SELECT n.id,'nudged','{"type":"agent","id":"bellhop","name":"Bellhop"}','{}',n.created_at,NULL,NULL,NULL,NULL FROM nudge_events n WHERE n.issue_id=(${target}) ORDER BY created_at`
+         UNION ALL SELECT n.id,'nudged','{"type":"agent","id":"bellhop","name":"Bellhop"}','{}',n.created_at,NULL,NULL,NULL,NULL FROM nudge_events n WHERE n.issue_id=(${target})
+         UNION ALL SELECT e.id,'routed',e.actor,e.data,e.created_at,NULL,NULL,NULL,NULL FROM request_route_events e JOIN apps a ON a.id=e.app_id AND a.mode='helpdesk' WHERE e.issue_id=(${target}) ORDER BY created_at`
            : "ORDER BY e.created_at,e.rowid"
        }`,
         key,
         number,
-        ...(v.team ? [key, number, key, number] : [])
+        ...(v.team ? [key, number, key, number, key, number] : [])
       ),
       sql(
         env,
@@ -750,13 +758,15 @@ export async function getIssue(
     timeline.push({
       kind: "event",
       event: projectTiers(
-        { ...e, actor: parseActor(e.actor, roles), data },
+        { ...e, actor: privileged ? parseActor(e.actor, roles) : requesterActor(parseActor(e.actor, roles)), data },
         tier_bag ? JSON.parse(tier_bag) : undefined
       )
     })
   }
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
-  const verifications = proofs.map(verification)
+  const verifications = proofs
+    .map(verification)
+    .map((v) => (privileged ? v : { ...v, requested_by: requesterActor(v.requested_by) }))
   for (const proof of verifications)
     if (proof.state === "verified")
       timeline.push({
@@ -773,6 +783,7 @@ export async function getIssue(
   return {
     ...s,
     contact: contacts.length ? (({ issue_id, ...c }) => c)(contacts[0]!) : null,
+    ...typeInfo(r.request_info),
     verifications,
     edited_at: r.edited_at,
     imported: r.github_repo
@@ -804,6 +815,9 @@ export async function getIssue(
 }
 export function summaryOf(issue: Issue): IssueSummary {
   const {
+    request_type,
+    fields,
+    effective_autonomy,
     contact,
     verifications,
     imported,

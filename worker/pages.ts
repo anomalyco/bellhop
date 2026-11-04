@@ -115,6 +115,21 @@ const hasVideo = (post: Pick<Issue, "attachments" | "body">) =>
   post.attachments.some((a) => a.kind === "video") ||
   /(?:^|[\s(<])\/media\/[^\s()<>]+\.(?:mp4|m4v|webm|mov|ogv)(?=[?#)>\s]|$)/i.test(post.body)
 export async function page(c: Ctx) {
+  if (c.req.path.startsWith("/assets/")) {
+    const asset = await c.env.ASSETS.fetch(c.req.raw)
+    if (asset.status >= 400) {
+      await asset.body?.cancel()
+      return new Response(asset.status === 404 ? "Not found" : null, {
+        status: asset.status,
+        headers: {
+          ...(asset.status === 404 && { "Content-Type": "text/plain; charset=utf-8" }),
+          "Cache-Control": "no-store",
+          "X-Content-Type-Options": "nosniff"
+        }
+      })
+    }
+    return asset
+  }
   const url = new URL(c.req.url),
     target = location(c, url),
     { slug, path } = target

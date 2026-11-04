@@ -1,6 +1,13 @@
 import type { Actor, Contact, Verification } from "../shared/api"
 import { sql } from "./core"
-export const contactCols = "t.id,t.name,t.email,t.unverified_email,t.external_id,t.verified_via,t.created_at,t.last_seen_at"
+export const contactCols =
+  "t.id,t.name,t.email,t.unverified_email,t.external_id,t.verified_via,t.created_at,t.last_seen_at"
+/** Credential attribution stays on the team/audit side, never on a requester-facing actor. */
+export function requesterActor(a: Actor): Actor {
+  return a.type === "agent" && a.id.startsWith("api-key:")
+    ? { type: "member", id: "workspace-team", name: a.name, avatar_url: null }
+    : a
+}
 export type ProofRow = Omit<Verification, "requested_by"> & { issue_id: string; requested_by: string }
 export const proofCols =
   "v.id,v.issue_id,v.email,CASE WHEN v.state='pending' AND v.expires<=unixepoch() THEN 'expired' ELSE v.state END state,v.requested_by,v.created_at,v.verified_at"
