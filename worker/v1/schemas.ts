@@ -34,7 +34,9 @@ export const schemas = {
   }),
   Session: obj({ token: string, expires_at: date, user: ref("EndUser") }),
   SessionInput: one(
-    obj({ user: obj({ id: string, email: string, email_verified: bool, name: string, locale }, ["id"]) }),
+    obj({
+      user: obj({ id: string, email: string, email_verified: bool, link_existing: bool, name: string, locale }, ["id"])
+    }),
     obj({ identity_token: string }),
     obj({ anonymous: { const: true }, turnstile_token: string })
   ),

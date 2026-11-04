@@ -5,7 +5,9 @@
 // Base URL: https://api.blhp.app/v1 (also /v1 on every workspace host and, later, custom domains).
 // JSON; times are ISO 8601; lists are Page<T> with cursor pagination; errors are { error: { code, message } } with
 // the usual statuses (400, 401, 403, 404, 409, 410, 413, 422, 428, 429 + Retry-After). POSTs accept an
-// Idempotency-Key header (replayed for 24 h). End users never see "Bellhop": team and agent participants are shown
+// Idempotency-Key header (except fresh realtime tickets): successes replay for 24 h, client errors for 5 minutes;
+// 1000 active nonces per scope (publishable credentials budgeted per key/IP). Replayed uploads get fresh signed URLs.
+// End users never see "Bellhop": team and agent participants are shown
 // as the workspace presents them.
 //
 // Keys (created by workspace admins in Settings → API keys; shown once):
@@ -19,9 +21,12 @@
 // End-user sessions: `Authorization: Bearer bh_us_…`, one contact in one workspace, 24 h, no cookies (works in
 // iframes and third-party embeds). CORS is open to the publishable key's allowed origins for these routes.
 //   POST   /v1/sessions        secret key      { user: { id, email?, email_verified?, name?, locale? } } -> Session
-//          the host's server vouches for its signed-in user directly (no token signing needed)
+//          The host vouches for its signed-in user directly. A verified mailbox does NOT link an existing contact
+//          by default. user.link_existing:true explicitly grants access to the matching email-only contact's private
+//          history; signed identity tokens use the same claim.
 //   POST   /v1/sessions        publishable key { identity_token }                -> Session   an IdentityToken (api.ts)
-//   POST   /v1/sessions        publishable key { anonymous: true, turnstile_token } -> Session   if allowed
+//   POST   /v1/sessions        publishable key { anonymous: true, turnstile_token } -> Session   if allowed;
+//          anonymous conversations are reachable for the 24-hour session unless the visitor verifies.
 //   POST   /v1/sessions/email  publishable key { email, turnstile_token }        -> { ok: true }   sends a code
 //   POST   /v1/sessions/email/verify publishable key { email, code }            -> Session
 //          Email start returns Challenge-Token in a CORS-exposed response header. Keep it in this browser and send

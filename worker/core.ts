@@ -103,6 +103,10 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("api_nonce_limit"))
+    return new ApiFailure(429, "idempotency_limit", "Too many active idempotency keys")
+  if (message.includes("api_upload_quota"))
+    return new ApiFailure(413, "upload_byte_quota", "Daily upload byte budget exhausted")
   if (/api_session_required|v1 credential unavailable/.test(message))
     return new ApiFailure(401, "invalid_credential", "Invalid or expired credential")
   if (message.includes("code_limit")) return new ApiFailure(429, "code_limit", "Too many code requests; try later")

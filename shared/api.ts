@@ -465,6 +465,8 @@ export interface IdentityToken {
   email?: string
   /** The host has verified `email`, so the contact counts as verified by email too. */
   email_verified?: boolean
+  /** Explicitly link a verified mailbox to its existing email-only contact and private requests. Default false. */
+  link_existing?: boolean
   name?: string
   iat: number
   exp: number

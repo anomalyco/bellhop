@@ -78,25 +78,27 @@ export async function verifyIdentity(env: Env, slug: string, token: unknown) {
   if (!text(jti, 255)) return invalid("identifier")
   return { app: key.app_id, workspace: key.workspace, slug, kid: h.kid, jti, exp, ...hostClaims(sub, p) }
 }
-export function hostClaims(sub: unknown, p: Record<string, unknown>) {
-  if (!text(sub, 255)) return invalid("identifier")
-  if (p.name !== undefined && !text(p.name, 120)) return invalid("name")
-  if (p.email_verified !== undefined && typeof p.email_verified !== "boolean") return invalid("verified_flag")
+export function hostClaims(sub: unknown, p: Record<string, unknown>, reject: (reason: string) => never = invalid) {
+  if (!text(sub, 255)) return reject("identifier")
+  if (p.name !== undefined && !text(p.name, 120)) return reject("name")
+  if (p.email_verified !== undefined && typeof p.email_verified !== "boolean") return reject("verified_flag")
   let address: string | null = null
   if (p.email !== undefined) {
-    if (!text(p.email, 254)) return invalid("email")
+    if (!text(p.email, 254)) return reject("email")
     try {
       address = email(p.email)
     } catch {
-      return invalid("email")
+      return reject("email")
     }
   }
-  if (p.email_verified && !address) return invalid("email")
+  if (p.email_verified && !address) return reject("email")
+  if (p.link_existing !== undefined && typeof p.link_existing !== "boolean") return reject("link_flag")
   return {
     sub: sub.trim(),
     name: p.name?.trim() ?? null,
     email: p.email_verified ? address : null,
-    display: p.email_verified ? null : address
+    display: p.email_verified ? null : address,
+    link: p.link_existing === true && p.email_verified === true
   }
 }
 
@@ -114,23 +116,45 @@ export async function consumeIdentity(env: Env, v: Awaited<ReturnType<typeof ver
     v.exp
   )
 }
-export function resolveHost(env: Env, v: ReturnType<typeof hostClaims> & { app: string }) {
-  return sql(
-    env,
-    `WITH target AS (SELECT id FROM contacts WHERE app_id=?1 AND (external_id=?2 OR (external_id IS NULL AND email=?3)) ORDER BY external_id IS NOT NULL DESC LIMIT 1),
+export function resolveHost(
+  env: Env,
+  v: ReturnType<typeof hostClaims> & { app: string },
+  key: { id: string; kind: "identity" | "api" }
+) {
+  // Audit the candidate before the update, inside the same D1 batch. A known subject
+  // always wins, even if link_existing is supplied: never merge two contact IDs.
+  return [
+    sql(
+      env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data)
+    SELECT t.app_id,json_object('type','agent','id',?1||':'||k.id,'name',k.name,'preview',k.preview),'contact.linked',json_object('type','contact','id',t.id),json_object('key_kind',?1,'key_id',k.id,'preview',k.preview)
+    FROM contacts t JOIN ${key.kind === "api" ? "api_keys" : "identity_keys"} k ON k.app_id=t.app_id AND k.id=?2
+    WHERE ?3 AND t.app_id=?4 AND t.email=?5 AND t.external_id IS NULL AND NOT EXISTS(SELECT 1 FROM contacts WHERE app_id=t.app_id AND external_id=?6)`,
+      key.kind,
+      key.id,
+      Number(v.link),
+      v.app,
+      v.email,
+      v.sub
+    ),
+    sql(
+      env,
+      `WITH target AS (SELECT id FROM contacts WHERE app_id=?1 AND (external_id=?2 OR (?8 AND external_id IS NULL AND email=?3)) ORDER BY external_id IS NOT NULL DESC LIMIT 1),
       chosen AS (SELECT coalesce((SELECT id FROM target),?4) id)
       INSERT INTO contacts(id,app_id,external_id,email,unverified_email,name,verified_via,created_at,last_seen_at)
-      SELECT id,?1,?2,CASE WHEN NOT EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=?1 AND t.email=?3 AND t.id!=chosen.id) THEN ?3 END,?5,?6,'host',?7,?7 FROM chosen WHERE true
+      SELECT id,?1,?2,CASE WHEN NOT EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=?1 AND t.email=?3 AND t.id!=chosen.id) THEN ?3 END,CASE WHEN EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=?1 AND t.email=?3 AND t.id!=chosen.id) THEN ?3 ELSE ?5 END,?6,'host',?7,?7 FROM chosen WHERE true
       ON CONFLICT(id) DO UPDATE SET external_id=excluded.external_id,email=coalesce(excluded.email,contacts.email),unverified_email=coalesce(excluded.unverified_email,contacts.unverified_email),name=coalesce(excluded.name,contacts.name),verified_via='host',last_seen_at=excluded.last_seen_at
       RETURNING id,name,email,external_id,verified_via`,
-    v.app,
-    v.sub,
-    v.email,
-    "ct_" + uid(),
-    v.display,
-    v.name,
-    now()
-  )
+      v.app,
+      v.sub,
+      v.email,
+      "ct_" + uid(),
+      v.display,
+      v.name,
+      now(),
+      Number(v.link)
+    )
+  ]
 }
 export function identityFailure(e: unknown): never {
   const msg = e instanceof Error ? `${e.message} ${e.cause}` : ""
@@ -146,7 +170,7 @@ async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest 
     at = now()
   const batch = [
     await consumeIdentity(env, v),
-    resolveHost(env, v),
+    ...resolveHost(env, v, { id: v.kid, kind: "identity" }),
     sql(env, "DELETE FROM contact_sessions WHERE app_id=? AND hash=?", v.app, await contactHash(c, v.slug)),
     sql(
       env,
@@ -164,7 +188,7 @@ async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest 
   } catch (e) {
     return identityFailure(e)
   }
-  const contact = result[1]!.results[0]!
+  const contact = result[2]!.results[0]!
   // A forwarded GET link authenticates its subject, not the browser that opened
   // it. Only the origin-checked POST may transfer the browser's private history.
   if (claimGuest) await claimContactGuest(c, contact, v.app)
@@ -236,7 +260,8 @@ handoff.get("/identify", async (c) => {
     ).first<{ name: string | null; email: string | null; external_id: string | null }>()
     const who = esc(v.name ?? v.email ?? v.sub),
       switching =
-        current && !(current.external_id === v.sub || (!current.external_id && v.email && current.email === v.email))
+        current &&
+        !(current.external_id === v.sub || (v.link && !current.external_id && v.email && current.email === v.email))
     const next = destination(c.req.query("next"), new URL(c.req.url).origin)
     // A no-referrer document can serialize Origin as null on form navigation.
     // Send only the origin for the self-only form, never the URL containing the token.

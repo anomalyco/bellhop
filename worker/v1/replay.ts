@@ -1,5 +1,7 @@
-import { ApiFailure, dbError, fail, hex, sql, str, uid, type Ctx } from "../core"
-import type { Scope } from "./access"
+import { ApiFailure, dbError, fail, hex, sql, str, uid, sha256, type Ctx } from "../core"
+import { apiOrigin, type Scope } from "./access"
+import { clientIP } from "../rate-limits"
+import { signedFiles } from "./signed-media"
 
 const enc = new TextEncoder(),
   dec = new TextDecoder()
@@ -39,9 +41,10 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
     sql(c.env, `DELETE FROM api_replays WHERE ${where} AND expires<=unixepoch()`, ...ids),
     sql(
       c.env,
-      `INSERT INTO api_replays(key_id,scope,route,nonce,digest,expires) VALUES(?,?,?,?,?,unixepoch()+86400) ON CONFLICT DO NOTHING`,
+      `INSERT INTO api_replays(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+86400,?) ON CONFLICT DO NOTHING`,
       ...ids,
-      digest
+      digest,
+      s.kind === "publishable" && !s.user ? await sha256(s.key + ":" + clientIP(c)) : scope
     ),
     sql(c.env, `SELECT digest,status,cipher FROM api_replays WHERE ${where}`, ...ids)
   ])
@@ -70,6 +73,12 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
     const seed = await deriveSeed(ticket)
     if (challenge) c.header("Challenge-Token", c.req.header("Challenge-Token") ?? seed)
     if (session) body.token = "bh_us_" + seed
+    if (route === "/v1/uploads" && r.status === 201) {
+      const [fresh] = await signedFiles({ env: c.env, app: s.app, who: s.user!.id, origin: apiOrigin(c) }, [
+        { id: body.id, name: body.name, size: body.size, type: body.type }
+      ])
+      body.url = fresh!.url
+    }
     if (wsTicket) {
       const u = new URL(body.url)
       u.searchParams.set("ticket", seed)
@@ -112,9 +121,10 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
   sealed.set(cipher, 12)
   await sql(
     c.env,
-    `UPDATE api_replays SET status=?,cipher=? WHERE ${where} AND digest=?`,
+    `UPDATE api_replays SET status=?,cipher=?,expires=min(expires,unixepoch()+?) WHERE ${where} AND digest=?`,
     response.status,
     b64(sealed),
+    response.status >= 400 && response.status < 500 ? 300 : 86400,
     ...ids,
     digest
   ).run()

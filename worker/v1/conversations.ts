@@ -7,6 +7,7 @@ import { redeemCode } from "../email-codes"
 import { dispatchProof } from "../helpdesk"
 import { proofCols, verification, type ProofRow } from "../helpdesk-data"
 import { clientIP, enforce } from "../rate-limits"
+import { contactActor } from "../contact-session"
 import { liveGuard, apiOrigin, type Scope } from "./access"
 import { signedFiles, type Audience } from "./signed-media"
 import { signalContact } from "./signals"
@@ -34,7 +35,9 @@ function access(c: Ctx, s: Scope, id?: string): Access {
     env: c.env,
     ctx: c.executionCtx,
     app: { id: s.app, slug: s.slug, name: s.name, public: false },
-    actor: { type: "guest", id: s.user!.id, name: s.user!.name, handle: "requester" },
+    actor: s.user!.anonymous
+      ? { type: "guest", id: s.user!.id, name: s.user!.name, handle: "guest-" + s.user!.id.slice(5, 13) }
+      : contactActor(s.user!),
     role: null,
     desk: true,
     locale: s.user!.locale,

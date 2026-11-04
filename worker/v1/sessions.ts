@@ -70,8 +70,9 @@ export async function mint(
       )
     )
   } else if (s.kind === "secret") {
-    const u = input(b.user),
-      v = hostClaims(u.id, u)
+    const u = input(b.user)
+    if (typeof u.id !== "string") bad("user.id must be a string")
+    const v = hostClaims(u.id, u, (reason) => bad(`Invalid user ${reason}`))
     if (b.identity_token !== undefined || b.anonymous !== undefined) bad("Choose one session method")
     if (u.locale !== undefined) {
       if (!isLocale(u.locale)) bad("Invalid locale")
@@ -79,14 +80,14 @@ export async function mint(
       setLocale = true
     }
     sub = v.sub
-    q.push(resolveHost(env, { ...v, app: s.app }))
+    q.push(...resolveHost(env, { ...v, app: s.app }, { id: s.key, kind: "api" }))
   } else if (b.identity_token !== undefined) {
     if (b.user !== undefined || b.anonymous !== undefined) bad("Choose one session method")
     const v = await verifyIdentity(env, s.slug, b.identity_token)
     sub = v.sub
     q.push(
       await consumeIdentity(env, v),
-      resolveHost(env, v),
+      ...resolveHost(env, v, { id: v.kid, kind: "identity" }),
       sql(env, "UPDATE identity_keys SET last_used_at=? WHERE app_id=? AND id=?", now(), s.app, v.kid)
     )
   } else {

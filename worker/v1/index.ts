@@ -173,7 +173,8 @@ function document() {
           schema: v as typeof string
         }))
       )
-    if (r.method === "POST") parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
+    if (r.method === "POST" && name !== "realtime")
+      parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
     if (name === "verifyEmail" || name === "startEmail")
       parameters.push({ in: "header", name: "Challenge-Token", required: name === "verifyEmail", schema: string })
     const responses: Record<string, unknown> = {
@@ -191,7 +192,7 @@ function document() {
     }
     for (const [code, description] of Object.entries({
       404: "not_found: unknown host, resource not found or not owned",
-      429: "rate_limited or code_limit; retry after the indicated delay",
+      429: "rate_limited, idempotency_limit or code_limit; retry after the indicated delay",
       500: "internal_error",
       ...(r.transport === "socket" ? { 426: "upgrade_required" } : {}),
       ...(r.auth !== "public"
@@ -207,7 +208,11 @@ function document() {
         ? { 409: "conflict or request_pending", 422: "idempotency_mismatch: key reused with different input" }
         : {}),
       ...(r.transport === "multipart"
-        ? { 413: "too_large", 415: "expected_multipart", 503: "misconfigured" }
+        ? {
+            413: "too_large or upload_byte_quota",
+            415: "expected_multipart or unsupported_video",
+            503: "misconfigured"
+          }
         : r.request || r.method === "POST"
           ? { 413: "too_large", 415: "expected_json", 503: "misconfigured, mail_unavailable or conversation_upgrading" }
           : {}),
@@ -274,7 +279,13 @@ export function publicApi() {
     checkHost(c)
     c.header("Cache-Control", "no-store")
     c.header("Vary", "Origin")
-    await enforce(c, "RL_IP", "v1:ip:" + clientIP(c))
+    if (c.req.method !== "OPTIONS") {
+      const entry =
+        c.req.path.startsWith("/v1/sessions") ||
+        (c.req.path === "/v1/realtime" && c.req.method === "GET") ||
+        !/^Bearer bh_(pk|sk|us)_[0-9a-f]{64}$/i.test(c.req.header("Authorization") ?? "")
+      await enforce(c, entry ? "RL_AGENT" : "RL_V1_IP", (entry ? "v1:entry:" : "v1:ip:") + clientIP(c))
+    }
     await next()
   })
   api.use("*", (c, next) =>
@@ -298,6 +309,7 @@ export function publicApi() {
       )
         denied()
       cors(c, origin)
+      c.header("Access-Control-Max-Age", "86400")
       c.header("Vary", "Origin, Access-Control-Request-Method, Access-Control-Request-Headers")
       c.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key, Challenge-Token")
       c.header("Access-Control-Allow-Methods", methods.join(", "))
@@ -308,6 +320,26 @@ export function publicApi() {
     api.on(r.method, r.path, async (c) => {
       if (r.auth === "public") return c.json(document())
       if (r.auth === "ticket") return upgrade(c)
+      // Malformed mint attempts pay only the ingress IP check: no D1 or key budget.
+      if (r.method === "POST" && r.path.startsWith("/sessions")) {
+        const prefix = /^Bearer bh_(pk|sk)_[a-f0-9]{64}$/i.exec(c.req.header("Authorization") ?? "")?.[1]
+        if ((prefix === "sk" && c.req.raw.headers.has("Origin")) || (prefix === "pk" && !c.req.header("Origin")))
+          denied()
+        if (prefix) {
+          let value: unknown
+          try {
+            value = JSON.parse(await c.req.text())
+          } catch {
+            bad("Invalid JSON")
+          }
+          const b = input(value)
+          if (r.path === "/sessions") {
+            if (prefix === "sk") {
+              if (typeof input(b.user).id !== "string") bad("user.id must be a string")
+            } else if (!b.identity_token && b.anonymous !== true) bad("Expected identity_token or anonymous: true")
+          } else if (typeof b.email !== "string") bad("Expected email")
+        }
+      }
       const s = await authorize(c, r.auth),
         id = c.req.param("id") ?? "",
         n = id ? await target(c, s, id) : 0
@@ -328,7 +360,7 @@ export function publicApi() {
         } else if (r.request) bad("Expected a JSON object")
         return c.json(await r.run(c, s, b, id, n, seed), r.status ?? 200)
       }
-      return r.method === "POST" ? replay(c, s, new URL(c.req.url).pathname, raw, run) : run()
+      return r.method === "POST" && r.path !== "/realtime" ? replay(c, s, new URL(c.req.url).pathname, raw, run) : run()
     })
   api.all("*", () => missing())
   return api

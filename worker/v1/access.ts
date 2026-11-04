@@ -1,7 +1,7 @@
 import type { EndUser } from "../../shared/v1"
 import type { Locale } from "../../shared/api"
 import { denied, fail, missing, sha256, sql, type Ctx } from "../core"
-import { enforce } from "../rate-limits"
+import { clientIP, enforce } from "../rate-limits"
 
 export type Auth = "public" | "key" | "publishable" | "session"
 type Workspace = {
@@ -109,7 +109,6 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
   if ("anonymous" in row && row.anonymous && !row.allow_anonymous)
     fail(403, "anonymous_disabled", "Anonymous sessions are disabled")
   if (auth === "publishable" && row.kind !== "publishable") denied()
-  await enforce(c, "RL_AGENT", "v1:key:" + row.key)
   const user: EndUser | null =
     row.actor !== null
       ? {
@@ -122,7 +121,19 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
           locale: row.locale
         }
       : null
-  if (user) await enforce(c, "RL_IP", "v1:session:" + hash)
+  if (user) {
+    const typing = c.req.path.endsWith("/typing"),
+      read = c.req.method === "GET" || c.req.method === "HEAD"
+    await enforce(
+      c,
+      read || typing ? "RL_V1_READ" : "RL_TEAM",
+      `v1:${typing ? "typing" : read ? "read" : "write"}:${hash}`
+    )
+  } else if (row.kind === "secret") {
+    if(c.req.path==='/v1/sessions')await enforce(c,'RL_TEAM',`v1:mint:${row.key}:${clientIP(c)}`)
+    await enforce(c, "RL_V1_SECRET", "v1:secret:" + row.key)
+  }
+  else await enforce(c, "RL_TEAM", `v1:mint:${row.key}:${clientIP(c)}`)
   await sql(
     env,
     "UPDATE api_keys SET last_used_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND (last_used_at IS NULL OR last_used_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'))",

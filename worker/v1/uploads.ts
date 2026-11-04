@@ -140,8 +140,36 @@ export async function upload(c: Ctx, s: Scope) {
   digest.digest.catch(() => {})
   await sql(env, "INSERT INTO api_upload_gc VALUES(?,unixepoch()+86400)", object).run()
   let claimed = false
+  let first = true
+  async function admit(part: Uint8Array) {
+    if (first && spec.kind === "video") {
+      const ascii = (offset: number, len: number) => String.fromCharCode(...part.subarray(offset, offset + len))
+      const container =
+        (part.length >= 12 && ascii(4, 4) === "ftyp") ||
+        (ascii(0, 4) === "RIFF" && ascii(8, 4) === "AVI ") ||
+        (part[0] === 0x1a &&
+          part[1] === 0x45 &&
+          part[2] === 0xdf &&
+          part[3] === 0xa3 &&
+          /webm|matroska/.test(ascii(4, 512))) ||
+        (ascii(0, 4) === "OggS" && ascii(4, 256).includes("theora"))
+      if (!container) fail(415, "unsupported_video", "Unknown video container")
+    }
+    first = false
+    const charge = (scope: string) =>
+      sql(
+        env,
+        "INSERT INTO api_upload_bytes VALUES(?,date('now'),?,?) ON CONFLICT(app_id,day,scope) DO UPDATE SET bytes=bytes+excluded.bytes",
+        s.app,
+        scope,
+        part.length
+      )
+    // Charge each admitted R2 part, including interrupted streams and retries. A
+    // failed budget check rolls back both counters before those bytes reach storage.
+    await env.DB.batch([liveGuard(c, s), charge("workspace"), charge(s.hash)])
+  }
   try {
-    const size = await chunked(env.MEDIA, object, stream, spec.mime, spec.limit, digest.getWriter()),
+    const size = await chunked(env.MEDIA, object, stream, spec.mime, spec.limit, digest.getWriter(), admit),
       fingerprint = JSON.stringify([spec.name, spec.mime, size, hex(await digest.digest)])
     return await replay(c, s, "/v1/uploads", fingerprint, async () => {
       await env.DB.batch([
@@ -176,6 +204,7 @@ export async function upload(c: Ctx, s: Scope) {
   }
 }
 export async function sweepUploads(env: Env) {
+  await sql(env, "DELETE FROM api_upload_bytes WHERE day<date('now')").run()
   const [, rs] = await env.DB.batch<{ object_key: string }>([
     sql(
       env,

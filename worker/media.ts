@@ -27,7 +27,8 @@ export async function chunked(
   body: ReadableStream<Uint8Array>,
   mime: string,
   limit: number,
-  digest?: WritableStreamDefaultWriter<ArrayBuffer | ArrayBufferView>
+  digest?: WritableStreamDefaultWriter<ArrayBuffer | ArrayBufferView>,
+  admit?:(part:Uint8Array)=>Promise<void>
 ) {
   const options = { httpMetadata: { contentType: mime } },
     reader = body.getReader(),
@@ -49,6 +50,7 @@ export async function chunked(
         used += n
         i += n
         if (used === buffer.length) {
+          if(admit)await admit(buffer)
           upload ??= await bucket.createMultipartUpload(key, options)
           parts.push(await upload.uploadPart(parts.length + 1, buffer))
           used = 0
@@ -56,6 +58,7 @@ export async function chunked(
       }
     }
     if (!size) bad("Empty upload")
+    if(used&&admit)await admit(buffer.subarray(0,used))
     if (upload) {
       if (used) parts.push(await upload.uploadPart(parts.length + 1, buffer.subarray(0, used)))
       await upload.complete(parts)
@@ -138,23 +141,24 @@ export const endUserMedia:MiddlewareHandler<Bindings>=async(c,next)=>{
   if ((c.req.method === "GET" || c.req.method === "HEAD") && c.req.query("sig") !== undefined) {
     c.header("Referrer-Policy", "no-referrer")
     c.header("Cache-Control", "private, max-age=0, must-revalidate")
-    await enforce(c, "RL_IP", "v1:media:" + clientIP(c))
+    await enforce(c, "RL_V1_IP", "v1:media:" + clientIP(c))
     const r = await serveFile(c, await signedFile(c, id, name), true)
     r.headers.set("Referrer-Policy", "no-referrer")
     r.headers.set("Cache-Control", "private, max-age=0, must-revalidate")
     return r
   }
   if(c.req.method==='OPTIONS'){
-    checkHost(c);await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const origin=c.req.header('Origin')
+    checkHost(c);const origin=c.req.header('Origin')
     if(!origin||c.req.header('Access-Control-Request-Method')!=='GET')missing()
     if (!(await preflightAllowed(c, origin))) missing()
     cors(c, origin)
     c.header("Access-Control-Allow-Headers", "Authorization, Range, If-None-Match")
     c.header("Access-Control-Allow-Methods", "GET")
+    c.header('Access-Control-Max-Age','86400')
     return c.body(null, 204)
   }
   if(!/^Bearer bh_us_/i.test(c.req.header('Authorization')??''))return next()
-  await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const s=await authorize(c,'session')
+  await enforce(c,'RL_V1_IP','v1:media:'+clientIP(c));const s=await authorize(c,'session')
   const file=await sql(c.env,`SELECT f.name,f.mime,f.kind,f.size,f.object_key FROM attachments f JOIN attachment_links l ON l.attachment_id=f.id JOIN issues i ON i.id=l.issue_id AND i.app_id=f.app_id LEFT JOIN comments m ON m.id=l.comment_id AND m.issue_id=i.id WHERE f.app_id=? AND f.id=? AND f.name=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND (l.comment_id IS NULL OR (m.internal=0 AND m.hidden IS NULL))`,s.app,id,name,s.user!.id).first<AttachmentRow&{object_key:string}>()??missing()
   const r=await serveFile(c,file,true);if(s.origin){r.headers.set('Access-Control-Allow-Origin',s.origin);r.headers.set('Vary','Origin')}return r
 }
