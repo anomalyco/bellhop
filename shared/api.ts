@@ -24,6 +24,12 @@
 //     also allow creating workspaces: the approving user owns them and the agent gets admin. Agent posts carry the AI
 //     badge.
 //
+// - contact: a requester in a help desk workspace (AppDetail.mode "helpdesk"). A per-workspace identity, never an
+//   account: signed in on that workspace's host with an email code, or by a host-signed identity token (the host
+//   app's own signed-in user, e.g. from Console or the chat widget). Signing in moves this browser's guest posts in
+//   that workspace to the contact, and the contact's requests follow them to any device. Signed-in contacts post
+//   without Turnstile. The workspace team and agents see a contact's email and external id; nobody else does.
+//
 // Routes (all under the Worker; everything else is the single-page app)
 //   GET    /api/config                                   -> Config
 //   GET    /api/me                                       -> Me
@@ -48,7 +54,8 @@
 //   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
-//   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days? } -> AppDetail   admin;
+//   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days?, mode?, helpdesk? }
+//          -> AppDetail   admin; mode "helpdesk" makes new issues private and hides the workspace (see Help desk);
 //          nudge_days (1-30, or null for off): email the reporter once when an issue has waited on them that many days.
 //          Never closes anything.
 //   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
@@ -183,6 +190,13 @@
 //   GET    /auth/google  ->  Google OAuth  ->  /auth/google/callback  (then redirect to ?next= or /)
 //   GET    /auth/dev?email=<email>&next=<path>           only when DEV_LOGIN=1
 //   POST   /auth/logout
+//   POST   /auth/email/start       { email }             -> { ok: true }       human; sends a same-browser sign-in code,
+//                                                                             or Google instructions for a linked account
+//   POST   /auth/email/verify      { email, code }       -> { ok: true }       use /api/me to read the session. Valid email
+//       codes create/sign in email-only accounts and send a new-sign-in notice. A verified Google sign-in links the
+//       same email; thereafter only Google can sign in. Wrong, expired or other-browser codes return 400 invalid_code.
+//   Sign-in and verification codes: 6 digits, valid 10 minutes, single use; 5 wrong tries end the code; rate limited
+//   per address, per IP and per workspace (429). The same answer whether or not the address has an account.
 //   POST   /mcp                                          MCP, Streamable HTTP, Authorization: Bearer <token>
 //                                                         (an app's agent token, or an OAuth access token; see below)
 //
@@ -205,6 +219,27 @@
 //   POST   /api/oauth/device/lookup { user_code }       -> { request_id }     signed in
 //   POST   /api/oauth/requests/:id/approve OAuthApproval -> { redirect_to: string | null }  null for device requests
 //   POST   /api/oauth/requests/:id/deny                 -> { redirect_to: string | null }
+// Help desk (AppDetail.mode "helpdesk"). Every request (issue) is private: a requester sees only their own, and the
+// workspace is never listed, indexed, in the feed, sitemaps, Atom or oEmbed. End-user surfaces never mention Bellhop
+// (page titles, emails and their sender name, previews). The team and agents work requests like any issue.
+//   POST   /api/apps/:slug/contact/start  { email }      -> { ok: true }       human; emails a sign-in code
+//   POST   /api/apps/:slug/contact/verify { email, code } -> Me               signs this browser in as that contact
+//   POST   /api/apps/:slug/identify       { token }      -> Me                 an IdentityToken from the host's server
+//   GET    /identify?token=<jwt>&next=<path>             read-only sign-in confirmation on the workspace host
+//   POST   /identify               form: token, next     same-origin consent, then 302 to a safe path. Neither link
+//                                                         step claims guest posts; only the JSON identify route does.
+//   POST   /api/apps/:slug/contact/sign-out              -> Me
+//   GET    /api/apps/:slug/contacts?q=&cursor=           -> ContactPage        team (viewer and up) and agents
+//   GET    /api/apps/:slug/contacts/:id                  -> ContactDetail      team and agents
+//   GET    /api/apps/:slug/identity-keys                 -> IdentityKey[]      admin
+//   POST   /api/apps/:slug/identity-keys { name }        -> NewIdentityKey     admin; the secret is only returned here
+//   DELETE /api/apps/:slug/identity-keys/:id             -> { ok: true }       admin
+// Email verification, in any workspace: someone on a request (the requester, the team, or an agent at responder)
+// asks to verify an address, e.g. "the email on your billing account". Bellhop emails it a code that only the
+// requester can enter; the request then shows the address as verified to the team and agents. Agents never see codes.
+//   POST   /api/apps/:slug/issues/:number/verifications { email }        -> Verification
+//   POST   /api/apps/:slug/issues/:number/verifications/:id/confirm { code } -> Verification   the requester
+//
 // Email (OpenSend, from mail.blhp.app). People get an email when someone else replies publicly or changes the
 // status on an issue they follow; replies within ~3 minutes are batched into one email. Accounts follow issues they
 // opened or replied to, and their @mentions and assignments (each switchable). Guests follow an issue by giving an
@@ -262,6 +297,7 @@ export interface ApiError {
 export interface Config {
   turnstile_site_key: string
   google_enabled: boolean
+  email_sign_in: boolean
   dev_login: boolean
 }
 
@@ -279,6 +315,8 @@ export interface Me {
   guest: { id: string; handle: string; name: string | null }
   /** True while the bh_human cookie is valid; otherwise run Turnstile and POST /api/human before writing. */
   human: boolean
+  /** The contact this browser is signed in as on this help desk's host; null elsewhere and when signed out. */
+  contact: Pick<Contact, "id" | "name" | "email" | "external_id" | "verified_via"> | null
 }
 
 export interface App {
@@ -345,6 +383,8 @@ export interface FeedList {
 }
 
 export interface AppDetail extends App {
+  /** Admins only. Operator-set in D1 (no API write); permits using the workspace name alone as its mail sender. */
+  readonly trusted?: boolean
   labels: Label[]
   templates: Template[]
   /** What the viewer can see: includes private issues only for the team. */
@@ -352,6 +392,86 @@ export interface AppDetail extends App {
   visibility: AppVisibility
   /** Days before a waiting-on-reporter issue sends its reporter one reminder; null when off. */
   nudge_days: number | null
+  mode: AppMode
+  helpdesk: HelpdeskSettings
+}
+
+/** A public issue tracker (the default), or a private, white-label help desk. */
+export type AppMode = "tracker" | "helpdesk"
+
+export interface HelpdeskSettings {
+  /** Requesters must be a verified contact (email code or host identity) before submitting. Default true. */
+  require_verified_email: boolean
+}
+
+/** How a contact proved who they are: an email code, or the host app's signed identity token. */
+export type ContactVerification = "email" | "host"
+
+/** A requester in a help desk workspace. Visible only to that workspace's team and agents. */
+export interface Contact {
+  id: string
+  name: string | null
+  /** A verified email: from a sign-in code, or an identity token with email_verified. */
+  email: string | null
+  /** Display only. An email asserted by the host without verification; never used to link contacts or deliver mail. */
+  unverified_email: string | null
+  /** The host app's user id, from an identity token's `sub`. */
+  external_id: string | null
+  verified_via: ContactVerification | null
+  created_at: string
+  last_seen_at: string | null
+}
+
+export interface ContactDetail extends Contact {
+  requests: IssueSummary[]
+}
+
+export interface ContactPage {
+  contacts: Contact[]
+  next_cursor: string | null
+}
+
+/** A secret the host app's server signs identity tokens with. Never shipped to browsers.
+ * Revocation rejects future handoffs; it does not end sessions already issued. */
+export interface IdentityKey {
+  id: string
+  name: string
+  /** e.g. "bh_id_…3f9a". */
+  preview: string
+  created_at: string
+  last_used_at: string | null
+}
+
+export interface NewIdentityKey extends IdentityKey {
+  secret: string
+}
+
+/**
+ * The claims of an identity token: a JWT signed HS256 with an IdentityKey's secret, header `kid` = the key id. Made
+ * on the host app's server for its signed-in user. Single use (jti); exp at most 10 minutes after iat.
+ */
+export interface IdentityToken {
+  /** The host app's user id; becomes Contact.external_id. */
+  sub: string
+  /** The workspace slug. */
+  aud: string
+  email?: string
+  /** The host has verified `email`, so the contact counts as verified by email too. */
+  email_verified?: boolean
+  name?: string
+  iat: number
+  exp: number
+  jti: string
+}
+
+/** An email address someone on a request asked to verify. */
+export interface Verification {
+  id: string
+  email: string
+  state: "pending" | "verified" | "expired" | "failed"
+  requested_by: Actor
+  created_at: string
+  verified_at: string | null
 }
 
 export interface ImportJob {
@@ -775,6 +895,10 @@ export interface Issue extends IssueSummary {
   imported: { source: "github"; url: string; number: number } | null
   /** The reporter's interface language when they opened it (agents can reply in it); null for older issues. */
   reporter_locale: Locale | null
+  /** Help desk requests: the requester's contact, for the team and agents (null otherwise). */
+  contact: Contact | null
+  /** Email verifications on this request, for the requester, the team and agents (empty for anyone else). */
+  verifications: Verification[]
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
   /** @mentions in the body. */
@@ -858,6 +982,7 @@ export interface Comment {
 }
 
 export type IssueEventType =
+  | "verified" // data: { verification_id }; requester/team only, no email or code in the event
   | "nudged" // team-only: the waiting reporter was sent a reminder
   | "status_changed" // data: { from: IssueStatus, to: IssueStatus, close_reason: CloseReason | null }
   // Events a tier rule caused (labels and assignee on a tiered person's new issue) carry data.rule
@@ -936,6 +1061,7 @@ export type WebhookEventType =
   | "comment.edited"
   | "comment.deleted"
   | "mention.created"
+  | "verification.completed" // verification in `verification` (verified, or failed/expired)
 
 /** What a webhook gets until its events are changed (the behaviour before events were selectable). */
 export const DEFAULT_WEBHOOK_EVENTS: WebhookEventType[] = ["issue.opened", "issue.updated", "comment.created", "mention.created"]
@@ -962,6 +1088,10 @@ export interface WebhookPayload {
   redelivery_of?: string
   /** For issue.opened / comment.created: report metadata attached to that post (team-facing). */
   metadata?: ReportMetadata[]
+  /** Help desk requests: the requester's contact. */
+  contact?: Contact
+  /** For verification.completed. */
+  verification?: Verification
   mcp_url: string
 }
 
@@ -979,6 +1109,10 @@ export interface WebhookPayload {
 //   get_metadata   { id }                        report metadata: specs, context, log attachments, fingerprint, matches
 //   list_saved_replies {}                        saved replies; use one by posting its body via comment
 //   get_analytics  { days? }                     the workspace's Analytics (member)
+//   get_contact    { id? | email? | external_id? }  a help desk contact with their requests (get_issue and
+//                                                  list_issues carry the requester's contact and verifications)
+//   request_verification { number, email }       responder; emails that address a code only the requester can
+//                                                  enter; the result arrives on the issue and as verification.completed
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)

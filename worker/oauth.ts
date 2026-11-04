@@ -201,7 +201,7 @@ oauth.post("/oauth/register", async (c) => {
 oauth.get("/oauth/authorize", async (c) => {
   const invalidPage = () =>
     c.html(
-      '<!doctype html><html lang="en"><head><title>Invalid authorization request · Bellhop</title></head><body><h1>Invalid authorization request</h1><p>Return to your app and start again.</p></body></html>',
+      '<!doctype html><html lang="en"><head><title>Invalid authorization request</title></head><body><h1>Invalid authorization request</h1><p>Return to your app and start again.</p></body></html>',
       400,
       {
         "Cache-Control": "no-store",

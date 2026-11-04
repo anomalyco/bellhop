@@ -26,13 +26,13 @@ export async function pagePayload(
     time = now(),
     q = query.get("q") ?? undefined,
     state = query.get("state") ?? undefined
-  const session = Promise.resolve(userBySession(c, hash, read)).then((user) => {
+  const session = Promise.resolve(userBySession(c, hash, read, slug)).then((user) => {
     c.set("user", user)
     shareSession(c)
     return user
   })
   const name = c.var.existingGuest ? guestName(c, read) : Promise.resolve(null)
-  const identity = Promise.all([session, name]).then(([, n]) => me(c, n))
+  const identity = Promise.all([session, name]).then(([, n]) => me(c, n, undefined, slug))
   const location = path.replace(/\/$/, "") || "/"
   let app: PagePayload["app"] = null,
     status: PageResult["status"] = 200

@@ -11,6 +11,10 @@ export type Bindings = {
     aliases: string[]
     user: User | null
     accountLocale: Locale | null
+    contact: Me["contact"]
+    contactReads: Map<string, Promise<import("./contact-session").ContactIdentity | null>>
+    desk: boolean
+    requireContact: boolean
     app: App
     actor: Actor
   }
@@ -99,6 +103,11 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("code_limit")) return new ApiFailure(429, "code_limit", "Too many code requests; try later")
+  if (message.includes("verified contact required"))
+    return new ApiFailure(401, "contact_required", "Sign in to submit a request")
+  if (message.includes("help desk requests are private"))
+    return new ApiFailure(400, "private_required", "Help desk requests must stay private")
   if (message.includes("confirmation_daily_limit"))
     return new ApiFailure(429, "confirmation_daily_limit", "Daily confirmation email limit reached")
   if (message.includes("report_daily_limit"))

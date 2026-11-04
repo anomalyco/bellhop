@@ -107,7 +107,7 @@ media.post("/api/apps/:slug/uploads", async (c) => {
       kind,
       now()
     )
-    if (actor.type === "guest") await env.DB.batch([insert, guestWrite(env, c.var.guestHash)])
+    if (actor.type === "guest" && !c.var.contact) await env.DB.batch([insert, guestWrite(env, c.var.guestHash)])
     else await insert.run()
   } catch (e) {
     await env.MEDIA.delete(key)

@@ -35,6 +35,7 @@ import { enqueueWebhooks } from "./webhooks"
 import { entry, recorded, auditActor, targetEntry } from "./audit"
 import { attachReport, getReport } from "./report-data"
 import { requestLocale } from "./locale"
+import { contactActor } from "./contact-session"
 
 export interface Access {
   env: Env
@@ -47,6 +48,7 @@ export interface Access {
   role: App["role"] | AgentRole
   origin: string
   locale?: Locale
+  desk?: boolean
 }
 function access(c: Ctx): Access {
   return {
@@ -54,10 +56,11 @@ function access(c: Ctx): Access {
     ctx: c.executionCtx,
     app: c.var.app,
     actor: c.var.actor,
-    guestHash: c.var.guestHash,
+    guestHash: c.var.contact ? undefined : c.var.guestHash,
     aliases: c.var.aliases,
     role: c.var.app.role,
     locale: requestLocale(c).locale,
+    desk: c.var.desk,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
@@ -66,7 +69,7 @@ const who = (a: Access) => ({
   actorId: a.actor.id,
   aliases: a.aliases,
   team: can(a.role, "read"),
-  voter: a.actor.type === "guest" ? "g:" + a.guestHash : a.actor.id
+  voter: !a.desk && a.actor.type === "guest" && a.guestHash ? "g:" + a.guestHash : a.actor.id
 })
 const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, who(a))
 const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a), who(a))
@@ -85,7 +88,7 @@ function guestNameGuard(a: Access) {
           JSON.stringify(actorIds(who(a)))
         )
       ]
-  return a.actor.type === "guest"
+  return a.actor.type === "guest" && a.guestHash
     ? [
         ...guard,
         sql(a.env, "UPDATE guest_names SET name=NULL WHERE guest_hash=? AND name IS NOT ?", a.guestHash, a.actor.name),
@@ -176,7 +179,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
     sql(
       env,
       `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,reporter_locale,private,mentions,assignee,reply_tier_id)
-    SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,?,CASE WHEN t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
+    SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,?,CASE WHEN a.mode='helpdesk' OR t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
       (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id),
       CASE WHEN t.agents_reply=0 THEN t.id END FROM apps a LEFT JOIN reporter_tiers t ON t.app_id=a.id AND t.actor_id=? WHERE a.id=? RETURNING number`,
       id,
@@ -199,7 +202,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
     ...guestNameGuard(a)
   ]
   const templateEvents = new Set<string>()
-  if (actor.type === "guest")
+  if (actor.type === "guest" && a.guestHash)
     q.push(
       sql(
         env,
@@ -728,7 +731,7 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
       ),
       sql(
         a.env,
-        `UPDATE issues SET app_id=?1,number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,reply_tier_id=NULL,activity=NULL,
+        `UPDATE issues SET app_id=?1,private=max(private,(SELECT mode='helpdesk' FROM apps WHERE id=?1)),number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,reply_tier_id=NULL,activity=NULL,
       assignee=CASE WHEN json_extract(assignee,'$.id') IN(SELECT user_id FROM members WHERE app_id=?1 UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL) THEN assignee END,
       updated_at=max(updated_at,?2),revision=CASE WHEN revision=?3 AND app_id=?4 AND number=?5 THEN revision+1 END WHERE id=?6 RETURNING number`,
         dest.id,
@@ -1300,8 +1303,18 @@ issues.delete("/api/apps/:slug/blocks/:id", async (c) => {
   return c.json({ ok: true })
 })
 issues.post(base, async (c) => {
+  if (c.var.desk && c.var.requireContact && !c.var.contact) fail(401, "contact_required", "Sign in to submit a request")
   const b = await postBody(c)
-  return c.json(await createIssue(access(c), b), 201)
+  const a = access(c)
+  // Staff keep their team permissions for support work. Submitting through the
+  // verified-requester form always uses the contact, not the staff identity.
+  if (c.var.contact && c.var.requireContact) {
+    a.actor = contactActor(c.var.contact)
+    a.role = null
+    a.aliases = []
+    a.guestHash = undefined
+  }
+  return c.json(await createIssue(a, b), 201)
 })
 issues.patch(path, async (c) => {
   await allowWrite(c)

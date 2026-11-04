@@ -67,11 +67,32 @@ export async function provider<T>(env: Env, path: string, init?: RequestInit): P
   return res.json<T>()
 }
 type Letter = { to: string; fromName: string; replyTo?: string[]; subject: string; html: string; text: string }
-export async function sendMail(env: Env, id: string, letter: Letter) {
-  const body = { ...letter, from: "notifications@mail.blhp.app", kind: "transactional", tracking: false, screen: true }
+export const cleanSender = (s: string) =>
+  s
+    .replace(/[<>"@,;\p{Cc}\p{Cf}\u2028\u2029]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim() || "Workspace"
+export const workspaceSender = (name: string, trusted: boolean) => cleanSender(name) + (trusted ? "" : " via Bellhop")
+export const emailConfigured = (env: Env) =>
+  !!secrets(env).OPENSEND_API_KEY &&
+  (devMail(env)
+    ? /^os_test_[a-f0-9]{64}$/i.test(secrets(env).OPENSEND_API_KEY!)
+    : (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY === "live")
+export async function sendMail(env: Env, id: string, letter: Letter, redactCode?: string) {
+  const body = {
+    ...letter,
+    fromName: cleanSender(letter.fromName),
+    from: "notifications@mail.blhp.app",
+    kind: "transactional",
+    tracking: false,
+    screen: true
+  }
   let providerId: string
   if (!secrets(env).OPENSEND_API_KEY && env.DEV_LOGIN === "1" && !env.APP_DOMAIN) {
-    console.log("bellhop.dev_mail", JSON.stringify(body))
+    console.log(
+      "bellhop.dev_mail",
+      redactCode ? JSON.stringify(body).replaceAll(redactCode, "[redacted]") : JSON.stringify(body)
+    )
     providerId = "logged_" + id
   } else if (env.APP_DOMAIN && (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY !== "live") {
     // Production holds outgoing mail until Ryan turns delivery on (MAIL_DELIVERY=live). Held mail counts as sent, so

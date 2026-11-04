@@ -3,6 +3,7 @@ import { fail, memberActor, now, rows, scopedGuestId, sha256, sql } from "./core
 import type { Ctx, User } from "./core"
 import { actorUpdated } from "./events"
 import { requestLocale } from "./locale"
+import { contactActor } from "./contact-session"
 
 export async function reportActors(c: Ctx, cookies: string[]) {
   const found = await Promise.all(
@@ -57,7 +58,7 @@ async function* scopes(c: Ctx, user?: User) {
       sql(
         c.env,
         `SELECT a.id,m.role FROM apps a LEFT JOIN members m ON m.app_id=a.id AND m.user_id=?
-       WHERE a.id>? ${user ? "" : "AND a.issue_seq>0"} ORDER BY a.id LIMIT 128`,
+       WHERE a.id>? ${user ? "AND a.mode='tracker'" : "AND a.issue_seq>0"} ORDER BY a.id LIMIT 128`,
         user?.id ?? null,
         after
       )
@@ -239,6 +240,79 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
   }
 }
 
+export async function claimContactGuest(
+  c: Ctx,
+  contact: NonNullable<import("../shared/api").Me["contact"]>,
+  app = c.var.app.id
+) {
+  if (!c.var.existingGuest) return
+  if (!contact.name) {
+    const row = await sql(
+      c.env,
+      `UPDATE contacts SET name=coalesce(name,(SELECT name FROM guest_names WHERE guest_hash=?)) WHERE app_id=? AND id=? RETURNING name`,
+      await sha256(c.var.guestId),
+      app,
+      contact.id
+    ).first<{ name: string | null }>()
+    contact.name = row?.name ?? null
+  }
+  const previous = await scopedGuestId(c.var.guestId, app),
+    actor = contactActor(contact),
+    json = JSON.stringify(actor)
+  const [hits] = await c.env.DB.batch<RoomHit>([
+    affectedRooms(c.env, JSON.stringify([previous]), app),
+    ...locations.map((s) => {
+      const named = contact.name ? "?" : `json_set(?,'$.name',json_extract(${s.col},'${s.path}.name'))`
+      return sql(
+        c.env,
+        `UPDATE ${s.table} SET ${s.col}=${s.col === "activity" ? `json_set(activity,'$.actor',json(${named}))` : named}${s.table === "issues" && s.col === "author" ? ",revision=revision+1" : ""} WHERE ${s.id}=? AND ${s.guest} AND ${s.table === "issues" ? "app_id=?" : `EXISTS(SELECT 1 FROM issues i WHERE i.id=${s.table}.issue_id AND i.app_id=?)`}`,
+        json,
+        previous,
+        app
+      )
+    }),
+    sql(c.env, "UPDATE attachments SET owner_id=? WHERE owner_id=? AND app_id=?", contact.id, previous, app),
+    sql(
+      c.env,
+      "INSERT OR IGNORE INTO blocks SELECT lower(hex(randomblob(16))),app_id,?,?,moderator,created_at FROM blocks WHERE app_id=? AND actor_id=?",
+      contact.id,
+      json,
+      app,
+      previous
+    ),
+    sql(
+      c.env,
+      "INSERT OR IGNORE INTO tier_assignments(app_id,tier_id,actor_id) SELECT app_id,tier_id,? FROM tier_assignments WHERE app_id=? AND actor_id=?",
+      contact.id,
+      app,
+      previous
+    ),
+    sql(c.env, "DELETE FROM tier_assignments WHERE app_id=? AND actor_id=?", app, previous),
+    sql(
+      c.env,
+      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,address,state,reason,locale) SELECT s.issue_id,?,s.address,s.state,'manual',s.locale FROM mail_subs s JOIN issues i ON i.id=s.issue_id WHERE i.app_id=? AND s.actor_id=? AND s.address=? AND s.state IN ('on','off')`,
+      contact.id,
+      app,
+      previous,
+      contact.email
+    ),
+    sql(
+      c.env,
+      "DELETE FROM mail_subs WHERE actor_id=? AND issue_id IN(SELECT id FROM issues WHERE app_id=?)",
+      previous,
+      app
+    ),
+    sql(
+      c.env,
+      "DELETE FROM guest_report_authors WHERE actor_id=? AND NOT EXISTS(SELECT 1 FROM issues WHERE json_extract(author,'$.id')=?)",
+      previous,
+      previous
+    )
+  ])
+  if (hits!.results.length)
+    actorUpdated(c.env, c.executionCtx, app, [...new Set(hits!.results.map((r) => r.issue_id))], previous, actor)
+}
+
 export async function claimGuest(c: Ctx, user: User) {
   const hash = await sha256(c.var.guestId)
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -272,7 +346,7 @@ export async function claimGuest(c: Ctx, user: User) {
             sql(
               c.env,
               `SELECT DISTINCT i.app_id id,m.role FROM issue_moves mv JOIN issues i ON i.id=mv.issue_id
-          LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=? WHERE mv.from_app=? AND i.app_id!=?`,
+          LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=? WHERE mv.from_app=? AND i.app_id!=? AND i.app_id IN(SELECT id FROM apps WHERE mode='tracker')`,
               user.id,
               g.id,
               g.id

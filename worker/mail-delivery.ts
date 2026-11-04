@@ -1,7 +1,16 @@
 import { appUrl, rows, sql } from "./core"
 import type { Locale, IssueStatus } from "../shared/api"
 import { mailCopy, formatMail } from "./mail-copy"
-import { esc, mailOrigin, mailToken, sendMail, unsubscribeURL, ProviderError, type TokenRow } from "./mail-provider"
+import {
+  esc,
+  mailOrigin,
+  mailToken,
+  sendMail,
+  workspaceSender,
+  unsubscribeURL,
+  ProviderError,
+  type TokenRow
+} from "./mail-provider"
 
 export async function enqueueDue(env: Env) {
   const at = Math.floor(Date.now() / 1000)
@@ -23,6 +32,8 @@ export async function enqueueDue(env: Env) {
     await env.MAIL.sendBatch(jobs.map((j) => ({ body: { id: j.id }, delaySeconds: Math.max(0, j.due - at) })))
 }
 type Recipient = TokenRow & {
+  mode: string
+  trusted: number
   locale: Locale
   address: string
   name: string
@@ -42,7 +53,7 @@ export async function deliverBatch(env: Env, id: string) {
     ),
     sql(
       env,
-      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.name,a.slug,coalesce(u.locale,p.locale,'en') locale FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id WHERE b.id=? AND b.sealed=1 AND p.state='on'`,
+      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.mode,a.trusted,a.name,a.slug,coalesce(u.locale,p.locale,'en') locale FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id WHERE b.id=? AND b.sealed=1 AND p.state='on' AND (a.mode='tracker' OR p.user_id IS NULL OR p.role IS NOT NULL)`,
       id
     ),
     sql(
@@ -98,11 +109,11 @@ export async function deliverBatch(env: Env, id: string) {
     const clean = (s: string) => s.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim()
     await sendMail(env, "bellhop-" + id, {
       to: p.address,
-      fromName: formatMail(copy.sender, { app: clean(p.name) }),
+      fromName: workspaceSender(p.name, !!p.trusted),
       subject: formatMail(copy.subject, { title: clean(p.title), number: p.number, app: clean(p.name) }),
       replyTo: [`reply+${reply}@mail.blhp.app`],
-      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">${esc(formatMail(copy.view, { number: p.number }))}</a></p><p>${esc(instruction)}</p><p><a href="${esc(off)}">${esc(copy.unsubscribe)}</a> · <a href="${esc(all)}">${esc(copy.stop)}</a></p>`,
-      text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\n${copy.unsubscribe}: ${off}\n${copy.stop}: ${all}`
+      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">${esc(formatMail(copy.view, { number: p.number }))}</a></p><p>${esc(instruction)}</p><p><a href="${esc(off)}">${esc(copy.unsubscribe)}</a>${p.mode === "helpdesk" ? "" : ` · <a href="${esc(all)}">${esc(copy.stop)}</a>`}</p>`,
+      text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\n${copy.unsubscribe}: ${off}${p.mode === "helpdesk" ? "" : `\n${copy.stop}: ${all}`}`
     })
     if (nudge)
       await sql(

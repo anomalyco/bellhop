@@ -35,7 +35,8 @@ export const webhookEvents = [
   "issue.deleted",
   "issue.moved",
   "comment.edited",
-  "comment.deleted"
+  "comment.deleted",
+  "verification.completed"
 ] satisfies WebhookEventType[]
 
 // Read the destination in the same transaction as the action. webhookUrl stores
@@ -113,7 +114,10 @@ interface Job {
   destinationHash: string
 }
 
-export type Hook = Pick<WebhookPayload, "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to"> & {
+export type Hook = Pick<
+  WebhookPayload,
+  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification"
+> & {
   transition?: Partial<Pick<IssueSummary, "assignee" | "status" | "close_reason">>
 }
 // Ping is an explicit admin test, not an automatic subscription.
@@ -129,10 +133,11 @@ export async function enqueueWebhooks(
   if (!events.length) return []
   const settings = await sql(
     env,
-    `SELECT url,events,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    `SELECT url,events,(SELECT json_object('id',t.id,'name',t.name,'email',t.email,'unverified_email',t.unverified_email,'external_id',t.external_id,'verified_via',t.verified_via,'created_at',t.created_at,'last_seen_at',t.last_seen_at) FROM contacts t JOIN apps a ON a.id=t.app_id WHERE a.mode='helpdesk' AND t.app_id=s.app_id AND t.id=?) contact,(SELECT count(*) FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.id=? AND i.app_id=s.app_id) comment_count FROM webhook_settings s WHERE app_id=? AND url IS NOT NULL`,
+    issue?.author.id ?? null,
     issue?.id ?? null,
     app.id
-  ).first<{ url: string; events: string; comment_count: number }>()
+  ).first<{ url: string; events: string; comment_count: number; contact: string | null }>()
   if (!settings) return []
   const enabled = new Set<string>(JSON.parse(settings.events)),
     selected = events.filter((e) => e.type === "ping" || enabled.has(e.type))
@@ -151,6 +156,7 @@ export async function enqueueWebhooks(
   const { base, hooks } = await teamProjection(env, app.id, {
     base: {
       actor,
+      ...(settings.contact && { contact: JSON.parse(settings.contact) }),
       ...(issue
         ? {
             issue: {
@@ -177,7 +183,7 @@ export async function enqueueWebhooks(
           ? m.attached_to!.comment_id === null
           : hook.type === "comment.created" && m.attached_to!.comment_id === hook.comment?.id
       )
-      const id = uid(),
+      const id = hook.verification ? "vr-" + hook.verification.id : uid(),
         created_at = now(),
         payload: WebhookPayload & { metadata?: typeof metadata } = {
           ...base,
@@ -197,7 +203,7 @@ export async function enqueueWebhooks(
             : "(?7 IS NULL OR EXISTS(SELECT 1 FROM issues WHERE app_id=?2 AND id=?7))"
       const statement = sql(
         env,
-        `INSERT INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?1,s.app_id,?3,?4,?5 FROM webhook_settings s
+        `INSERT ${hook.verification ? "OR IGNORE " : ""}INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?1,s.app_id,?3,?4,?5 FROM webhook_settings s
       WHERE s.app_id=?2 AND s.url=?6 AND ${subscribed("?3")} AND ${gate}
       AND (?9 IS NULL OR ${hook.type === "comment.deleted" ? "NOT " : ""}EXISTS(SELECT 1 FROM comments WHERE id=?9 AND issue_id=?7))`,
         id,
@@ -214,12 +220,24 @@ export async function enqueueWebhooks(
     })
     const result = await env.DB.batch([
       ...pending.map((p) => p.statement),
+      ...(events.length === 1 && events[0]!.verification
+        ? [
+            sql(
+              env,
+              "UPDATE verification_outbox SET destination_hash=? WHERE id=? AND changes()>0",
+              destinationHash,
+              events[0]!.verification.id
+            )
+          ]
+        : []),
       ...(events.length === 1 && events[0]!.type === "ping"
         ? [hookEntry(env, app.id, actor, "webhook.tested", { type: "delivery", id: pending[0]!.id })]
         : [])
     ])
     const added = pending.flatMap((p, i) => (result[i]!.meta.changes ? [p.id] : []))
-    await sendJobs(env, added, destinationHash)
+    // Verification completion has a transactional outbox. Its dispatcher sends
+    // the persisted ID/hash pair and only then removes the recovery record.
+    if (!events[0]?.verification) await sendJobs(env, added, destinationHash)
     ids.push(...added)
   }
   return ids

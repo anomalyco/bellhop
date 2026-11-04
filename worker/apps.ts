@@ -50,6 +50,7 @@ import {
 import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
 import { mentionables } from "./conversation"
+import { activeContact, contactActor, hostWorkspace } from "./contact-session"
 const originScopes = `(SELECT json_group_array(DISTINCT mv.from_app) FROM issue_moves mv WHERE mv.current_app=a.id)`
 const aliasesFor = (cookie: string | null, origins: string) =>
   Promise.all((cookie ? (JSON.parse(origins) as string[]) : []).map((id) => scopedGuestId(cookie!, id)))
@@ -61,11 +62,20 @@ export async function viewerApp(
   ownCookies?: string[],
   page?: { hash: string | null; cookie: string; read: Read }
 ) {
+  const host = c.env.APP_DOMAIN && hostWorkspace(c)
+  if (
+    host &&
+    host !== slug &&
+    (await sql(c.env, "SELECT 1 FROM apps WHERE slug IN (?,?) AND mode='helpdesk' LIMIT 1", host, slug).first())
+  )
+    missing()
   const hash = page ? page.hash : await sessionHash(c),
-    row = await firstRow<AppRow & { user_id: string | null; origins: string }>(
+    row = await firstRow<
+      AppRow & { mode: string; require_verified_email: number; user_id: string | null; origins: string }
+    >(
       sql(
         c.env,
-        `SELECT ${appCols},m.role,s.user_id,CASE WHEN ${ownCookies?.length ? "1" : "s.user_id IS NULL"} THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
+        `SELECT ${appCols},a.mode,a.require_verified_email,m.role,s.user_id,CASE WHEN a.mode='tracker' AND (${ownCookies?.length ? "1" : "s.user_id IS NULL"}) THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
         hash,
         now(),
@@ -74,50 +84,56 @@ export async function viewerApp(
       page?.read
     )
   if (!row) missing()
-  const { user_id, origins, ...rest } = row,
+  const { user_id: account, origins, mode, require_verified_email, ...rest } = row,
     app = fromAppRow(rest),
-    cookie = page?.cookie ?? browserGuest(c)
-  const actorId = user_id ?? (cookie ? await scopedGuestId(cookie, app.id) : null)
+    desk = mode === "helpdesk",
+    user_id = desk && !app.role ? null : account,
+    identity = desk ? await activeContact(c, slug) : null,
+    cookie = page?.cookie ?? browserGuest(c) ?? c.var.guestId
+  const actorId = user_id ?? identity?.contact.id ?? (cookie ? await scopedGuestId(cookie, app.id) : null)
   const baseViewer = {
     team: can(app.role, "read"),
     actorId,
     aliases: await aliasesFor(user_id ? null : cookie, origins),
-    voter: user_id ?? (cookie ? "g:" + (await sha256(cookie)) : null)
+    voter: user_id ?? identity?.contact.id ?? (desk ? actorId : cookie ? "g:" + (await sha256(cookie)) : null)
   }
   return {
     app,
+    desk,
+    requireContact: !!require_verified_email,
+    contact: identity?.contact ?? null,
     baseViewer,
     viewer: {
       ...baseViewer,
-      aliases: ownCookies?.length
-        ? (
-            await Promise.all(
-              ownCookies.map(async (raw) => [await scopedGuestId(raw, app.id), ...(await aliasesFor(raw, origins))])
-            )
-          ).flat()
-        : baseViewer.aliases
+      aliases:
+        !desk && ownCookies?.length
+          ? (
+              await Promise.all(
+                ownCookies.map(async (raw) => [await scopedGuestId(raw, app.id), ...(await aliasesFor(raw, origins))])
+              )
+            ).flat()
+          : baseViewer.aliases
     },
     user: user_id,
-    session: user_id ? hash : null
+    session: user_id ? hash : (identity?.hash ?? null)
   }
 }
 
 export async function loadApp(c: Ctx) {
-  const { origins, ...row } =
-    (await sql(
-      c.env,
-      `SELECT ${appCols},m.role,${c.var.user ? "'[]'" : originScopes} origins FROM apps a LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
-      c.var.user?.id ?? null,
-      c.req.param("slug")
-    ).first<AppRow & { origins: string }>()) ?? missing()
-  const app = fromAppRow(row)
+  const { app, viewer, desk, requireContact, contact } = await viewerApp(c, c.req.param("slug")!)
   c.set("app", app)
-  if (!c.var.user) c.set("aliases", await aliasesFor(c.var.guestId, origins))
+  c.set("desk", desk)
+  c.set("requireContact", requireContact)
+  c.set("contact", contact)
+  c.set("aliases", viewer.aliases)
+  if (desk && !app.role) c.set("user", null)
   c.set(
     "actor",
     c.var.user
       ? memberActor(c.var.user, app.role)
-      : await guestActor(c, app.id, !["GET", "HEAD"].includes(c.req.method))
+      : contact
+        ? contactActor(contact)
+        : await guestActor(c, app.id, !["GET", "HEAD"].includes(c.req.method))
   )
 }
 export const labelCols = "id,name,color,description"
@@ -159,7 +175,14 @@ export async function detail(
       Label,
       StoredTemplate,
       AppDetail["counts"],
-      { default_private: number; reporter_can_choose: number; nudge_days: number | null }
+      {
+        default_private: number
+        reporter_can_choose: number
+        nudge_days: number | null
+        mode: AppDetail["mode"]
+        require_verified_email: number
+        trusted: number
+      }
     ]
   >(
     c.env,
@@ -174,7 +197,11 @@ export async function detail(
         scope,
         ...actorBindings(viewer)
       ),
-      sql(c.env, "SELECT default_private,reporter_can_choose,nudge_days FROM apps WHERE id=?", scope)
+      sql(
+        c.env,
+        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,trusted FROM apps WHERE id=?",
+        scope
+      )
     ],
     read
   )
@@ -185,7 +212,13 @@ export async function detail(
     templates: ts.map(template),
     counts: totals[0]!,
     nudge_days: v.nudge_days,
-    visibility: { default: v.default_private ? "private" : "public", reporter_can_choose: !!v.reporter_can_choose }
+    mode: v.mode,
+    ...(can(target.role, "setup") && { trusted: !!v.trusted }),
+    helpdesk: { require_verified_email: !!v.require_verified_email },
+    visibility: {
+      default: v.default_private || v.mode === "helpdesk" ? "private" : "public",
+      reporter_can_choose: v.mode === "tracker" && !!v.reporter_can_choose
+    }
   }
 }
 export function webhookDeliveries(env: Env, id: string) {
@@ -357,6 +390,10 @@ function publicFlag(v: unknown) {
   return v
 }
 export async function updateApp(env: Env, app: App, actor: Actor, b: Record<string, unknown>): Promise<App> {
+  if (b.trusted !== undefined) bad("trusted is read-only")
+  const mode = b.mode === undefined ? null : choice(b.mode, ["tracker", "helpdesk"] as const, "mode"),
+    desk = b.helpdesk === undefined ? null : input(b.helpdesk)
+  if (desk && typeof desk.require_verified_email !== "boolean") bad("Invalid require_verified_email")
   const v = b.visibility === undefined ? null : input(b.visibility)
   const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
   if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
@@ -370,14 +407,17 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const change = sql(
     env,
-    `UPDATE apps SET nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
+    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
     WHERE id=? RETURNING name,description,public`,
+    mode,
+    desk ? Number(desk.require_verified_email) : null,
     Number(days !== undefined),
     days ?? null,
     def === null ? null : Number(def === "private"),
     v ? Number(v.reporter_can_choose) : null,
     b.name === undefined ? null : str(b.name, "name", 120).trim(),
     b.description === undefined ? null : str(b.description, "description", 4000, true),
+    mode,
     b.public === undefined ? null : Number(publicFlag(b.public)),
     app.id
   )
@@ -389,7 +429,11 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
       actor,
       "app.updated",
       { type: "app", id: app.id },
-      { fields: ["name", "description", "public", "visibility", "nudge_days"].filter((k) => b[k] !== undefined) }
+      {
+        fields: ["name", "description", "public", "visibility", "nudge_days", "mode", "helpdesk"].filter(
+          (k) => b[k] !== undefined
+        )
+      }
     )
   ).results[0]
   return { ...app, ...fromAppRow(changed ?? missing()) }

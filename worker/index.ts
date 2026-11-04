@@ -3,6 +3,10 @@ import { bodyLimit } from "hono/body-limit"
 import { apps, detail, loadApp, viewerApp } from "./apps"
 import { auth, browserGuest, currentUser, firstContact, reportCookies, sessionHash } from "./auth"
 import { reportActors } from "./guest-history"
+import { helpdesk, processVerifications } from "./helpdesk"
+import { handoff } from "./identity"
+import { identityKeys } from "./identity-keys"
+import { hostWorkspace } from "./contact-session"
 import { clientIP, enforce, workspaceLimit } from "./rate-limits"
 import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
 import type { Bindings, Ctx } from "./core"
@@ -94,6 +98,14 @@ const writeLimit =
 api.on("POST", [writeBase, `${post}/comments`, ...marks], writeLimit())
 api.on("DELETE", marks, writeLimit())
 api.post("/api/apps/:slug/uploads", writeLimit(true))
+api.on(
+  "POST",
+  ["/auth/email/start", "/api/apps/:slug/contact/start", "/api/apps/:slug/issues/:number/verifications"],
+  async (c, next) => {
+    await enforce(c, "RL_IP", "code-start:" + clientIP(c))
+    await next()
+  }
+)
 api.post("/api/human", async (c, next) => {
   await enforce(c, "RL_HUMAN", clientIP(c))
   await next()
@@ -133,6 +145,21 @@ api.get("/api/feed", async (c) =>
 )
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
 api.get("/api/me/reports", async (c) => {
+  const slug = hostWorkspace(c)
+  if (slug && (await sql(c.env, "SELECT 1 FROM apps WHERE slug=? AND mode='helpdesk'", slug).first())) {
+    const { app, viewer } = await viewerApp(c, slug)
+    return c.json(
+      await feed(
+        c.env,
+        { state: c.req.query("state"), cursor: c.req.query("cursor") },
+        viewer.voter,
+        viewer.actorId ? [viewer.actorId] : [],
+        undefined,
+        undefined,
+        app.id
+      )
+    )
+  }
   const cookie = browserGuest(c),
     ids = await reportActors(c, reportCookies(c))
   return c.json(
@@ -159,11 +186,14 @@ api.get("/api/apps/:slug/issues/:number", async (c) => {
     })
   )
 })
+api.route("/", handoff)
 api.use("/api/apps/:slug/*", async (c, next) => {
   if (!c.var.app) await loadApp(c)
   await next()
 })
 api.route("/", auth)
+api.route("/", helpdesk)
+api.route("/", identityKeys)
 api.route("/", mailRoutes)
 api.route("/", oauth)
 api.route("/", agents)
@@ -265,6 +295,8 @@ export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(pruneAudit(env))
+    ctx.waitUntil(processVerifications(env))
+    ctx.waitUntil(sql(env, "DELETE FROM identity_uses WHERE expires<=unixepoch()").run())
     ctx.waitUntil(expireReports(env))
     ctx.waitUntil(wakeImports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))

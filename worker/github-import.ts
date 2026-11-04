@@ -322,7 +322,7 @@ async function step(env: Env, j: Job) {
         sql(
           env,
           `INSERT INTO issues(id,app_id,number,title,body,status,close_reason,author,created_at,updated_at,private,github_workspace,github_repo,github_number)
-        SELECT ?,id,issue_seq,?,?,?,?,?,?,?,max(default_private,?),id,?,? FROM apps WHERE id=? AND changes()=1`,
+        SELECT ?,id,issue_seq,?,?,?,?,?,?,?,max(default_private,?,mode='helpdesk'),id,?,? FROM apps WHERE id=? AND changes()=1`,
           id,
           i.title,
           i.body ?? "",
@@ -432,7 +432,7 @@ export async function importMessage(env: Env, m: Message<ImportMessage>) {
       const due = Math.min(e.retryAt, Math.ceil(Date.parse(j.created_at) / 1000) + 7 * 86400),
         changed = await sql(
           env,
-          `UPDATE github_jobs SET state='running',due=?,wake=?,version=version+1,failures=failures+? WHERE id=? AND version=? AND cipher IS NOT NULL`,
+          `UPDATE github_jobs SET state='running',due=?,wake=?,version=version+1,failures=failures+CAST(? AS INTEGER) WHERE id=? AND version=? AND cipher IS NOT NULL`,
           due,
           due + 120,
           Number(!e.limited),
