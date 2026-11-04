@@ -19,7 +19,7 @@ const slugify = (name: string) =>
 
 // The Worker's reserved slugs (they double as subdomains), plus the home domain's own pages.
 const reserved = new Set(
-  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device _design".split(" "),
+  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device agents _design".split(" "),
 )
 
 function slugProblem(slug: string, strict: boolean) {

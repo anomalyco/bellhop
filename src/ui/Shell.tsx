@@ -82,16 +82,23 @@ function UserMenu() {
             <strong>{user.name}</strong>
             <span className="menu-item-description">{user.email}</span>
           </MenuHeader>
-          <MenuItem
-            onSelect={() => {
-              close()
-              const home = homeUrl()
-              if (isAbsolute(home)) window.location.assign(home)
-              else navigate(home)
-            }}
-          >
-            Your applications
-          </MenuItem>
+          {(
+            [
+              ["Your workspaces", homeUrl()],
+              ["Agents", homeUrl("/agents")],
+            ] as const
+          ).map(([label, href]) => (
+            <MenuItem
+              key={href}
+              onSelect={() => {
+                close()
+                if (isAbsolute(href)) window.location.assign(href)
+                else navigate(href)
+              }}
+            >
+              {label}
+            </MenuItem>
+          ))}
           <MenuItem
             onSelect={async () => {
               close()

@@ -19,9 +19,10 @@ const DesignSystem = lazy(() => import("./routes/DesignSystem").then((m) => ({ d
 const Settings = lazy(() => import("./routes/Settings"))
 const Consent = lazy(() => import("./routes/OAuth").then((m) => ({ default: m.Consent })))
 const Device = lazy(() => import("./routes/OAuth").then((m) => ({ default: m.Device })))
+const Agents = lazy(() => import("./routes/Agents").then((m) => ({ default: m.AgentsPage })))
 
 /** First path segments that are the home domain's own pages, not old /<slug> links. */
-const homePages = new Set(["_design", "oauth", "device"])
+const homePages = new Set(["_design", "oauth", "device", "agents"])
 
 // Old /<slug>/… links on the home domain move to the app's subdomain.
 const [, first, ...rest] = window.location.pathname.split("/")
@@ -92,6 +93,7 @@ function PathRoutes() {
       <Route path="/">{() => <Home />}</Route>
       <Route path="/oauth/consent" component={Consent} />
       <Route path="/device" component={Device} />
+      <Route path="/agents" component={Agents} />
       <Route path="/:slug/new">{(p) => <NewIssue slug={p.slug} />}</Route>
       <Route path="/:slug/issues/:number">
         {(p) => (/^[1-9]\d*$/.test(p.number) ? <IssuePage slug={p.slug} number={Number(p.number)} /> : <NotFound />)}
