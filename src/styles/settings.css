@@ -53,3 +53,15 @@
     min-height: 40px;
   }
 }
+
+/* Translated labels run longer: the new-key row and the saved-reply tabs wrap instead of overflowing on phones. */
+.key-create-row,
+.reply-tabs {
+  flex-wrap: wrap;
+}
+@media (max-width: 640px) {
+  .key-create-row .input {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+}

@@ -1,36 +1,14 @@
 import type { WebhookEventType } from "../../../shared/api"
+import { t, tKey, useT, type PlainKey } from "../../i18n/settings"
+import { sentenceGap } from "../../i18n"
 import "../../styles/features.css"
 
-const groups: { name: string; events: { type: WebhookEventType; text: string }[] }[] = [
-  {
-    name: "Issues",
-    events: [
-      { type: "issue.opened", text: "Opened" },
-      { type: "issue.updated", text: "Any change" },
-      { type: "issue.closed", text: "Closed" },
-      { type: "issue.reopened", text: "Reopened" },
-      { type: "issue.deleted", text: "Deleted" },
-      { type: "issue.moved", text: "Moved to another workspace" },
-    ],
-  },
-  {
-    name: "Triage",
-    events: [
-      { type: "issue.labeled", text: "Label added" },
-      { type: "issue.unlabeled", text: "Label removed" },
-      { type: "issue.assigned", text: "Assignee changed" },
-    ],
-  },
-  {
-    name: "Comments",
-    events: [
-      { type: "comment.created", text: "Posted" },
-      { type: "comment.edited", text: "Edited" },
-      { type: "comment.deleted", text: "Deleted" },
-      { type: "mention.created", text: "Someone @mentioned" },
-    ],
-  },
+const groups: { name: PlainKey; events: WebhookEventType[] }[] = [
+  { name: "events.issues", events: ["issue.opened", "issue.updated", "issue.closed", "issue.reopened", "issue.deleted", "issue.moved"] },
+  { name: "events.triage", events: ["issue.labeled", "issue.unlabeled", "issue.assigned"] },
+  { name: "events.comments", events: ["comment.created", "comment.edited", "comment.deleted", "mention.created"] },
 ]
+const eventText = (type: WebhookEventType) => tKey(`events.${type}` as PlainKey)
 
 /** shared/api.ts DEFAULT_WEBHOOK_EVENTS, restated: the dev server can't load runtime values from shared/. */
 const DEFAULT_WEBHOOK_EVENTS: WebhookEventType[] = ["issue.opened", "issue.updated", "comment.created", "mention.created"]
@@ -40,6 +18,7 @@ export const sameEvents = (a: WebhookEventType[], b: WebhookEventType[]) => a.le
 
 /** Which events the webhook gets, grouped, with the defaults marked. `ping` (Send test) always goes through. */
 export function WebhookEvents({ value, onChange }: { value: WebhookEventType[]; onChange: (next: WebhookEventType[]) => void }) {
+  useT()
   const on = new Set(value)
   const toggle = (type: WebhookEventType, checked: boolean) =>
     onChange(checked ? [...value.filter((e) => e !== type), type] : value.filter((e) => e !== type))
@@ -49,12 +28,12 @@ export function WebhookEvents({ value, onChange }: { value: WebhookEventType[]; 
       <div className="events-groups">
         {groups.map((g) => (
           <fieldset key={g.name} className="events-group">
-            <legend>{g.name}</legend>
+            <legend>{tKey(g.name)}</legend>
             {g.events.map((e) => (
-              <label key={e.type} className="events-option" title={e.type}>
-                <input type="checkbox" checked={on.has(e.type)} onChange={(ev) => toggle(e.type, ev.target.checked)} />
-                <span>{e.text}</span>
-                {defaults.has(e.type) && <span className="events-default">Default</span>}
+              <label key={e} className="events-option" title={e}>
+                <input type="checkbox" checked={on.has(e)} onChange={(ev) => toggle(e, ev.target.checked)} />
+                <span>{eventText(e)}</span>
+                {defaults.has(e) && <span className="events-default">{t("events.default")}</span>}
               </label>
             ))}
           </fieldset>
@@ -62,12 +41,13 @@ export function WebhookEvents({ value, onChange }: { value: WebhookEventType[]; 
       </div>
       <div className="events-foot">
         <span>
-          {chosen === 0 ? "No events: only test pings are sent." : `${chosen} ${chosen === 1 ? "event" : "events"}.`} “Any change” fires for every edit,
-          with the changed fields.
+          {chosen === 0 ? t("events.none") : t("events.count", { count: chosen })}
+          {sentenceGap()}
+          {t("events.anyChange")}
         </span>
         {!sameEvents(value.filter((e) => e !== "ping"), DEFAULT_WEBHOOK_EVENTS) && (
           <button type="button" className="link-button" onClick={() => onChange([...DEFAULT_WEBHOOK_EVENTS])}>
-            Reset to defaults
+            {t("events.reset")}
           </button>
         )}
       </div>
