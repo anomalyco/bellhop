@@ -10,6 +10,7 @@ import { issueNumber } from "./issues"
 import { issues } from "./mutations"
 import { media } from "./media"
 import { mcp } from "./mcp"
+import { oauth } from "./oauth"
 import { queue } from "./webhooks"
 export { Room } from "./room"
 
@@ -20,12 +21,20 @@ const limit = bodyLimit({
 })
 api.use("*", async (c, next) => {
   if (!c.req.path.startsWith("/media/")) c.header("Cache-Control", "no-store")
-  if (c.req.path !== "/mcp" && !c.req.path.startsWith("/icon/")) firstContact(c)
+  const publicOAuth = /^\/oauth\/(register|device|token|revoke)$/.test(c.req.path) || c.req.path.startsWith("/.well-known/")
+  if (publicOAuth) {
+    // Machine endpoints never use browser sessions. Consent and account APIs keep the usual origin guard.
+    c.header("Access-Control-Allow-Origin", "*")
+    c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    c.header("Access-Control-Allow-Headers", "Content-Type, Accept")
+    if (c.req.method === "OPTIONS") return c.body(null, 204)
+  }
+  if (!publicOAuth && c.req.path !== "/mcp" && !c.req.path.startsWith("/icon/")) firstContact(c)
   const origin = c.req.header("origin")
   // Behind a TLS-terminating proxy the request URL is http while the browser's Origin is PUBLIC_ORIGIN.
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
-  if (origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
-  if (c.req.path.startsWith("/api/")) await currentUser(c)
+  if (!publicOAuth && origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
+  if (c.req.path.startsWith("/api/") || c.req.path === "/oauth/authorize") await currentUser(c)
   if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
     return limit(c, next)
   await next()
@@ -35,6 +44,7 @@ api.use("/api/apps/:slug/*", async (c, next) => {
   await next()
 })
 api.route("/", auth)
+api.route("/", oauth)
 api.route("/", apps)
 api.route("/", icons)
 api.route("/", issues)

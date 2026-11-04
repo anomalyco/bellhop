@@ -1,12 +1,40 @@
 import { Hono } from "hono"
-import { labels } from "./apps"
-import { ApiFailure, bad, choice, dbError, ids, input, missing, now, sha256, sql, str } from "./core"
+import type { App, Label, Template } from "../shared/api"
+import {
+  appCols,
+  deleteTemplate,
+  detail,
+  labels,
+  templates,
+  updateApp,
+  webhookDeliveries,
+  writeLabel,
+  writeTemplate
+} from "./apps"
+import {
+  ApiFailure,
+  bad,
+  choice,
+  dbError,
+  denied,
+  fail,
+  ids,
+  input,
+  missing,
+  now,
+  rows,
+  sha256,
+  sql,
+  str
+} from "./core"
 import type { Bindings, Ctx } from "./core"
 import { setActivity } from "./events"
 import { attachment, getIssue, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
-import { addComment, relate, updateIssue } from "./mutations"
+import { addComment, relate, removeLabel, updateIssue } from "./mutations"
 import type { Access } from "./mutations"
+import { oauthOrigin } from "./oauth"
+import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 
 const number = { type: "integer", minimum: 1 },
   text = { type: "string" },
@@ -14,9 +42,64 @@ const number = { type: "integer", minimum: 1 },
 const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
 function tool(name: string, description: string, properties: Record<string, object>, required: string[] = []) {
-  return { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false } }
+  return {
+    name,
+    description,
+    inputSchema: {
+      type: "object",
+      properties:
+        name === "list_apps"
+          ? properties
+          : {
+              ...properties,
+              app: {
+                type: "string",
+                description: "Workspace slug. Required when more than one workspace is connected."
+              }
+            },
+      required,
+      additionalProperties: false
+    }
+  }
 }
+const templateFields = {
+  name: text,
+  description: text,
+  title: text,
+  body: text,
+  labels: { type: "array", items: text, maxItems: 50 },
+  ask_system_info: { type: "boolean" },
+  position: { type: "integer" }
+}
+const workspaceTools = [
+  tool("get_app", "Read workspace details, counts, labels, and templates (owner).", {}),
+  tool("update_app", "Update workspace name or description (owner).", { name: text, description: text }),
+  tool("get_webhook", "Read webhook configuration and recent deliveries (owner).", {}),
+  tool("set_webhook", "Set an HTTPS webhook URL, or remove it (owner).", { url: { type: ["string", "null"] } }, [
+    "url"
+  ]),
+  tool("rotate_webhook_secret", "Rotate the signing secret and return the new secret once (owner).", {}),
+  tool("test_webhook", "Queue a ping to the configured webhook (owner).", {}),
+  tool("create_label", "Create a label (team member).", { name: text, color: text, description: text }, ["name"]),
+  tool(
+    "update_label",
+    "Update a label by its current name (team member).",
+    { name: text, new_name: text, color: text, description: text },
+    ["name"]
+  ),
+  tool("delete_label", "Delete a named label and remove it from issues (team member).", { name: text }, ["name"]),
+  tool("list_templates", "List issue templates with their labels (team member).", {}),
+  tool("create_template", "Create an issue template using label names (team member).", templateFields, ["name"]),
+  tool(
+    "update_template",
+    "Update a template by its current name (team member).",
+    { ...templateFields, new_name: text },
+    ["name"]
+  ),
+  tool("delete_template", "Delete a template by name (team member).", { name: text }, ["name"])
+]
 const tools = [
+  tool("list_apps", "List the workspaces this agent can use and its role in each.", {}),
   tool("list_issues", "List issues by state, label, or search terms.", {
     state: { ...text, enum: states },
     label: text,
@@ -73,29 +156,127 @@ const tools = [
 ]
 
 const textResult = (value: unknown) => ({
-  content: [{
-    type: "text",
-    text: typeof value === "string" ? value : JSON.stringify(value, (key, v) =>
-      (key === "author" || key === "actor") && v?.type === "guest" && v.name
-        ? { ...v, display_name: `${v.name} (${v.handle})` }
-        : v
-    )
-  }]
+  content: [
+    {
+      type: "text",
+      text:
+        typeof value === "string"
+          ? value
+          : JSON.stringify(value, (key, v) =>
+              (key === "author" || key === "actor") && v?.type === "guest" && v.name
+                ? { ...v, display_name: `${v.name} (${v.handle})` }
+                : v
+            )
+    }
+  ]
 })
 function integer(v: unknown, field: string, max = Number.MAX_SAFE_INTEGER) {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > max) bad(`Invalid ${field}`)
   return v
 }
-async function call(a: Access, name: string, b: Record<string, unknown>) {
-  const schema = tools.find((t) => t.name === name)?.inputSchema ?? bad("Unknown tool")
+type Workspace = App & { role: "owner" | "member" }
+type Caller = { actor: Access["actor"]; apps: Workspace[]; oauth: boolean }
+const availableTools = (caller: Caller) => (caller.oauth ? [...tools, ...workspaceTools] : tools)
+function named<T extends { name: string }>(items: T[], value: unknown, kind: "label" | "template"): T {
+  const name = str(value, "name", kind === "template" ? 120 : 60)
+    .trim()
+    .toLowerCase()
+  const matches = items.filter((item) => item.name.toLowerCase() === name)
+  if (matches.length > 1) bad(`Ambiguous ${kind} name; rename one in workspace settings`)
+  return matches[0] ?? bad(`Unknown ${kind} name`)
+}
+function labelIds(available: Label[], names: unknown) {
+  return ids(names, "labels").map((name) => named(available, name, "label").id)
+}
+function templateResult(t: Template, all: Label[]) {
+  return { ...t, labels: all.filter((l) => t.label_ids.includes(l.id)).map((l) => l.name) }
+}
+async function call(c: Ctx, caller: Caller, name: string, args: Record<string, unknown>) {
+  const schema = availableTools(caller).find((t) => t.name === name)?.inputSchema ?? bad("Unknown tool")
   if (
-    Object.keys(b).some((k) => !Object.hasOwn(schema.properties, k)) ||
-    schema.required.some((k) => !Object.hasOwn(b, k))
+    Object.keys(args).some((k) => !Object.hasOwn(schema.properties, k)) ||
+    schema.required.some((k) => !Object.hasOwn(args, k))
   )
     bad("Unexpected or missing tool argument")
+  if (name === "list_apps") return textResult(caller.apps)
+  const { app: slug, ...b } = args
+  const options = caller.apps.map((app) => app.slug).join(", ") || "(none)"
+  if (slug === undefined && caller.apps.length > 1) bad(`Choose an app. Allowed: ${options}`)
+  const chosen = slug === undefined ? caller.apps[0] : caller.apps.find((app) => app.slug === slug)
+  if (!chosen) fail(403, "forbidden", `Workspace not allowed. Allowed: ${options}`)
+  const a: Access = {
+    app: chosen,
+    env: c.env,
+    ctx: c.executionCtx,
+    origin: oauthOrigin(c),
+    actor: caller.actor,
+    privileged: !!chosen.role
+  }
   const { env, app, actor } = a,
     n = () => integer(b.number, "number")
+  if (
+    ["get_app", "update_app", "get_webhook", "set_webhook", "rotate_webhook_secret", "test_webhook"].includes(name) &&
+    chosen.role !== "owner"
+  )
+    denied()
   switch (name) {
+    case "get_app":
+      return textResult(await detail(c, chosen))
+    case "update_app":
+      return textResult(await detail(c, await updateApp(env, chosen, b)))
+    case "get_webhook": {
+      const hook = await sql(
+        env,
+        "SELECT url,secret!='' has_secret FROM webhook_settings WHERE app_id=?",
+        app.id
+      ).first<{ url: string | null; has_secret: number }>()
+      if (!hook) missing()
+      return textResult({
+        url: hook.url,
+        has_secret: !!hook.has_secret,
+        deliveries: await webhookDeliveries(env, app.id)
+      })
+    }
+    case "set_webhook":
+      return textResult(await configureWebhook(env, app.id, b.url))
+    case "rotate_webhook_secret":
+      return textResult(await rotateWebhook(env, app.id))
+    case "test_webhook":
+      return textResult(await testWebhook(env, a.origin, app, actor))
+    case "create_label":
+      return textResult(await writeLabel(env, app.id, b))
+    case "update_label":
+    case "delete_label": {
+      const label = named(await labels(env, app.id), b.name, "label")
+      if (name === "update_label")
+        return textResult(await writeLabel(env, app.id, { ...b, name: b.new_name }, label.id))
+      await removeLabel(a, label.id)
+      return textResult({ ok: true })
+    }
+    case "list_templates": {
+      const [items, all] = await Promise.all([templates(env, app.id), labels(env, app.id)])
+      return textResult(items.map((t) => templateResult(t, all)))
+    }
+    case "delete_template": {
+      const t = named(await templates(env, app.id), b.name, "template")
+      return textResult(await deleteTemplate(env, app.id, t.id))
+    }
+    case "create_template":
+    case "update_template": {
+      const old = name === "update_template" ? named(await templates(env, app.id), b.name, "template") : undefined
+      const all = await labels(env, app.id)
+      const t = await writeTemplate(
+        env,
+        app.id,
+        {
+          ...b,
+          name: old ? b.new_name : b.name,
+          label_ids: b.labels === undefined ? undefined : labelIds(all, b.labels)
+        },
+        old?.id
+      )
+      return textResult(templateResult(t, all))
+    }
     case "list_issues":
     case "search_issues":
       return textResult(
@@ -139,10 +320,7 @@ async function call(a: Access, name: string, b: Record<string, unknown>) {
       const { number: _, labels: names, ...patch } = b
       if (names !== undefined) {
         const available = await labels(env, app.id)
-        patch.label_ids = ids(names, "labels").map(
-          (name) =>
-            available.find((l) => l.name.toLowerCase() === name.toLowerCase())?.id ?? bad(`Unknown label: ${name}`)
-        )
+        patch.label_ids = labelIds(available, names)
       }
       if (patch.status === null || patch.close_reason === null) bad("Status and close reason must be strings")
       return textResult(await updateIssue(a, n(), patch))
@@ -162,24 +340,46 @@ async function call(a: Access, name: string, b: Record<string, unknown>) {
   }
 }
 
-async function authenticate(c: Ctx): Promise<Access | null> {
-  const token = /^Bearer (bh_[a-f0-9]{64})$/i.exec(c.req.header("Authorization") ?? "")?.[1]
+async function authenticate(c: Ctx): Promise<Caller | null> {
+  const token = /^Bearer (bh_(?:a_)?[a-f0-9]{64})$/i.exec(c.req.header("Authorization") ?? "")?.[1]
   if (!token) return null
+  const hash = await sha256(token)
+  if (token.startsWith("bh_a_")) {
+    const grant = await sql(
+      c.env,
+      `UPDATE oauth_grants SET last_used_at=unixepoch() WHERE revoked_at IS NULL AND id IN
+      (SELECT grant_id FROM oauth_tokens WHERE hash=? AND kind='access' AND expires_at>unixepoch())
+      RETURNING id,user_id,(SELECT name FROM oauth_clients WHERE id=oauth_grants.client_id) name`,
+      hash
+    ).first<{ id: string; user_id: string; name: string }>()
+    if (!grant) return null
+    const apps = await rows<Workspace>(
+      sql(
+        c.env,
+        `SELECT ${appCols},m.role FROM oauth_grant_apps ga JOIN apps a ON a.id=ga.app_id
+      JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE ga.grant_id=? ORDER BY a.slug`,
+        grant.user_id,
+        grant.id
+      )
+    )
+    return { actor: { type: "agent", id: grant.id, name: grant.name }, apps, oauth: true }
+  }
   const agent = await sql(
     c.env,
     "UPDATE agent_tokens SET last_used_at=? WHERE token_hash=? RETURNING id,name,app_id",
     now(),
-    await sha256(token)
+    hash
   ).first<{ id: string; name: string; app_id: string }>()
   if (!agent) return null
-  const app = await sql(c.env, "SELECT id,slug,name FROM apps WHERE id=?", agent.app_id).first<Access["app"]>()
+  const app = await sql(
+    c.env,
+    `SELECT ${appCols},'member' role FROM apps a WHERE id=?`,
+    agent.app_id
+  ).first<Workspace>()
   if (!app) return null
   return {
-    app,
-    env: c.env,
-    ctx: c.executionCtx,
-    origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin,
-    privileged: true,
+    apps: [app],
+    oauth: false,
     actor: { type: "agent", id: agent.id, name: agent.name }
   }
 }
@@ -188,18 +388,25 @@ function object(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v)
 }
 export const mcp = new Hono<Bindings>()
-mcp.on(["GET", "DELETE"], "/mcp", (c) => {
+function challenge(c: Ctx) {
+  c.header("WWW-Authenticate", `Bearer resource_metadata="${oauthOrigin(c)}/.well-known/oauth-protected-resource"`)
+}
+mcp.on(["GET", "DELETE"], "/mcp", async (c) => {
+  if (!(await authenticate(c))) {
+    challenge(c)
+    return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Invalid or missing agent token" } }, 401)
+  }
   c.header("Allow", "POST")
   return c.body(null, 405)
 })
 mcp.post("/mcp", async (c) => {
   let id: string | number | null = null
-  const error = (code: number, message: string, status: 200 | 400 | 401 | 500 = 200) =>
+  const error = (code: number, message: string, status: 200 | 400 | 401 | 403 | 500 = 200) =>
     c.json({ jsonrpc: "2.0", id, error: { code, message } }, status)
   const result = (value: unknown) => c.json({ jsonrpc: "2.0", id, result: value })
   const a = await authenticate(c)
   if (!a) {
-    c.header("WWW-Authenticate", "Bearer")
+    challenge(c)
     return error(-32001, "Invalid or missing agent token", 401)
   }
   let req: unknown
@@ -227,13 +434,14 @@ mcp.post("/mcp", async (c) => {
     case "ping":
       return result({})
     case "tools/list":
-      return result({ tools })
+      return result({ tools: availableTools(a) })
     case "tools/call": {
       if (typeof p.name !== "string") return error(-32602, "Tool name required")
       try {
-        return result(await call(a, p.name, p.arguments === undefined ? {} : input(p.arguments)))
+        return result(await call(c, a, p.name, p.arguments === undefined ? {} : input(p.arguments)))
       } catch (e) {
         const failure = e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null
+        if (failure?.status === 403) return error(-32003, failure.message, 403)
         if (!failure) console.error("bellhop.tool_failed", { tool: p.name })
         return result({ ...textResult(failure?.message ?? "Internal tool error"), isError: true })
       }

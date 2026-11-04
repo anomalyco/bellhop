@@ -21,7 +21,7 @@ export function appUrl(env: Env, origin: string, slug: string, path = "/") {
 }
 /** Slugs double as subdomains, so names with other meanings stay unavailable. */
 export const reservedSlugs = new Set(
-  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www".split(" ")
+  "admin api app assets auth blog cdn dev device docs help icon mail mcp media new oauth settings static status support www".split(" ")
 )
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 

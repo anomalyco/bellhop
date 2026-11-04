@@ -1,5 +1,5 @@
 import type { WebhookPayload } from "../shared/api"
-import { bad, hex, now, sha256, sql, str, uid } from "./core"
+import { bad, hex, now, secret, sha256, sql, str, uid } from "./core"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -8,6 +8,22 @@ export function webhookUrl(value: unknown, env: Env) {
   const local = env.DEV_LOGIN === "1" && ["localhost", "127.0.0.1"].includes(url.hostname)
   if (url.protocol !== "https:" && !(local && url.protocol === "http:")) bad("Webhook URL must use HTTPS")
   return url.href
+}
+
+export async function configureWebhook(env: Env, app: string, value: unknown) {
+  const url = webhookUrl(value, env)
+  await sql(env, "UPDATE webhook_settings SET url=? WHERE app_id=?", url, app).run()
+  return { url }
+}
+export async function rotateWebhook(env: Env, app: string) {
+  const key = secret()
+  await sql(env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", key, app).run()
+  return { secret: key }
+}
+export async function testWebhook(env: Env, origin: string, app: WebhookPayload["app"], actor: NonNullable<WebhookPayload["actor"]>) {
+  const id = await enqueueWebhook(env, origin, { type: "ping", app, actor })
+  if (!id) bad("Set a webhook URL first")
+  return { delivery_id: id }
 }
 
 interface Job {

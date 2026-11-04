@@ -306,7 +306,7 @@ export async function relate(a: Access, n: number, other: number, type: Relation
   notify(a, { type: "issue.updated", issue: otherSummary, items: items[1], changes: ["relations"] })
   return next
 }
-async function removeLabel(a: Access, id: string) {
+export async function removeLabel(a: Access, id: string) {
   const { env, app, actor } = a,
     label = await sql(env, `SELECT ${labelCols} FROM labels WHERE id=? AND app_id=?`, id, app.id).first<Label>()
   if (!label) missing()

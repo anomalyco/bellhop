@@ -32,13 +32,13 @@ import {
 } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { guestActor } from "./auth"
-import { enqueueWebhook, webhookUrl } from "./webhooks"
+import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 
-const appCols = `a.id,a.slug,a.name,a.description,a.created_at,m.role,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
+export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
 export async function loadApp(c: Ctx) {
   const app = await sql(
     c.env,
-    `SELECT ${appCols} FROM apps a
+    `SELECT ${appCols},m.role FROM apps a
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
     c.var.user?.id ?? null,
     c.req.param("slug")
@@ -56,7 +56,7 @@ export async function selectedLabels(env: Env, appId: string, value: unknown) {
     all = await labels(env, appId)
   return requested.map((id) => all.find((l) => l.id === id) ?? bad("Unknown label"))
 }
-async function templates(env: Env, appId: string): Promise<Template[]> {
+export async function templates(env: Env, appId: string): Promise<Template[]> {
   const list = await rows<
     Omit<Template, "label_ids" | "ask_system_info"> & { labels: string; ask_system_info: number }
   >(
@@ -80,10 +80,13 @@ export async function counts(env: Env, appId: string) {
     appId
   ).first<AppDetail["counts"]>())!
 }
-export async function detail(c: Ctx): Promise<AppDetail> {
-  const app = c.var.app
+export async function detail(c: Ctx, app = c.var.app): Promise<AppDetail> {
   const [ls, ts, totals] = await Promise.all([labels(c.env, app.id), templates(c.env, app.id), counts(c.env, app.id)])
   return { ...app, labels: ls, templates: ts, counts: totals }
+}
+export function webhookDeliveries(env: Env, id: string) {
+  return rows<WebhookDelivery>(sql(env,
+    "SELECT id,event,status,response_status,attempts,created_at FROM webhook_deliveries WHERE app_id=? ORDER BY created_at DESC,rowid DESC LIMIT 50", id))
 }
 export async function settings(c: Ctx): Promise<AppSettings> {
   const id = c.var.app.id
@@ -92,13 +95,7 @@ export async function settings(c: Ctx): Promise<AppSettings> {
       url: string | null
       secret: string
     }>(),
-    rows<WebhookDelivery>(
-      sql(
-        c.env,
-        "SELECT id,event,status,response_status,attempts,created_at FROM webhook_deliveries WHERE app_id=? ORDER BY created_at DESC,rowid DESC LIMIT 50",
-        id
-      )
-    ),
+    webhookDeliveries(c.env, id),
     rows<AgentToken>(
       sql(
         c.env,
@@ -156,7 +153,7 @@ apps.get("/api/apps", async (c) => {
     await rows<App>(
       sql(
         c.env,
-        `SELECT ${appCols} FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
+        `SELECT ${appCols},m.role FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
         c.var.user.id
       )
     )
@@ -214,14 +211,15 @@ apps.post("/api/apps", async (c) => {
   return c.json(await detail(c), 201)
 })
 apps.get("/api/apps/:slug", async (c) => c.json(await detail(c)))
-apps.patch("/api/apps/:slug", async (c) => {
-  owner(c)
-  const b = await body(c),
-    app = c.var.app
+export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
   const name = str(b.name === undefined ? app.name : b.name, "name", 120).trim(),
     description = str(b.description === undefined ? app.description : b.description, "description", 4000, true)
-  await sql(c.env, "UPDATE apps SET name=?,description=? WHERE id=?", name, description, app.id).run()
-  c.set("app", { ...app, name, description })
+  await sql(env, "UPDATE apps SET name=?,description=? WHERE id=?", name, description, app.id).run()
+  return { ...app, name, description }
+}
+apps.patch("/api/apps/:slug", async (c) => {
+  owner(c)
+  c.set("app", await updateApp(c.env, c.var.app, await body(c)))
   return c.json(await detail(c))
 })
 apps.get("/api/apps/:slug/settings", async (c) => {
@@ -230,22 +228,17 @@ apps.get("/api/apps/:slug/settings", async (c) => {
 })
 apps.put("/api/apps/:slug/webhook", async (c) => {
   owner(c)
-  const url = webhookUrl((await body(c)).url, c.env)
-  await sql(c.env, "UPDATE webhook_settings SET url=? WHERE app_id=?", url, c.var.app.id).run()
+  await configureWebhook(c.env, c.var.app.id, (await body(c)).url)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/rotate", async (c) => {
   owner(c)
-  await sql(c.env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", secret(), c.var.app.id).run()
+  await rotateWebhook(c.env, c.var.app.id)
   return c.json(await settings(c))
 })
 apps.post("/api/apps/:slug/webhook/test", async (c) => {
   owner(c)
-  const id = await enqueueWebhook(c.env, c.env.PUBLIC_ORIGIN || c.req.url, {
-    type: "ping", app: c.var.app, actor: c.var.actor
-  })
-  if (!id) bad("Set a webhook URL first")
-  return c.json({ delivery_id: id })
+  return c.json(await testWebhook(c.env, c.env.PUBLIC_ORIGIN || c.req.url, c.var.app, c.var.actor))
 })
 apps.post("/api/apps/:slug/tokens", async (c) => {
   owner(c)
@@ -305,13 +298,10 @@ apps.delete("/api/apps/:slug/members/:id", async (c) => {
     missing()
   return c.json(await settings(c))
 })
-async function saveLabel(c: Ctx, id?: string) {
-  member(c)
-  const appId = c.var.app.id,
-    b = await body(c),
-    old = id
-      ? await sql(c.env, `SELECT ${labelCols} FROM labels WHERE id=? AND app_id=?`, id, appId).first<Label>()
-      : null
+export async function writeLabel(env: Env, appId: string, b: Record<string, unknown>, id?: string) {
+  const old = id
+    ? await sql(env, `SELECT ${labelCols} FROM labels WHERE id=? AND app_id=?`, id, appId).first<Label>()
+    : null
   if (id && !old) missing()
   const label: Label = {
     id: id ?? uid(),
@@ -322,7 +312,7 @@ async function saveLabel(c: Ctx, id?: string) {
   if (!/^[0-9a-f]{6}$/.test(label.color)) bad("Invalid label color")
   if (old)
     await sql(
-      c.env,
+      env,
       "UPDATE labels SET name=?,color=?,description=? WHERE app_id=? AND id=?",
       label.name,
       label.color,
@@ -332,7 +322,7 @@ async function saveLabel(c: Ctx, id?: string) {
     ).run()
   else
     await sql(
-      c.env,
+      env,
       "INSERT INTO labels VALUES(?,?,?,?,?)",
       label.id,
       appId,
@@ -340,17 +330,18 @@ async function saveLabel(c: Ctx, id?: string) {
       label.color,
       label.description
     ).run()
-  return c.json(label, old ? 200 : 201)
+  return label
+}
+async function saveLabel(c: Ctx, id?: string) {
+  member(c)
+  return c.json(await writeLabel(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/labels", (c) => saveLabel(c))
 apps.patch("/api/apps/:slug/labels/:id", (c) => saveLabel(c, c.req.param("id")))
-async function saveTemplate(c: Ctx, id?: string) {
-  member(c)
-  const appId = c.var.app.id,
-    b = await body(c),
-    old = id ? (await templates(c.env, appId)).find((t) => t.id === id) : null
+export async function writeTemplate(env: Env, appId: string, b: Record<string, unknown>, id?: string) {
+  const old = id ? (await templates(env, appId)).find((t) => t.id === id) : null
   if (id && !old) missing()
-  const ls = b.label_ids !== undefined ? await selectedLabels(c.env, appId, b.label_ids) : null
+  const ls = b.label_ids !== undefined ? await selectedLabels(env, appId, b.label_ids) : null
   const ask = b.ask_system_info ?? old?.ask_system_info ?? false,
     pos = b.position ?? old?.position ?? 0
   if (typeof ask !== "boolean" || typeof pos !== "number" || !Number.isSafeInteger(pos))
@@ -368,7 +359,7 @@ async function saveTemplate(c: Ctx, id?: string) {
   const q = [
     old
       ? sql(
-          c.env,
+          env,
           "UPDATE templates SET name=?,description=?,title=?,body=?,ask_system_info=?,position=? WHERE id=? AND app_id=?",
           t.name,
           t.description,
@@ -380,7 +371,7 @@ async function saveTemplate(c: Ctx, id?: string) {
           appId
         )
       : sql(
-          c.env,
+          env,
           "INSERT INTO templates VALUES(?,?,?,?,?,?,?,?)",
           t.id,
           appId,
@@ -393,20 +384,23 @@ async function saveTemplate(c: Ctx, id?: string) {
         )
   ]
   if (ls) {
-    q.push(sql(c.env, "DELETE FROM template_labels WHERE template_id=?", t.id))
-    for (const l of ls) q.push(sql(c.env, "INSERT INTO template_labels VALUES(?,?)", t.id, l.id))
+    q.push(sql(env, "DELETE FROM template_labels WHERE template_id=?", t.id))
+    for (const l of ls) q.push(sql(env, "INSERT INTO template_labels VALUES(?,?)", t.id, l.id))
   }
-  await c.env.DB.batch(q)
-  return c.json(t, old ? 200 : 201)
+  await env.DB.batch(q)
+  return t
+}
+async function saveTemplate(c: Ctx, id?: string) {
+  member(c)
+  return c.json(await writeTemplate(c.env, c.var.app.id, await body(c), id), id ? 200 : 201)
 }
 apps.post("/api/apps/:slug/templates", (c) => saveTemplate(c))
 apps.patch("/api/apps/:slug/templates/:id", (c) => saveTemplate(c, c.req.param("id")))
+export async function deleteTemplate(env: Env, appId: string, id: string) {
+  if (!(await sql(env, "DELETE FROM templates WHERE app_id=? AND id=?", appId, id).run()).meta.changes) missing()
+  return { ok: true }
+}
 apps.delete("/api/apps/:slug/templates/:id", async (c) => {
   member(c)
-  if (
-    !(await sql(c.env, "DELETE FROM templates WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")).run()).meta
-      .changes
-  )
-    missing()
-  return c.json({ ok: true })
+  return c.json(await deleteTemplate(c.env, c.var.app.id, c.req.param("id")))
 })

@@ -391,13 +391,21 @@ export interface WebhookPayload {
 //   relate_issues  { number, other_number, type: RelationType }
 //   claim_issue    { number }                    assigns the agent, adds a "claimed" event
 //   set_activity   { number, text?: string|null, clear?: boolean }   typing dots + short status; expires after 60 s
-//   Workspace setup (owner role needed for webhooks; member for labels):
+//   Workspace setup (same roles as the REST routes: owner for the app itself and webhooks; member for labels and
+//   templates). Labels and templates are named by name, matched case-insensitively.
+//   get_app        {}                            name, description, icon, counts, labels, templates
+//   update_app     { name?, description? }       owner
 //   get_webhook    {}                            URL, whether a secret is set, recent deliveries
 //   set_webhook    { url: string|null }          https only; null removes it
 //   rotate_webhook_secret {}                     returns the new secret once
 //   test_webhook   {}                            sends a ping, returns the delivery id
 //   create_label   { name, color?, description? }
 //   update_label   { name, new_name?, color?, description? }
+//   delete_label   { name }                      removes it from issues too
+//   list_templates {}
+//   create_template { name, description?, title?, body?, labels?: string[] (names), ask_system_info?, position? }
+//   update_template { name, new_name?, description?, title?, body?, labels?, ask_system_info?, position? }
+//   delete_template { name }
 
 /** The consent page's request: who is asking and which of the user's apps they can grant. */
 export interface OAuthRequest {
