@@ -155,7 +155,12 @@ export async function detail(
   const {
     data: [ls, ts, totals, settings]
   } = await readBatch<
-    [Label, StoredTemplate, AppDetail["counts"], { default_private: number; reporter_can_choose: number }]
+    [
+      Label,
+      StoredTemplate,
+      AppDetail["counts"],
+      { default_private: number; reporter_can_choose: number; nudge_days: number | null }
+    ]
   >(
     c.env,
     scope,
@@ -169,7 +174,7 @@ export async function detail(
         scope,
         ...actorBindings(viewer)
       ),
-      sql(c.env, "SELECT default_private,reporter_can_choose FROM apps WHERE id=?", scope)
+      sql(c.env, "SELECT default_private,reporter_can_choose,nudge_days FROM apps WHERE id=?", scope)
     ],
     read
   )
@@ -179,6 +184,7 @@ export async function detail(
     labels: ls,
     templates: ts.map(template),
     counts: totals[0]!,
+    nudge_days: v.nudge_days,
     visibility: { default: v.default_private ? "private" : "public", reporter_can_choose: !!v.reporter_can_choose }
   }
 }
@@ -354,11 +360,20 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   const v = b.visibility === undefined ? null : input(b.visibility)
   const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
   if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
+  const days = b.nudge_days
+  if (
+    days !== undefined &&
+    days !== null &&
+    (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > 30)
+  )
+    bad("nudge_days must be 1–30 or null")
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const change = sql(
     env,
-    `UPDATE apps SET default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
+    `UPDATE apps SET nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
     WHERE id=? RETURNING name,description,public`,
+    Number(days !== undefined),
+    days ?? null,
     def === null ? null : Number(def === "private"),
     v ? Number(v.reporter_can_choose) : null,
     b.name === undefined ? null : str(b.name, "name", 120).trim(),
@@ -374,7 +389,7 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
       actor,
       "app.updated",
       { type: "app", id: app.id },
-      { fields: ["name", "description", "public", "visibility"].filter((k) => b[k] !== undefined) }
+      { fields: ["name", "description", "public", "visibility", "nudge_days"].filter((k) => b[k] !== undefined) }
     )
   ).results[0]
   return { ...app, ...fromAppRow(changed ?? missing()) }

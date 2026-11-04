@@ -32,7 +32,7 @@ export function appUrl(env: Env, origin: string, slug: string, path = "/") {
 }
 /** Slugs double as subdomains, so names with other meanings stay unavailable. */
 export const reservedSlugs = new Set(
-  "admin agents api app assets auth blog cdn dev device docs help icon mail mcp media new oauth reports settings signin static status support workspaces www".split(
+  "admin agents api app assets auth blog cdn dev device docs help icon mail mcp media new oauth oembed reports settings signin static status support workspaces www".split(
     " "
   )
 )

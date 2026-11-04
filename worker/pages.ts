@@ -54,6 +54,50 @@ function location(c: Ctx, url: URL) {
   const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
   return { slug, path, homePage: homePages.has(path.replace(/\/$/, "") || "/") }
 }
+// Resolve a Bellhop URL locally; oEmbed never fetches a caller-supplied URL or uses cookies.
+export async function oembed(c: Ctx) {
+  if ((c.req.query("format") ?? "json") !== "json") bad("Only JSON oEmbed is supported")
+  const u = URL.parse(c.req.query("url") ?? ""),
+    site = c.env.APP_DOMAIN,
+    o = origin(c)
+  if (
+    !u ||
+    u.username ||
+    u.password ||
+    !["https:", "http:"].includes(u.protocol) ||
+    (site
+      ? !(u.hostname === site || u.hostname.endsWith("." + site)) ||
+        (u.protocol !== "https:" && site !== "localhost") ||
+        (u.port && site !== "localhost")
+      : u.origin !== o)
+  )
+    return notFound(c)
+  const { slug, path } = location(c, u),
+    n = /^\/issues\/([1-9]\d*)\/?$/.exec(path)?.[1]
+  if (!slug || (!n && path !== "/") || (n && !Number.isSafeInteger(Number(n)))) return notFound(c)
+  const row = await (
+    n
+      ? sql(
+          c.env,
+          `SELECT i.title,coalesce(json_extract(i.author,'$.name'),json_extract(i.author,'$.handle'),'Guest') author FROM apps a JOIN issues i ON i.app_id=a.id WHERE a.public=1 AND a.slug=? AND i.number=? AND i.private=0 AND i.hidden IS NULL`,
+          slug,
+          n
+        )
+      : sql(c.env, "SELECT name title,name author FROM apps WHERE public=1 AND slug=?", slug)
+  ).first<{ title: string; author: string }>()
+  if (!row) return notFound(c)
+  return c.json({
+    version: "1.0",
+    type: "link",
+    title: row.title,
+    author_name: row.author,
+    provider_name: "Bellhop",
+    provider_url: o,
+    thumbnail_url: appUrl(c.env, o, slug, n ? `/og/issues/${n}.png` : "/og/app.png"),
+    thumbnail_width: 1200,
+    thumbnail_height: 630
+  })
+}
 export async function pageApi(c: Ctx) {
   const input = c.req.query("path")
   if (!input || !input.startsWith("/") || input.startsWith("//") || /[\\\u0000-\u001f]/.test(input))
@@ -158,6 +202,10 @@ export async function page(c: Ctx) {
     `<link rel="icon" href="${xml(icon ?? "/favicon.svg")}"><link rel="apple-touch-icon" href="${xml(icon ?? "/apple-touch-icon.png")}">`
   ]
   if (noindex) tags.push(meta("robots", "noindex"))
+  if (slug && p.listed && p.code === 200 && (article || path === "/"))
+    tags.push(
+      `<link rel="alternate" type="application/json+oembed" href="${xml(`${o}/oembed?url=${encodeURIComponent(canonical)}&format=json`)}">`
+    )
   if (nonce) tags.push(`<meta property="csp-nonce" nonce="${nonce}">`)
   if (slug && p.code === 200 && (number || /^\/(?:index\.html)?$/.test(path))) {
     const href = appPath(number ? `/issues/${number}/feed.atom` : "/feed.atom")

@@ -3,6 +3,12 @@ import { esc, mailOrigin, mailToken, sendMail, unsubscribeURL, ProviderError, ty
 
 export async function enqueueDue(env: Env) {
   const at = Math.floor(Date.now() / 1000)
+  await sql(
+    env,
+    `INSERT OR IGNORE INTO mail_batches(id,sub_id,issue_id,address,due,sealed)
+    SELECT 'nudge-'||n.period,n.sub,n.issue_id,n.address,unixepoch(),1 FROM due_nudges n
+    WHERE NOT EXISTS(SELECT 1 FROM mail_batches b WHERE b.id='nudge-'||n.period) LIMIT 100`
+  ).run()
   const jobs = await rows<{ id: string; due: number }>(
     sql(
       env,
@@ -14,7 +20,15 @@ export async function enqueueDue(env: Env) {
   if (jobs.length)
     await env.MAIL.sendBatch(jobs.map((j) => ({ body: { id: j.id }, delaySeconds: Math.max(0, j.due - at) })))
 }
-type Recipient = TokenRow & { address: string; name: string; slug: string; number: number; title: string }
+type Recipient = TokenRow & {
+  address: string
+  name: string
+  slug: string
+  number: number
+  title: string
+  issue_id: string
+  app_id: string
+}
 type Item = { kind: string; description: string; author: string | null; internal: number }
 export async function deliverBatch(env: Env, id: string) {
   const [claim, recipient, items] = await env.DB.batch([
@@ -25,7 +39,7 @@ export async function deliverBatch(env: Env, id: string) {
     ),
     sql(
       env,
-      `SELECT p.id,p.nonce,p.address,p.number,p.title,a.name,a.slug FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id WHERE b.id=? AND b.sealed=1 AND p.state='on'`,
+      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.name,a.slug FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id WHERE b.id=? AND b.sealed=1 AND p.state='on'`,
       id
     ),
     sql(
@@ -44,6 +58,18 @@ export async function deliverBatch(env: Env, id: string) {
   if (!claim!.meta.changes) return
   const p = recipient!.results[0] as Recipient | undefined,
     data = items!.results as Item[]
+  const nudge = id.startsWith("nudge-") ? id.slice(6) : null
+  if (
+    nudge &&
+    p &&
+    (await sql(env, "SELECT 1 FROM due_nudges WHERE period=? AND sub=? AND address=?", nudge, p.id, p.address).first())
+  )
+    data.push({
+      kind: "nudge",
+      author: null,
+      internal: 0,
+      description: "The team is waiting for your reply on this issue."
+    })
   if (p && data.length) {
     const note = data.some((n) => n.internal),
       [reply, unsub] = await Promise.all([mailToken(env, note ? "note" : "reply", p), mailToken(env, "unsubscribe", p)])
@@ -69,6 +95,16 @@ export async function deliverBatch(env: Env, id: string) {
       html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">View issue #${p.number}</a></p><p>${instruction}</p><p><a href="${esc(off)}">Unsubscribe from this issue</a> · <a href="${esc(all)}">Stop all Bellhop email</a></p>`,
       text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\nUnsubscribe from this issue: ${off}\nStop all Bellhop email: ${all}`
     })
+    if (nudge)
+      await sql(
+        env,
+        // Unsubscribing while the provider acknowledges a send can delete the batch.
+        // Still remember the successful send if the issue is in the same workspace.
+        `INSERT OR IGNORE INTO nudge_events SELECT ?,id,strftime('%Y-%m-%dT%H:%M:%fZ','now') FROM issues WHERE id=? AND app_id=?`,
+        nudge,
+        p.issue_id,
+        p.app_id
+      ).run()
   }
   await sql(env, "DELETE FROM mail_batches WHERE id=? AND sealed=1", id).run()
 }

@@ -539,6 +539,8 @@ export async function getIssue(
     [
       StoredSummary & {
         body: string
+        github_repo: string | null
+        github_number: number | null
         template_id: string | null
         system_info: string | null
         edited_at: string | null
@@ -579,7 +581,7 @@ export async function getIssue(
     [
       sql(
         env,
-        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.github_repo,i.github_number,i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
         ...viewerArgs(v),
         key,
         number
@@ -610,12 +612,13 @@ export async function getIssue(
        ${
          v.team
            ? `UNION ALL SELECT e.id,e.type,i.author,e.data,i.created_at,${tierBag("i.app_id", ["i.author", "json_extract(e.data,'$.assignee')"])},NULL,NULL,NULL
-         FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target}) ORDER BY created_at`
+         FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target})
+         UNION ALL SELECT n.id,'nudged','{"type":"agent","id":"bellhop","name":"Bellhop"}','{}',n.created_at,NULL,NULL,NULL,NULL FROM nudge_events n WHERE n.issue_id=(${target}) ORDER BY created_at`
            : "ORDER BY e.created_at,e.rowid"
        }`,
         key,
         number,
-        ...(v.team ? [key, number] : [])
+        ...(v.team ? [key, number, key, number] : [])
       ),
       sql(
         env,
@@ -714,6 +717,13 @@ export async function getIssue(
   return {
     ...s,
     edited_at: r.edited_at,
+    imported: r.github_repo
+      ? {
+          source: "github",
+          url: `https://github.com/${r.github_repo}/issues/${r.github_number}`,
+          number: r.github_number!
+        }
+      : null,
     mentions: projectTiers(parseMentions(r.mentions, roles), r.tier_bag ? JSON.parse(r.tier_bag) : undefined),
     body: r.body,
     template_id: r.template_id,
@@ -736,6 +746,7 @@ export async function getIssue(
 }
 export function summaryOf(issue: Issue): IssueSummary {
   const {
+    imported,
     body,
     template_id,
     system_info,

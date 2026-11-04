@@ -23,12 +23,14 @@ import { mailQueue, enqueueDue } from "./mail-delivery"
 import { pollInbound } from "./mail-inbound"
 import { pollFeedback } from "./mail-feedback"
 import { secrets } from "./mail-provider"
-import { atom, ogImage, page, pageApi, robots, sitemap } from "./pages"
+import { atom, ogImage, oembed, page, pageApi, robots, sitemap } from "./pages"
 import { similar } from "./similar"
 import { teamTools } from "./team-tools"
 import { pruneAudit } from "./audit"
 import { reports, uploadReport } from "./reports"
 import { expireReports } from "./report-data"
+import { imports, wakeImports } from "./github-import"
+import { exportWorkspace } from "./workspace-export"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -168,6 +170,8 @@ api.route("/", apps)
 api.route("/", tierRoutes)
 api.route("/", reports)
 api.route("/", teamTools)
+api.route("/", imports)
+api.get("/api/apps/:slug/export", exportWorkspace)
 api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
@@ -209,6 +213,7 @@ api.get("/api/live/feed", async (c) => {
   return feedRoom(c.env).fetch(new Request(new URL("/__bellhop_conversation_socket", c.req.url), { headers }))
 })
 api.route("/", mcp)
+api.get("/oembed", oembed)
 api.get("/robots.txt", robots)
 api.get("/sitemap.xml", sitemap)
 api.get("/feed.atom", (c) => atom(c))
@@ -259,6 +264,7 @@ export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(pruneAudit(env))
     ctx.waitUntil(expireReports(env))
+    ctx.waitUntil(wakeImports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))
     ctx.waitUntil(pollInbound(env, ctx))
     ctx.waitUntil(pollFeedback(env))

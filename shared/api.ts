@@ -46,7 +46,9 @@
 //   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
-//   PATCH  /api/apps/:slug         { name?, description?, public?, visibility? } -> AppDetail   admin
+//   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days? } -> AppDetail   admin;
+//          nudge_days (1-30, or null for off): email the reporter once when an issue has waited on them that many days.
+//          Never closes anything.
 //   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
 //   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  admin
 //   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
@@ -136,6 +138,14 @@
 //   DELETE /api/apps/:slug/saved-replies/:id             -> { ok: true }       member
 //   GET    /api/apps/:slug/audit?cursor=&actor=&action=  -> AuditPage          admin; newest first, kept 90 days
 //   GET    /api/apps/:slug/analytics?days=7|30|90        -> Analytics          member
+//   GET    /api/apps/:slug/export                        -> NDJSON download    admin; one JSON object per line: the
+//          app, labels, templates, tiers, members, then each issue with its comments (notes included), events, votes
+//          and attachment URLs. Never secrets (webhook secret, keys, tokens).
+//   POST   /api/apps/:slug/import/github { repo: "owner/name", token, state?: "open"|"all" } -> ImportJob   admin;
+//          copies issues, comments and labels in the background. The token is used for this job only and then
+//          deleted. Authors become guest actors named "@login"; issues carry `imported`.
+//   GET    /api/apps/:slug/import/:id                    -> ImportJob          admin
+//   GET    /oembed?url=<issue or workspace URL>&format=json -> oEmbed JSON     public issues and public workspaces only
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -329,6 +339,20 @@ export interface AppDetail extends App {
   /** What the viewer can see: includes private issues only for the team. */
   counts: { open: number; closed: number }
   visibility: AppVisibility
+  /** Days before a waiting-on-reporter issue sends its reporter one reminder; null when off. */
+  nudge_days: number | null
+}
+
+export interface ImportJob {
+  id: string
+  source: "github"
+  repo: string
+  state: "queued" | "running" | "done" | "failed"
+  imported: { issues: number; comments: number; labels: number }
+  /** A short reason when it failed (never the token). */
+  error: string | null
+  created_at: string
+  finished_at: string | null
 }
 
 /** Whether new issues are public, and whether reporters may choose. The team can always change an issue's privacy. */
@@ -736,6 +760,8 @@ export interface Issue extends IssueSummary {
   viewer_is_author: boolean
   /** When the title or body last changed after posting; GET .../history has the earlier versions. */
   edited_at: string | null
+  /** Set for issues copied from elsewhere. */
+  imported: { source: "github"; url: string; number: number } | null
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
   /** @mentions in the body. */
@@ -819,6 +845,7 @@ export interface Comment {
 }
 
 export type IssueEventType =
+  | "nudged" // team-only: the waiting reporter was sent a reminder
   | "status_changed" // data: { from: IssueStatus, to: IssueStatus, close_reason: CloseReason | null }
   // Events a tier rule caused (labels and assignee on a tiered person's new issue) carry data.rule
   // { tier_id, tier_name } and are team-only timeline items, so the tier never shows to outsiders.

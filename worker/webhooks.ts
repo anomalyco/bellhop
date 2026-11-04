@@ -3,6 +3,7 @@ import { appUrl, bad, hex, missing, now, secret, sha256, sql, str, uid } from ".
 import { teamProjection } from "./tier-actors"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 import { entry, recorded } from "./audit"
+import { importMessage } from "./github-import"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -310,6 +311,12 @@ async function deliver(env: Env, message: Message<Job>) {
   else message.ack()
 }
 
-export async function queue(batch: MessageBatch<Job>, env: Env) {
-  await Promise.all(batch.messages.map((message) => deliver(env, message)))
+export async function queue(batch: MessageBatch<Job | Parameters<typeof importMessage>[1]["body"]>, env: Env) {
+  await Promise.all(
+    batch.messages.map((m) =>
+      "kind" in m.body && m.body.kind === "github.import"
+        ? importMessage(env, m as Parameters<typeof importMessage>[1])
+        : deliver(env, m as Message<Job>)
+    )
+  )
 }
