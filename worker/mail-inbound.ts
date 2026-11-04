@@ -1,4 +1,4 @@
-import type { Actor, App, Role } from "../shared/api"
+import type { Actor, App, Locale, Role } from "../shared/api"
 import { ApiFailure, dbError, memberActor, sha256, sql } from "./core"
 import { addComment, type Access } from "./mutations"
 import { checkToken, devMail, mailOrigin, provider, ProviderError, secrets, type TokenRow } from "./mail-provider"
@@ -20,6 +20,7 @@ export type Incoming = {
   verdicts: { dmarc?: string; virus?: string; spam?: string }
 }
 type Person = TokenRow & {
+  locale: Locale | null
   actor_id: string
   address: string
   user_id: string | null
@@ -114,6 +115,7 @@ export async function handleInboundMessage(env: Env, ctx: Access["ctx"], m: Inco
         app,
         actor,
         role: p.role,
+        locale: p.locale ?? "en",
         guestHash: p.guest_hash ?? undefined,
         aliases: p.owner_alias ? [p.owner_alias] : []
       },

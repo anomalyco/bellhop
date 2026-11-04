@@ -1,5 +1,5 @@
 import type { Context } from "hono"
-import type { Actor, App, Me } from "../shared/api"
+import type { Actor, App, Locale, Me } from "../shared/api"
 
 export type User = NonNullable<Me["user"]>
 export type Bindings = {
@@ -10,6 +10,7 @@ export type Bindings = {
     guestHash: string
     aliases: string[]
     user: User | null
+    accountLocale: Locale | null
     app: App
     actor: Actor
   }

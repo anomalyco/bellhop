@@ -1,5 +1,7 @@
 import { Hono } from "hono"
-import type { IssueSubscription, NotificationSettings } from "../shared/api"
+import type { IssueSubscription, Locale, NotificationSettings } from "../shared/api"
+import { requestLocale } from "./locale"
+import { mailCopy } from "./mail-copy"
 import { allowWrite } from "./auth"
 import { guestWrite } from "./guest-history"
 import { bad, body, denied, email, fail, missing, sha256, sql, type Bindings, type Ctx } from "./core"
@@ -148,15 +150,16 @@ mailRoutes.put(route, async (c) => {
     const [, reservation] = await c.env.DB.batch<Sub>([
       sql(
         c.env,
-        `INSERT INTO mail_subs(issue_id,actor_id,user_id,guest_hash,address,state,reason,requested) VALUES(?,?,?,?,?,?,'manual',unixepoch())
-      ON CONFLICT(issue_id,actor_id) DO UPDATE SET address=excluded.address,state=excluded.state,reason='manual',requested=excluded.requested,nonce=lower(hex(randomblob(16)))
+        `INSERT INTO mail_subs(issue_id,actor_id,user_id,guest_hash,address,state,reason,requested,locale) VALUES(?,?,?,?,?,?,'manual',unixepoch(),?)
+      ON CONFLICT(issue_id,actor_id) DO UPDATE SET address=excluded.address,state=excluded.state,reason='manual',requested=excluded.requested,nonce=lower(hex(randomblob(16))),locale=excluded.locale
       WHERE mail_subs.state='off' OR mail_subs.address!=excluded.address OR (mail_subs.state='pending' AND mail_subs.requested<unixepoch()-86400)`,
         iid,
         actor,
         u?.id ?? null,
         u ? null : c.var.guestHash,
         address,
-        u ? "on" : "pending"
+        u ? "on" : "pending",
+        requestLocale(c).locale
       ),
       ...(!u
         ? [
@@ -190,21 +193,26 @@ mailRoutes.put(route, async (c) => {
           ])
     ])
     const r = !u && reservation?.results[0]
-    if (
+    const pending =
       r &&
-      !u &&
-      (await sql(c.env, "SELECT 1 FROM mail_people WHERE id=? AND nonce=? AND state='pending'", r.id, r.nonce).first())
-    ) {
+      (await sql(
+        c.env,
+        "SELECT locale FROM mail_people WHERE id=? AND nonce=? AND state='pending'",
+        r.id,
+        r.nonce
+      ).first<{ locale: Locale | null }>())
+    if (r && pending) {
       const confirm = `${mailOrigin(c.env)}/email/confirm?t=${await mailToken(c.env, "confirm", r)}`,
-        unsub = unsubscribeURL(c.env, await mailToken(c.env, "unsubscribe", r))
+        unsub = unsubscribeURL(c.env, await mailToken(c.env, "unsubscribe", r)),
+        copy = mailCopy[pending.locale ?? "en"]
       // Neutral double opt-in. Never disclose the issue, workspace or custom text to an unverified address.
       try {
         await sendMail(c.env, "confirm-" + r.nonce, {
           to: address,
           fromName: "Bellhop",
-          subject: "Confirm your Bellhop subscription",
-          text: `Confirm this subscription: ${confirm}\nIf you did not request this, ignore this message, unsubscribe: ${unsub}, or stop all email: ${unsub}&all=1`,
-          html: `<p>Confirm that you want email updates on a Bellhop issue.</p><p><a href="${esc(confirm)}">Confirm subscription</a></p><p>If you didn’t request this, ignore this message, <a href="${esc(unsub)}">unsubscribe</a>, or <a href="${esc(unsub + "&all=1")}">stop all Bellhop email</a>.</p>`
+          subject: copy.confirmSubject,
+          text: `${copy.confirmIntro}\n${copy.confirmAction}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}\n${copy.stop}: ${unsub}&all=1`,
+          html: `<p>${esc(copy.confirmIntro)}</p><p><a href="${esc(confirm)}">${esc(copy.confirmAction)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a> · <a href="${esc(unsub + "&all=1")}">${esc(copy.stop)}</a></p>`
         })
       } catch (e) {
         await sql(c.env, "UPDATE mail_subs SET requested=0 WHERE id=? AND nonce=?", r.id, r.nonce).run()

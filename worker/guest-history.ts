@@ -2,6 +2,7 @@ import type { Actor, App } from "../shared/api"
 import { fail, memberActor, now, rows, scopedGuestId, sha256, sql } from "./core"
 import type { Ctx, User } from "./core"
 import { actorUpdated } from "./events"
+import { requestLocale } from "./locale"
 
 export async function reportActors(c: Ctx, cookies: string[]) {
   const found = await Promise.all(
@@ -161,8 +162,8 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
     // not proof; never turn an old guest reply address into an account credential.
     sql(
       c.env,
-      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason)
-      SELECT s.issue_id,u.id,u.id,u.email,s.state,'manual' FROM mail_subs s JOIN users u ON u.id=?1 JOIN issues i ON i.id=s.issue_id
+      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason,locale)
+      SELECT s.issue_id,u.id,u.id,u.email,s.state,'manual',s.locale FROM mail_subs s JOIN users u ON u.id=?1 JOIN issues i ON i.id=s.issue_id
       WHERE i.app_id=?2 AND s.actor_id=?3 AND s.address=u.email AND s.state IN ('on','off') AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email)`,
       actor.id,
       app,
@@ -170,14 +171,15 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
     ),
     sql(
       c.env,
-      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason)
+      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason,locale)
       SELECT i.id,u.id,u.id,u.email,CASE WHEN gs.state='off' THEN 'off' ELSE 'on' END,
-        CASE WHEN json_extract(i.author,'$.id')=?3 THEN 'opened' ELSE 'replied' END
+        CASE WHEN json_extract(i.author,'$.id')=?3 THEN 'opened' ELSE 'replied' END,coalesce(gs.locale,u.locale,?4)
       FROM issues i JOIN users u ON u.id=?1 LEFT JOIN mail_settings p ON p.user_id=u.id LEFT JOIN mail_subs gs ON gs.issue_id=i.id AND gs.actor_id=?3
       WHERE i.app_id=?2 AND ((json_extract(i.author,'$.id')=?3 AND coalesce(p.opened,1)) OR (coalesce(p.replied,1) AND i.id IN(SELECT issue_id FROM comments WHERE json_extract(author,'$.id')=?3))) AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email)`,
       actor.id,
       app,
-      previous
+      previous,
+      requestLocale(c).locale
     ),
     ...locations.map((s) =>
       sql(

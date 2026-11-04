@@ -10,6 +10,7 @@ import type {
   IssueSummary,
   Label,
   LiveEvent,
+  Locale,
   Block,
   Moderation,
   Revision,
@@ -33,6 +34,7 @@ import { teamProjection } from "./tier-actors"
 import { enqueueWebhooks } from "./webhooks"
 import { entry, recorded, auditActor, targetEntry } from "./audit"
 import { attachReport, getReport } from "./report-data"
+import { requestLocale } from "./locale"
 
 export interface Access {
   env: Env
@@ -44,6 +46,7 @@ export interface Access {
   aliases?: string[]
   role: App["role"] | AgentRole
   origin: string
+  locale?: Locale
 }
 function access(c: Ctx): Access {
   return {
@@ -54,6 +57,7 @@ function access(c: Ctx): Access {
     guestHash: c.var.guestHash,
     aliases: c.var.aliases,
     role: c.var.app.role,
+    locale: requestLocale(c).locale,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
@@ -171,8 +175,8 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
     sql(env, "UPDATE apps SET issue_seq=issue_seq+1 WHERE id=?", app.id),
     sql(
       env,
-      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,private,mentions,assignee,reply_tier_id)
-    SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,CASE WHEN t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
+      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,reporter_locale,private,mentions,assignee,reply_tier_id)
+    SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,?,CASE WHEN t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
       (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id),
       CASE WHEN t.agents_reply=0 THEN t.id END FROM apps a LEFT JOIN reporter_tiers t ON t.app_id=a.id AND t.actor_id=? WHERE a.id=? RETURNING number`,
       id,
@@ -183,6 +187,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       template,
       at,
       at,
+      a.locale ?? null,
       Number(can(a.role, "read")),
       b.private === undefined ? null : Number(b.private),
       JSON.stringify(mentions),
@@ -319,7 +324,7 @@ export async function addComment(
       : []),
     sql(
       env,
-      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,via,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,?,1)`,
+      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,via,locale,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,?,?,1)`,
       id,
       s.id,
       ...actorBindings(v),
@@ -329,7 +334,8 @@ export async function addComment(
       at,
       Number(internal),
       JSON.stringify(mentions),
-      via
+      via,
+      a.locale ?? null
     ),
     ...links,
     ...attachReport(env, app.id, b.metadata_id, s.id, id),

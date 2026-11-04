@@ -29,6 +29,8 @@
 //   GET    /api/me                                       -> Me
 //   POST   /api/human              { token }             -> { ok: true }       Turnstile check, sets bh_human (1 hour)
 //   PUT    /api/me/guest           { name }              -> Me                 guest + human; sets the display name
+//   PUT    /api/me/locale          { locale: Locale | null } -> Me             anyone; null goes back to the browser's
+//          language. Saved on the account, or for guests in a bh_locale cookie.
 //   GET    /api/apps                                     -> App[]              signed in: workspaces I'm on
 //   GET    /api/feed?state=open|closed&q=<text>&cursor=  -> FeedList           public: issues in public workspaces,
 //                                                                             most recently active first (blhp.app home)
@@ -263,7 +265,15 @@ export interface Config {
   dev_login: boolean
 }
 
+/** The interface languages Bellhop ships. */
+export type Locale = "en" | "es" | "pt-BR" | "fr" | "de" | "ja" | "zh-CN" | "ko"
+export const LOCALES: Locale[] = ["en", "es", "pt-BR", "fr", "de", "ja", "zh-CN", "ko"]
+
 export interface Me {
+  /** The language to show: the saved choice, else the best match for the browser's Accept-Language, else "en". */
+  locale: Locale
+  /** True when locale is a saved choice rather than detected. */
+  locale_saved: boolean
   user: { id: string; email: string; name: string; avatar_url: string | null } | null
   /** `name` is the display name this browser chose (null until set); the same across apps. */
   guest: { id: string; handle: string; name: string | null }
@@ -763,6 +773,8 @@ export interface Issue extends IssueSummary {
   edited_at: string | null
   /** Set for issues copied from elsewhere. */
   imported: { source: "github"; url: string; number: number } | null
+  /** The reporter's interface language when they opened it (agents can reply in it); null for older issues. */
+  reporter_locale: Locale | null
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
   /** @mentions in the body. */
@@ -934,7 +946,8 @@ export interface WebhookPayload {
   created_at: string
   app: { id: string; slug: string; name: string }
   /** Absent for ping. */
-  issue?: IssueSummary & { url: string }
+  /** New webhook snapshots include the reporter's language; stored pre-locale deliveries may omit it. */
+  issue?: IssueSummary & { url: string; reporter_locale?: Locale | null }
   comment?: Comment
   actor?: Actor
   /** For issue.updated: which fields changed. */

@@ -105,6 +105,7 @@ function tool(
     }
   }
 }
+const replyLanguage = "reporter_locale is the reporter's language; reply in it unless the conversation suggests otherwise."
 const templateFields = {
   name: text,
   description: text,
@@ -182,17 +183,24 @@ const tools = [
     { name: text, slug: text, description: text, public: { type: "boolean" } },
     ["name", "slug"]
   ),
-  tool("list_issues", "List issues by state, label, or search terms.", {
-    sort: { type: "string", enum: ["newest", "oldest", "votes", "updated", "comments"] },
-    state: { ...text, enum: states },
-    label: text,
-    query: text,
-    limit
-  }),
-  tool("get_issue", "Read an issue with its timeline, attachments, relations, and system info.", { number }, [
-    "number"
-  ]),
-  tool("search_issues", "Search titles, bodies, and comments across open and closed issues.", { query: text, limit }, [
+  tool(
+    "list_issues",
+    `List issues by state, label, or search terms. ${replyLanguage}`,
+    {
+      sort: { type: "string", enum: ["newest", "oldest", "votes", "updated", "comments"] },
+      state: { ...text, enum: states },
+      label: text,
+      query: text,
+      limit
+    }
+  ),
+  tool(
+    "get_issue",
+    `Read an issue with its timeline, attachments, relations, and system info. ${replyLanguage}`,
+    { number },
+    ["number"]
+  ),
+  tool("search_issues", `Search titles, bodies, and comments across open and closed issues. ${replyLanguage}`, { query: text, limit }, [
     "query"
   ]),
   tool(
@@ -449,6 +457,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           app.id,
           {
             allStates: name === "search_issues",
+            reporterLocale: true,
             sort: b.sort,
             state: b.state === undefined ? undefined : choice(b.state, states, "state"),
             label: b.label === undefined ? undefined : str(b.label, "label", 60),

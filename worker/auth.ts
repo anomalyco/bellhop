@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
-import type { Actor, Config, Me } from "../shared/api"
+import type { Actor, Config, Locale, Me } from "../shared/api"
+import { guestLocale, isLocale, requestLocale } from "./locale"
 import { bad, body, denied, email, fail, hex, missing, now, scopedGuestId, secret, sha256, sql, str, uid } from "./core"
 import type { Bindings, Ctx, User } from "./core"
 import { claimGuest, renameGuest } from "./guest-history"
@@ -74,12 +75,12 @@ export async function sessionHash(c: Ctx) {
   const token = getCookie(c, "bh_session")
   return token && /^[a-f0-9]{64}$/.test(token) ? sha256(token) : null
 }
-export function userBySession(c: Ctx, hash: string | null, read?: Read) {
-  return hash
-    ? firstRow<User>(
+export async function userBySession(c: Ctx, hash: string | null, read?: Read) {
+  const row = hash
+    ? await firstRow<User & { locale: Locale | null }>(
         sql(
           c.env,
-          `SELECT u.id,u.email,u.name,u.avatar_url FROM sessions s JOIN users u ON s.user_id=u.id
+          `SELECT u.id,u.email,u.name,u.avatar_url,u.locale FROM sessions s JOIN users u ON s.user_id=u.id
     WHERE s.token_hash=? AND s.expires_at>?`,
           hash,
           now()
@@ -87,6 +88,10 @@ export function userBySession(c: Ctx, hash: string | null, read?: Read) {
         read
       )
     : null
+  if (!row) return null
+  const { locale, ...user } = row
+  c.set("accountLocale", locale)
+  return user
 }
 export async function currentUser(c: Ctx) {
   c.set("user", await userBySession(c, await sessionHash(c)))
@@ -152,18 +157,20 @@ function nextPath(c: Ctx, input?: string) {
 }
 async function signIn(c: Ctx, address: string, name: string, picture: string | null, sub: string | null) {
   const token = secret(),
-    hash = await sha256(token)
+    hash = await sha256(token),
+    preference = guestLocale(c)
   const result = await c.env.DB.batch<{ user_id: string }>([
     sql(
       c.env,
-      `INSERT INTO users(id,email,name,avatar_url,google_sub) VALUES(?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET
-      name=excluded.name,avatar_url=excluded.avatar_url,google_sub=coalesce(excluded.google_sub,users.google_sub)
+      `INSERT INTO users(id,email,name,avatar_url,google_sub,locale) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET
+      name=excluded.name,avatar_url=excluded.avatar_url,google_sub=coalesce(excluded.google_sub,users.google_sub),locale=coalesce(users.locale,excluded.locale)
       WHERE users.google_sub IS NULL OR excluded.google_sub IS NULL OR users.google_sub=excluded.google_sub`,
       uid(),
       address,
       name,
       picture,
-      sub
+      sub,
+      preference
     ),
     sql(
       c.env,
@@ -177,6 +184,7 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
   ])
   const session = result[1]?.results[0]
   if (!session) denied()
+  if (preference) cookie(c, "bh_locale", "", 0, true)
   if (c.var.existingGuest) await claimGuest(c, { id: session.user_id, email: address, name, avatar_url: picture })
   cookie(c, "bh_session", token, month, true)
 }
@@ -200,13 +208,26 @@ export function config(c: Ctx): Config {
   }
 }
 auth.get("/api/config", (c) => c.json(config(c)))
-export async function me(c: Ctx, guest: string | null | Promise<string | null> = guestName(c)): Promise<Me> {
+export async function me(
+  c: Ctx,
+  guest: string | null | Promise<string | null> = guestName(c),
+  saved?: Locale | null
+): Promise<Me> {
   const [{ id, handle }, name, verified] = await Promise.all([guestActor(c, "me", false), guest, human(c)])
-  return { user: c.var.user, guest: { id, handle, name }, human: verified }
+  return { ...requestLocale(c, saved), user: c.var.user, guest: { id, handle, name }, human: verified }
 }
 auth.get("/api/me", async (c) => {
   shareSession(c)
   return c.json(await me(c))
+})
+auth.put("/api/me/locale", async (c) => {
+  const { locale } = await body(c)
+  if (locale !== null && !isLocale(locale)) bad("Unsupported locale")
+  if (c.var.user) {
+    await sql(c.env, "UPDATE users SET locale=? WHERE id=?", locale, c.var.user.id).run()
+    c.set("accountLocale", locale)
+  } else cookie(c, "bh_locale", locale ?? "", locale === null ? 0 : 365 * 86400, true)
+  return c.json(await me(c, undefined, locale))
 })
 auth.put("/api/me/guest", async (c) => {
   if (c.var.user) bad("Signed-in users cannot set a guest profile here")

@@ -1,4 +1,6 @@
 import { appUrl, rows, sql } from "./core"
+import type { Locale, IssueStatus } from "../shared/api"
+import { mailCopy, formatMail } from "./mail-copy"
 import { esc, mailOrigin, mailToken, sendMail, unsubscribeURL, ProviderError, type TokenRow } from "./mail-provider"
 
 export async function enqueueDue(env: Env) {
@@ -21,6 +23,7 @@ export async function enqueueDue(env: Env) {
     await env.MAIL.sendBatch(jobs.map((j) => ({ body: { id: j.id }, delaySeconds: Math.max(0, j.due - at) })))
 }
 type Recipient = TokenRow & {
+  locale: Locale
   address: string
   name: string
   slug: string
@@ -29,7 +32,7 @@ type Recipient = TokenRow & {
   issue_id: string
   app_id: string
 }
-type Item = { kind: string; description: string; author: string | null; internal: number }
+type Item = { kind: string; description: string | null; author: string | null; internal: number }
 export async function deliverBatch(env: Env, id: string) {
   const [claim, recipient, items] = await env.DB.batch([
     sql(
@@ -39,13 +42,13 @@ export async function deliverBatch(env: Env, id: string) {
     ),
     sql(
       env,
-      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.name,a.slug FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id WHERE b.id=? AND b.sealed=1 AND p.state='on'`,
+      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.name,a.slug,coalesce(u.locale,p.locale,'en') locale FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id WHERE b.id=? AND b.sealed=1 AND p.state='on'`,
       id
     ),
     sql(
       env,
       `SELECT n.kind,coalesce(json_extract(c.author,'$.name'),json_extract(c.author,'$.handle')) author,coalesce(c.internal,0) internal,
-      CASE WHEN n.kind='status' THEN 'Status: '||json_extract(e.data,'$.to') WHEN n.kind='assigned' THEN 'Assigned to you' WHEN n.kind='mention' AND c.id IS NULL THEN 'You were mentioned in the issue' ELSE substr(c.body,1,4096) END description
+      CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') ELSE substr(c.body,1,4096) END description
       FROM mail_items n JOIN mail_batches b ON b.id=n.batch_id AND b.sealed=1 JOIN mail_people p ON p.id=b.sub_id AND p.state='on' JOIN issues i ON i.id=p.issue_id
       LEFT JOIN comments c ON c.id=n.ref AND c.issue_id=i.id LEFT JOIN issue_events e ON n.kind='status' AND e.id=n.ref AND e.issue_id=i.id
       WHERE b.id=? AND n.actor!=p.actor_id AND (c.id IS NULL OR json_extract(c.author,'$.id')!=p.actor_id) AND ((p.role IS NULL AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=p.app_id AND m.email=p.address AND m.user_id IS NOT NULL)
@@ -68,32 +71,38 @@ export async function deliverBatch(env: Env, id: string) {
       kind: "nudge",
       author: null,
       internal: 0,
-      description: "The team is waiting for your reply on this issue."
+      description: null
     })
   if (p && data.length) {
-    const note = data.some((n) => n.internal),
+    const copy = mailCopy[p.locale],
+      note = data.some((n) => n.internal),
       [reply, unsub] = await Promise.all([mailToken(env, note ? "note" : "reply", p), mailToken(env, "unsubscribe", p)])
     const url = appUrl(env, mailOrigin(env), p.slug, `/issues/${p.number}`),
       off = unsubscribeURL(env, unsub),
       all = off + "&all=1"
     const cap = Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
       lines = data.map((n) => {
-        const label = n.kind === "mention" ? "Mention" : n.kind === "reply" ? "Reply" : ""
+        if (n.kind === "nudge") return copy.nudge
+        if (n.kind === "status") return formatMail(copy.status, { status: copy.statuses[n.description as IssueStatus] ?? n.description ?? "" })
+        if (n.kind === "assigned") return copy.assigned
+        if (n.kind === "mention" && n.description === null) return copy.mentioned
+        const label = n.kind === "mention" ? copy.mention : copy.reply,
+          heading = n.author ? formatMail(copy.by, { label, author: n.author }) : label
         return (
-          (label ? `${label}${n.author ? " from " + n.author : ""}${n.internal ? " (internal note)" : ""}: ` : "") +
-          (n.description?.slice(0, cap) || "(attachment)") +
+          `${heading}${n.internal ? ` (${copy.note})` : ""}: ` +
+          (n.description?.slice(0, cap) || copy.attachment) +
           ((n.description?.length ?? 0) >= cap ? "…" : "")
         )
       }),
-      instruction = note ? "Reply to this email to leave an internal note." : "Reply to this email to answer."
+      instruction = note ? copy.noteAnswer : copy.answer
     const clean = (s: string) => s.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim()
     await sendMail(env, "bellhop-" + id, {
       to: p.address,
-      fromName: `${clean(p.name)} via Bellhop`,
-      subject: `Re: ${clean(p.title)} (#${p.number} · ${clean(p.name)})`,
+      fromName: formatMail(copy.sender, { app: clean(p.name) }),
+      subject: formatMail(copy.subject, { title: clean(p.title), number: p.number, app: clean(p.name) }),
       replyTo: [`reply+${reply}@mail.blhp.app`],
-      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">View issue #${p.number}</a></p><p>${instruction}</p><p><a href="${esc(off)}">Unsubscribe from this issue</a> · <a href="${esc(all)}">Stop all Bellhop email</a></p>`,
-      text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\nUnsubscribe from this issue: ${off}\nStop all Bellhop email: ${all}`
+      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">${esc(formatMail(copy.view, { number: p.number }))}</a></p><p>${esc(instruction)}</p><p><a href="${esc(off)}">${esc(copy.unsubscribe)}</a> · <a href="${esc(all)}">${esc(copy.stop)}</a></p>`,
+      text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\n${copy.unsubscribe}: ${off}\n${copy.stop}: ${all}`
     })
     if (nudge)
       await sql(

@@ -45,7 +45,7 @@ const fields = (
   team: boolean,
   personal = true,
   full = false
-) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,
+) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,i.reporter_locale,
   ${team ? tierBag("i.app_id", ["i.author", "i.assignee", "json_extract(i.activity,'$.actor')", "json_extract(i.hidden,'$.by')"], full ? "i.mentions" : undefined) : "NULL"} tier_bag,
   ${voteCount(team ? "1" : "0", personal ? "(SELECT ids FROM viewer)" : "'[]'")} votes,
   ${personal ? "EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=(SELECT voter FROM viewer))" : "0"} viewer_voted,
@@ -66,6 +66,7 @@ type StoredSummary = Omit<
   activity: string | null
   labels: string
   tier_bag: string | null
+  reporter_locale: Issue["reporter_locale"]
 }
 type TeamRow = { user_id: string; role: Member["role"] }
 const teamQuery = (env: Env, scope: ReadScope) =>
@@ -142,6 +143,11 @@ function summary(r: StoredSummary, roles: Roles): IssueSummary {
     r.tier_bag ? JSON.parse(r.tier_bag) : undefined
   )
 }
+// Issue detail, agent lists and webhook snapshots carry the reporter's language.
+// Public discovery and ordinary list summaries keep their existing projections.
+function reporterSummary(r: StoredSummary, roles: Roles) {
+  return { ...summary(r, roles), reporter_locale: r.reporter_locale }
+}
 export function ref(i: IssueRef): IssueRef {
   const { id, number, title, status, close_reason } = i
   return { id, number, title, status, close_reason }
@@ -163,7 +169,7 @@ export async function issueSummary(
     ).first<StoredSummary>(),
     team
   ])
-  return r ? summary(r, roles) : missing()
+  return r ? reporterSummary(r, roles) : missing()
 }
 export function issueNumber(n: unknown) {
   if (
@@ -282,6 +288,7 @@ export async function listIssues(
     limit?: number
     allStates?: boolean
     sort?: unknown
+    reporterLocale?: boolean
   },
   viewer: Viewer = outsider,
   read?: Read
@@ -361,10 +368,10 @@ export async function listIssues(
     ],
     read
   )
-  const roles = roleMap(team)
+  const roles = roleMap(team), project = options.reporterLocale ? reporterSummary : summary
   return {
-    issues: items.slice(0, limit).map((r) => summary(r, roles)),
-    pinned: pins.map((r) => summary(r, roles)),
+    issues: items.slice(0, limit).map((r) => project(r, roles)),
+    pinned: pins.map((r) => project(r, roles)),
     counts: counts[0]!,
     next_cursor:
       items.length > limit
@@ -667,7 +674,7 @@ export async function getIssue(
     const parent = m.attached_to!.comment_id
     byParent.set(parent, [...(byParent.get(parent) ?? []), ...m.logs])
   }
-  const s = summary(r, roles),
+  const s = reporterSummary(r, roles),
     timeline: TimelineItem[] = []
   const privileged = v.team
   if (!sees(v, gateOf(s))) missing()

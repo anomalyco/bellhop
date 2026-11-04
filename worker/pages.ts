@@ -149,8 +149,9 @@ export async function page(c: Ctx) {
     ).first<{ slug: string; expires_at: string }>()
     if (!result || result.expires_at === "expired" || result.expires_at <= new Date().toISOString()) {
       const title = result ? "This report has expired" : "Report not found"
+      const { payload } = await pagePayload(c, target, url.searchParams, ctx)
       return c.html(
-        `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · Bellhop</title><meta name="robots" content="noindex"></head><body><h1>${title}</h1><p>Return to the app to start a new report.</p>${bootScript((await pagePayload(c, target, url.searchParams, ctx)).payload)}</body></html>`,
+        `<!doctype html><html lang="${payload.me.locale}"><head><meta charset="utf-8"><title>${title} · Bellhop</title><meta name="robots" content="noindex"></head><body><h1>${title}</h1><p>Return to the app to start a new report.</p>${bootScript(payload)}</body></html>`,
         result ? 410 : 404,
         { "X-Robots-Tag": "noindex" }
       )
@@ -269,6 +270,11 @@ export async function page(c: Ctx) {
       }
     })
   return rw
+    .on("html", {
+      element(e) {
+        e.setAttribute("lang", payload.me.locale)
+      }
+    })
     .on("head", {
       element: (e) => {
         e.append(tags.join("\n"), { html: true })
