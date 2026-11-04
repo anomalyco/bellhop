@@ -24,6 +24,7 @@ import { formatNumber } from "../i18n"
 import { sorts } from "../ui/features/FilterMenu"
 import { DeskHome } from "./helpdesk/Home"
 import { deskOutsider } from "../lib/helpdesk"
+import { ReviewFlags, useReviewQueue } from "../ui/helpdesk/Review"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -151,7 +152,13 @@ function IssuesList({ app }: { app: AppDetail }) {
   const lastList = useRef<{ slug: string; list: IssueList } | null>(null)
   if (data) lastList.current = { slug, list: data }
   else if (lastList.current?.slug !== slug) lastList.current = null
-  const shown = data ?? (error ? undefined : lastList.current?.list)
+  // Help desk team: which requests wait on a review (held agent drafts, pending approvals). Rows wait for it the
+  // first time, so their flags never arrive late and move the list.
+  const review = useReviewQueue(app, filter.state)
+  const revealed = useRef(false)
+  const reviewWait = !!review && !review.ready && !revealed.current
+  const shown = reviewWait ? undefined : (data ?? (error ? undefined : lastList.current?.list))
+  if (shown) revealed.current = true
   const pending = !data && !error && !!shown
   // Rows that replace the skeleton fade in; rows already cached at first paint are simply there.
   const hadSkeleton = useRef(false)
@@ -248,7 +255,7 @@ function IssuesList({ app }: { app: AppDetail }) {
         />
         <div className="list-label">
           <MineFilter filter={filter} onChange={go} />
-          <FilterMenu query={q} slug={slug} member={!!app.role} onChange={(next) => go(parseQuery(next))} />
+          <FilterMenu query={q} slug={slug} member={!!app.role} review={review} onChange={(next) => go(parseQuery(next))} />
           <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
@@ -280,7 +287,7 @@ function IssuesList({ app }: { app: AppDetail }) {
           )
         )}
         {shown?.issues.map((issue) => (
-          <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={onLabel} />
+          <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={onLabel} held={!!review?.held.has(issue.id)} approval={!!review?.approvals.has(issue.id)} />
         ))}
         {shown?.next_cursor && (
           <div className="list-footer">
@@ -381,11 +388,16 @@ export const IssueRow = memo(function IssueRow({
   issue,
   onLabel,
   workspace,
+  held = false,
+  approval = false,
 }: {
   slug: string
   issue: IssueSummary
   onLabel?: (name: string) => void
   workspace?: { name: string; icon_url: string | null }
+  /** Help desk team: an agent's draft or an approval waits for review on this request. */
+  held?: boolean
+  approval?: boolean
 }) {
   const t = useT()
   const active = useUntil(issue.activity?.expires_at)
@@ -444,6 +456,7 @@ export const IssueRow = memo(function IssueRow({
               {t("row.hidden")}
             </span>
           )}
+          {(held || approval) && <ReviewFlags held={held} approval={approval} />}
         </div>
       </div>
       <div className="issue-row-side">

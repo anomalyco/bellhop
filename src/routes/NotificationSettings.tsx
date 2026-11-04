@@ -7,12 +7,13 @@ import { SignIn } from "./home/SignIn"
 import { t, tr, useT, type PlainKey, tKey } from "../i18n/settings"
 import "../styles/agents.css"
 import "../styles/features.css"
+import { useT as useDeskT } from "../i18n/helpdesk"
 
 type Switch = Exclude<keyof NotificationSettings, "email">
 
-const rows: Switch[] = ["opened", "replied", "mentions", "assigned"]
+const rows: Switch[] = ["opened", "replied", "mentions", "assigned", "approvals"]
 
-/** /settings/notifications on the home domain: the account's four email switches, saved as they're flipped. */
+/** /settings/notifications on the home domain: the account's email switches, saved as they're flipped. */
 export function NotificationSettingsPage() {
   const { data: me } = useMe()
   if (!me) return <Header />
@@ -29,6 +30,7 @@ export function NotificationSettingsPage() {
 
 function Settings() {
   useT()
+  const td = useDeskT()
   const { data, error } = useResource<NotificationSettings>(keys.notifications, api.notifications, 5_000)
   const [saving, setSaving] = useState<Switch | null>(null)
   const [note, setNote] = useState<string | null>(null)
@@ -64,8 +66,9 @@ function Settings() {
             {rows.map((key) => (
               <label key={key} className="box-row switch-row" htmlFor={`notify-${key}`}>
                 <div className="settings-row-main">
-                  <div className="switch-title">{tKey(`notify.${key}` as PlainKey)}</div>
-                  <div className="issue-meta">{tKey(`notify.${key}Text` as PlainKey)}</div>
+                  {/* Help desk review mail's words live with the help desk's */}
+                  <div className="switch-title">{key === "approvals" ? td("notify.approvals") : tKey(`notify.${key}` as PlainKey)}</div>
+                  <div className="issue-meta">{key === "approvals" ? td("notify.approvalsText") : tKey(`notify.${key}Text` as PlainKey)}</div>
                 </div>
                 <input
                   id={`notify-${key}`}

@@ -29,6 +29,7 @@ import { isDesk } from "../../lib/helpdesk"
 import { ContactNamesProvider } from "../../ui/Actor"
 import { contactLabel } from "../../lib/helpdesk"
 import { RequestAnswers, RequestProvider, RequestTypeLabel } from "../../ui/helpdesk/RequestDetails"
+import { ApprovalCard, HeldReply, ReviewNotice } from "../../ui/helpdesk/Review"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -54,6 +55,10 @@ export function IssueView({ model }: { model: IssueModel }) {
             {blocks(entries(model)).map((b) =>
               b.kind === "hidden" ? (
                 <HiddenLine key={b.key} reason={b.reason} />
+              ) : b.kind === "held" ? (
+                <HeldReply key={b.key} app={app} issue={issue} comment={b.comment} />
+              ) : b.kind === "approval" ? (
+                <ApprovalCard key={b.key} app={app} issue={issue} approval={b.approval} />
               ) : b.kind === "events" ? (
                 b.events.length > 2 ? (
                   <EventBurst key={b.key} slug={app.slug} events={b.events} authorTier={authorTier} />
@@ -69,6 +74,7 @@ export function IssueView({ model }: { model: IssueModel }) {
           </div>
           </RequestProvider>
           </VerificationsProvider>
+          <ReviewNotice slug={app.slug} number={issue.number} />
           {actionError && (
             <p className="flash" data-tone="danger">
               {actionError}
@@ -169,10 +175,15 @@ function Report({ model }: { model: IssueModel }) {
               <EditedMarker slug={app.slug} number={issue.number} />
             </>
           )}
-          {viewers !== null && viewers > 0 && (
-            <span className="report-viewers" title={t("issue.viewersTitle")}>
-              {" · "}
-              <PersonIcon size={12} /> {t("issue.viewing", { count: viewers })}
+          {/* Rendered (empty) until the live count arrives: phones keep its line, so the count never moves the page */}
+          {viewers !== 0 && (
+            <span className="report-viewers" title={viewers ? t("issue.viewersTitle") : undefined}>
+              {!!viewers && (
+                <>
+                  <span className="report-viewers-sep">{" · "}</span>
+                  <PersonIcon size={12} /> {t("issue.viewing", { count: viewers })}
+                </>
+              )}
             </span>
           )}
         </span>

@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor} cambió el tipo a {type}; su destino de asignación no está disponible, así que quedó sin asignar",
   "event.typeRemoved": "{actor} quitó el tipo de solicitud",
   "event.someType": "otro tipo",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "Borrador de {agent}",
+  "held.title": "Borrador de {agent} · pendiente de revisión",
+  "held.send": "Enviar",
+  "held.sending": "Enviando…",
+  "held.editSend": "Editar y enviar",
+  "held.editLabel": "Edita el borrador antes de enviarlo",
+  "held.discard": "Descartar",
+  "held.discardTitle": "Descartar el borrador",
+  "held.discardText": "¿Descartar este borrador? El solicitante nunca lo verá.",
+  "held.discardConfirm": "Descartar borrador",
+  "held.gone": "Otra persona ya envió o descartó este borrador. La conversación está actualizada.",
+  "held.sentBy": "Enviado por {name}",
+
+  // Review: approvals
+  "approval.title": "{agent} pide aprobar {action}",
+  "approval.summaryLabel": "Lo que dice el agente",
+  "approval.details": "Lo que apruebas (exactamente como se envió)",
+  "approval.noDetails": "Sin detalles: la aprobación cubre solo la acción.",
+  "approval.pending": "Pendiente de decisión",
+  "approval.expires": "Caduca el {time}",
+  "approval.expired": "Caducó sin decisión",
+  "approval.approvedBy": "Aprobado por {name}",
+  "approval.rejectedBy": "Rechazado por {name}",
+  "approval.used": "El agente ya la usó.",
+  "approval.tokenExpired": "Pasaron los 30 minutos que tenía para actuar.",
+  "approval.note": "Nota: {note}",
+  "approval.approve": "Aprobar…",
+  "approval.reject": "Rechazar…",
+  "approval.confirmApprove": "¿Aprobar {action} con exactamente estos detalles?",
+  "approval.confirmReject": "¿Rechazar {action}?",
+  "approval.noteLabel": "Nota para el agente (opcional)",
+  "approval.back": "Atrás",
+  "approval.approveConfirm": "Aprobar",
+  "approval.rejectConfirm": "Rechazar",
+  "approval.deciding": "Guardando…",
+  "approval.changed": "Los detalles cambiaron desde que abriste esto. Revísalos de nuevo antes de decidir.",
+  "approval.unavailable": "Esta aprobación ya se decidió o caducó.",
+  "event.approvalApproved": "{actor} aprobó {action}",
+  "event.approvalRejected": "{actor} rechazó {action}",
+
+  // Review queue on the list
+  "queue.title": "Por revisar",
+  "queue.held": "Borradores del agente",
+  "queue.approvals": "Pendientes de aprobación",
+  "queue.heldFlag": "Borrador",
+  "queue.heldTitle": "Una respuesta de un agente espera revisión",
+  "queue.approvalFlag": "Aprobación",
+  "queue.approvalTitle": "Un agente espera una aprobación",
+  "queue.helpHeld": "Solicitudes con un borrador de un agente pendiente de revisión",
+  "queue.helpApproval": "Solicitudes con una aprobación pendiente de decisión",
+
+  // Notification settings
+  "notify.approvals": "Aprobaciones y borradores de agentes en centros de ayuda",
+  "notify.approvalsText": "Para equipos de centros de ayuda: un correo cuando un agente pide una aprobación o retiene una respuesta para revisarla.",
 }
 
 export default messages

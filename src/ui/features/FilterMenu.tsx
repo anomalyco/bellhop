@@ -7,6 +7,10 @@ import { Menu } from "../Menu"
 import { Button } from "../primitives"
 import "../../styles/insights.css"
 import { tKey, useT, type PlainKey } from "../../i18n/core"
+import { useT as useDeskT } from "../../i18n/helpdesk"
+
+/** The help desk review queue's counts (null: not a help desk team). */
+type Review = { heldCount: number | null; approvalCount: number | null } | null
 
 // The search box's qualifiers, edited as text: each control adds, swaps or removes one `key:value` token and leaves
 // the rest of the query (is:open, label:, free text) alone.
@@ -75,7 +79,7 @@ function managed(t: Token, scope: Scope) {
   if (t.key === null) return false
   if (["status", "reason", "assignee", "author", "has"].includes(t.key)) return true
   if (t.key === "no") return t.value === "label" || t.value === "assignee"
-  if (t.key === "is") return ["private", "locked", "pinned"].includes(t.value)
+  if (t.key === "is") return ["private", "locked", "pinned", "held", "awaiting-approval"].includes(t.value)
   if (t.key === "sort") return scope === "feed"
   return false
 }
@@ -111,6 +115,7 @@ export function FilterMenu({
   scope = "workspace",
   slug,
   member = false,
+  review = null,
   disabled,
 }: {
   query: string
@@ -120,6 +125,8 @@ export function FilterMenu({
   slug?: string
   /** On this workspace's team: shows assignees, handles and is:private. */
   member?: boolean
+  /** Help desk team: the review queue's counts, for the "Needs review" filters (null elsewhere). */
+  review?: Review
   /** The loading skeleton: the button holds its place. */
   disabled?: boolean
 }) {
@@ -151,9 +158,9 @@ export function FilterMenu({
     >
       {() =>
         helping ? (
-          <Help scope={scope} onBack={() => setHelping(false)} />
+          <Help scope={scope} desk={!!review} onBack={() => setHelping(false)} />
         ) : (
-          <Groups query={query} scope={scope} slug={slug} member={member} onChange={change} onHelp={() => setHelping(true)} />
+          <Groups query={query} scope={scope} slug={slug} member={member} review={review} onChange={change} onHelp={() => setHelping(true)} />
         )
       }
     </Menu>
@@ -165,6 +172,7 @@ function Groups({
   scope,
   slug,
   member,
+  review,
   onChange,
   onHelp,
 }: {
@@ -172,9 +180,11 @@ function Groups({
   scope: Scope
   slug?: string
   member: boolean
+  review: Review
   onChange: (next: string) => void
   onHelp: () => void
 }) {
+  const td = useDeskT()
   const t = useT()
   const team = scope === "workspace" && member && !!slug
   const { data: people } = useResource<Mentionable[]>(team ? keys.mentionables(slug!) : null, () => api.mentionables(slug!), 60_000)
@@ -187,6 +197,18 @@ function Groups({
 
   return (
     <div className="filter-menu">
+      {review && (
+        <Group title={td("queue.title")}>
+          <Chip on={hasQualifier(query, "is", "held")} onClick={() => onChange(toggle(query, "is", "held"))}>
+            {td("queue.held")}
+            {review.heldCount !== null && <span className="filter-chip-count">{review.heldCount}</span>}
+          </Chip>
+          <Chip on={hasQualifier(query, "is", "awaiting-approval")} onClick={() => onChange(toggle(query, "is", "awaiting-approval"))}>
+            {td("queue.approvals")}
+            {review.approvalCount !== null && <span className="filter-chip-count">{review.approvalCount}</span>}
+          </Chip>
+        </Group>
+      )}
       <Group title={t("filter.status")}>
         <Chip on={!status} onClick={() => onChange(setOne(query, "status", null))} radio>
           {t("filter.any")}
@@ -310,8 +332,9 @@ function Chip({ on, onClick, radio, children }: { on: boolean; onClick: () => vo
   )
 }
 
-function Help({ scope, onBack }: { scope: Scope; onBack: () => void }) {
+function Help({ scope, desk, onBack }: { scope: Scope; desk: boolean; onBack: () => void }) {
   const t = useT()
+  const td = useDeskT()
   return (
     <div className="filter-help">
       <p className="filter-group-title">{t("filter.qualifiers")}</p>
@@ -323,6 +346,18 @@ function Help({ scope, onBack }: { scope: Scope; onBack: () => void }) {
             <span>{label(h.text)}</span>
           </div>
         ))}
+      {desk && (
+        <>
+          <div className="filter-help-row">
+            <code>is:held</code>
+            <span>{td("queue.helpHeld")}</span>
+          </div>
+          <div className="filter-help-row">
+            <code>is:awaiting-approval</code>
+            <span>{td("queue.helpApproval")}</span>
+          </div>
+        </>
+      )}
       <p className="filter-help-note">{t("filter.helpNote")}</p>
       <div className="filter-foot">
         <span />

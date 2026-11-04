@@ -341,6 +341,62 @@ const en = {
   "event.retypedUnavailable": "{actor} changed the type to {type}; its routing target isn't available, so it's unassigned",
   "event.typeRemoved": "{actor} removed the request type",
   "event.someType": "another type",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "Draft from {agent}",
+  "held.title": "Draft from {agent} · waiting for review",
+  "held.send": "Send",
+  "held.sending": "Sending…",
+  "held.editSend": "Edit and send",
+  "held.editLabel": "Edit the draft before sending",
+  "held.discard": "Discard",
+  "held.discardTitle": "Discard the draft",
+  "held.discardText": "Discard this draft? The requester never sees it.",
+  "held.discardConfirm": "Discard draft",
+  "held.gone": "Someone else already sent or discarded this draft. The conversation is up to date.",
+  "held.sentBy": "Sent by {name}",
+
+  // Review: approvals
+  "approval.title": "{agent} asks to approve {action}",
+  "approval.summaryLabel": "The agent's description",
+  "approval.details": "What you approve (exactly as sent)",
+  "approval.noDetails": "No details: the approval covers the action alone.",
+  "approval.pending": "Waiting for a decision",
+  "approval.expires": "Expires {time}",
+  "approval.expired": "Expired without a decision",
+  "approval.approvedBy": "Approved by {name}",
+  "approval.rejectedBy": "Rejected by {name}",
+  "approval.used": "The agent has used it.",
+  "approval.tokenExpired": "Its 30 minutes to act have passed.",
+  "approval.note": "Note: {note}",
+  "approval.approve": "Approve…",
+  "approval.reject": "Reject…",
+  "approval.confirmApprove": "Approve {action} with exactly these details?",
+  "approval.confirmReject": "Reject {action}?",
+  "approval.noteLabel": "Note for the agent (optional)",
+  "approval.back": "Back",
+  "approval.approveConfirm": "Approve",
+  "approval.rejectConfirm": "Reject",
+  "approval.deciding": "Saving…",
+  "approval.changed": "The details changed since you opened this. Check them again before deciding.",
+  "approval.unavailable": "This approval was already decided or has expired.",
+  "event.approvalApproved": "{actor} approved {action}",
+  "event.approvalRejected": "{actor} rejected {action}",
+
+  // Review queue on the list
+  "queue.title": "Needs review",
+  "queue.held": "Agent drafts",
+  "queue.approvals": "Awaiting approval",
+  "queue.heldFlag": "Draft",
+  "queue.heldTitle": "An agent's reply is waiting for review",
+  "queue.approvalFlag": "Approval",
+  "queue.approvalTitle": "An agent is waiting for an approval",
+  "queue.helpHeld": "Requests with an agent's draft waiting for review",
+  "queue.helpApproval": "Requests with an approval waiting for a decision",
+
+  // Notification settings
+  "notify.approvals": "Approvals and agent drafts in help desks",
+  "notify.approvalsText": "For help desk teams: an email when an agent asks for an approval or holds a reply for review.",
 } as const
 
 export default en

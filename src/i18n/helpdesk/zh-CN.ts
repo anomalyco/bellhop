@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor} 将类型更改为 {type}；其分配目标不可用，因此未分配",
   "event.typeRemoved": "{actor} 移除了请求类型",
   "event.someType": "其他类型",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "{agent} 的草稿",
+  "held.title": "{agent} 的草稿 · 等待审核",
+  "held.send": "发送",
+  "held.sending": "正在发送…",
+  "held.editSend": "编辑后发送",
+  "held.editLabel": "发送前编辑草稿",
+  "held.discard": "丢弃",
+  "held.discardTitle": "丢弃草稿",
+  "held.discardText": "丢弃此草稿？请求者不会看到它。",
+  "held.discardConfirm": "丢弃草稿",
+  "held.gone": "其他人已发送或丢弃了此草稿。对话已是最新状态。",
+  "held.sentBy": "由 {name} 发送",
+
+  // Review: approvals
+  "approval.title": "{agent} 请求批准 {action}",
+  "approval.summaryLabel": "智能体自述（未经核实）",
+  "approval.details": "你批准的内容（与发送的完全一致）",
+  "approval.noDetails": "无详情：此批准仅针对该操作本身。",
+  "approval.pending": "等待决定",
+  "approval.expires": "{time}过期",
+  "approval.expired": "未作决定，已过期",
+  "approval.approvedBy": "已由 {name} 批准",
+  "approval.rejectedBy": "已由 {name} 拒绝",
+  "approval.used": "智能体已使用此批准。",
+  "approval.tokenExpired": "批准后的 30 分钟执行时限已过。",
+  "approval.note": "备注：{note}",
+  "approval.approve": "批准…",
+  "approval.reject": "拒绝…",
+  "approval.confirmApprove": "按以下详情原样批准 {action}？",
+  "approval.confirmReject": "拒绝 {action}？",
+  "approval.noteLabel": "给智能体的备注（选填）",
+  "approval.back": "返回",
+  "approval.approveConfirm": "批准",
+  "approval.rejectConfirm": "拒绝",
+  "approval.deciding": "正在保存…",
+  "approval.changed": "自你打开后详情已发生变化。请重新检查后再做决定。",
+  "approval.unavailable": "此批准已有决定或已过期。",
+  "event.approvalApproved": "{actor} 批准了 {action}",
+  "event.approvalRejected": "{actor} 拒绝了 {action}",
+
+  // Review queue on the list
+  "queue.title": "待审核",
+  "queue.held": "智能体草稿",
+  "queue.approvals": "等待批准",
+  "queue.heldFlag": "草稿",
+  "queue.heldTitle": "智能体的回复正在等待审核",
+  "queue.approvalFlag": "待批准",
+  "queue.approvalTitle": "智能体正在等待批准",
+  "queue.helpHeld": "有智能体草稿等待审核的请求",
+  "queue.helpApproval": "有批准等待决定的请求",
+
+  // Notification settings
+  "notify.approvals": "帮助台中的批准请求和智能体草稿",
+  "notify.approvalsText": "面向帮助台团队：当智能体请求批准或保留回复待审核时，发送邮件通知。",
 }
 
 export default messages

@@ -1326,6 +1326,9 @@ a.box-row:hover {
 .report-viewers .icon {
   vertical-align: -1px;
 }
+.report-viewers:empty {
+  display: none;
+}
 .report-body {
   margin-top: 18px;
   font-size: var(--text-body);
@@ -2459,12 +2462,21 @@ button.prop:hover,
   .report-head .report-new {
     display: none;
   }
-  /* The byline wraps rather than cut off "1 viewing" */
+  /* The byline wraps rather than cut off "1 viewing"; the count has its own line, held from first paint, since
+     it arrives over the live socket after the page */
   .report-by {
     align-items: flex-start;
   }
   .report-by > span {
     white-space: normal;
+  }
+  .report-viewers,
+  .report-viewers:empty {
+    display: block;
+    min-height: 1lh;
+  }
+  .report-viewers-sep {
+    display: none;
   }
   .group-msg {
     padding-left: 0;

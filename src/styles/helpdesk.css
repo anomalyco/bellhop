@@ -1148,3 +1148,281 @@
 .request-field-hint > span {
   display: block;
 }
+
+/* Review: an agent's held reply, in place in the thread (team only) */
+.held {
+  display: grid;
+  gap: 8px;
+  margin: 8px -12px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--waiting) 45%, transparent);
+  background: color-mix(in oklab, var(--waiting) 4%, transparent);
+}
+.held-head,
+.approval-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 22px;
+  font-size: var(--text-ui);
+}
+.held-title,
+.approval-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--fg-muted);
+  overflow-wrap: anywhere;
+}
+.held-title .actor-name,
+.approval-title .actor-name {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.held-title .ai-badge,
+.approval-title .ai-badge {
+  margin-left: 4px;
+}
+.held-time,
+.approval-time {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.held-body {
+  padding-left: 28px;
+  font-size: var(--text-body);
+  line-height: 22px;
+}
+.held-edit {
+  margin-left: 28px;
+}
+.held-actions,
+.approval-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.held > .held-actions,
+.held > .field-error {
+  padding-left: 28px;
+}
+.held-confirm {
+  display: grid;
+  gap: 8px;
+  margin-left: 28px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.held-confirm p {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.sent-by {
+  margin: 2px 0 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+
+/* Review: an approval card. `details` is what's signed, so it's the card's centre, verbatim and monospaced. */
+.approval {
+  display: grid;
+  gap: 10px;
+  margin: 8px -12px;
+  padding: 10px 12px 12px;
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 1px var(--border-strong, color-mix(in oklab, var(--fg) 18%, transparent));
+}
+.approval[data-state="pending"] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--progress) 55%, transparent);
+}
+.approval-action {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--fg);
+  border-radius: var(--radius-small);
+  background: var(--layer-1);
+  overflow-wrap: anywhere;
+}
+.approval-summary,
+.approval-signed {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding-left: 28px;
+}
+.approval-label {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.approval-summary p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.approval-details {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 20px;
+}
+.approval-details th,
+.approval-details td {
+  padding: 5px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  direction: ltr;
+  unicode-bidi: isolate;
+  box-shadow: inset 0 -1px 0 var(--border, color-mix(in oklab, var(--fg) 10%, transparent));
+}
+.approval-details th {
+  width: 36%;
+  color: var(--fg-muted);
+  font-weight: var(--weight-regular);
+}
+.approval-details td {
+  color: var(--fg);
+}
+.approval-details tr:last-child th,
+.approval-details tr:last-child td {
+  box-shadow: none;
+}
+.approval-details tbody {
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.approval-empty {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.approval-state,
+.approval-meta,
+.approval > .approval-actions,
+.approval > .field-error {
+  padding-left: 28px;
+}
+.approval-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: var(--text-ui);
+}
+.approval-pill {
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.approval-pill[data-state="pending"] {
+  color: var(--progress);
+}
+.approval-pill[data-state="approved"] {
+  color: var(--closed);
+}
+.approval-pill[data-state="rejected"] {
+  color: var(--danger);
+}
+.approval-pill[data-state="expired"] {
+  color: var(--fg-muted);
+}
+.approval-when {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.approval-meta {
+  margin: -4px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.approval-note {
+  color: var(--fg);
+}
+.approval-confirm {
+  display: grid;
+  gap: 10px;
+  margin-left: 28px;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.approval-confirm .approval-details tbody {
+  background: var(--bg);
+}
+.approval-confirm-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+
+/* List rows: review flags (team) */
+.review-flag {
+  padding: 0 6px;
+  border-radius: var(--radius-small);
+  font-size: var(--text-small);
+  line-height: 18px;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.review-flag[data-kind="held"] {
+  color: color-mix(in oklab, var(--waiting) 80%, var(--fg));
+}
+.review-flag[data-kind="approval"] {
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+}
+
+@media (max-width: 640px) {
+  .held,
+  .approval {
+    margin-inline: 0;
+  }
+  .held-body,
+  .held > .held-actions,
+  .held > .field-error,
+  .approval-summary,
+  .approval-signed,
+  .approval-state,
+  .approval-meta,
+  .approval > .approval-actions,
+  .approval > .field-error {
+    padding-left: 0;
+  }
+  .held-edit,
+  .held-confirm,
+  .approval-confirm {
+    margin-left: 0;
+  }
+  .approval-details th,
+  .approval-details td {
+    display: block;
+    width: auto;
+    box-shadow: none;
+  }
+  .approval-details th {
+    padding-bottom: 0;
+  }
+  .approval-details tr:not(:first-child) th {
+    box-shadow: inset 0 1px 0 var(--border, color-mix(in oklab, var(--fg) 10%, transparent));
+  }
+}
+.filter-chip-count {
+  margin-left: 6px;
+  color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}

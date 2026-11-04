@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor}が種類を{type}に変更しました。振り分け先が利用できないため、未割り当てです",
   "event.typeRemoved": "{actor}がお問い合わせの種類を外しました",
   "event.someType": "別の種類",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "{agent} の下書き",
+  "held.title": "{agent} の下書き · レビュー待ち",
+  "held.send": "送信",
+  "held.sending": "送信中…",
+  "held.editSend": "編集して送信",
+  "held.editLabel": "送信前に下書きを編集",
+  "held.discard": "破棄",
+  "held.discardTitle": "下書きを破棄",
+  "held.discardText": "この下書きを破棄しますか？問い合わせ者には表示されません。",
+  "held.discardConfirm": "下書きを破棄",
+  "held.gone": "この下書きは他のメンバーがすでに送信または破棄しました。会話は最新の状態です。",
+  "held.sentBy": "送信者: {name}",
+
+  // Review: approvals
+  "approval.title": "{agent} が {action} の承認を求めています",
+  "approval.summaryLabel": "エージェントによる説明（未検証）",
+  "approval.details": "承認する内容（送信されたとおりの正確な値）",
+  "approval.noDetails": "詳細はありません。承認の対象はこの操作のみです。",
+  "approval.pending": "判断待ち",
+  "approval.expires": "期限: {time}",
+  "approval.expired": "判断されないまま期限切れになりました",
+  "approval.approvedBy": "承認者: {name}",
+  "approval.rejectedBy": "却下者: {name}",
+  "approval.used": "エージェントが実行済みです。",
+  "approval.tokenExpired": "実行できる30分間の期限が過ぎました。",
+  "approval.note": "メモ: {note}",
+  "approval.approve": "承認…",
+  "approval.reject": "却下…",
+  "approval.confirmApprove": "この内容のとおりに {action} を承認しますか？",
+  "approval.confirmReject": "{action} を却下しますか？",
+  "approval.noteLabel": "エージェントへのメモ（任意）",
+  "approval.back": "戻る",
+  "approval.approveConfirm": "承認",
+  "approval.rejectConfirm": "却下",
+  "approval.deciding": "保存中…",
+  "approval.changed": "開いた後に詳細が変更されました。判断する前にもう一度確認してください。",
+  "approval.unavailable": "この承認はすでに判断済みか、期限切れです。",
+  "event.approvalApproved": "{actor}が {action} を承認しました",
+  "event.approvalRejected": "{actor}が {action} を却下しました",
+
+  // Review queue on the list
+  "queue.title": "レビュー待ち",
+  "queue.held": "エージェントの下書き",
+  "queue.approvals": "承認待ち",
+  "queue.heldFlag": "下書き",
+  "queue.heldTitle": "エージェントの返信がレビューを待っています",
+  "queue.approvalFlag": "承認",
+  "queue.approvalTitle": "エージェントが承認を待っています",
+  "queue.helpHeld": "エージェントの下書きがレビュー待ちのお問い合わせ",
+  "queue.helpApproval": "承認の判断待ちのお問い合わせ",
+
+  // Notification settings
+  "notify.approvals": "ヘルプデスクの承認とエージェントの下書き",
+  "notify.approvalsText": "ヘルプデスクのチーム向け: エージェントが承認を求めたときや、返信をレビュー待ちで保留したときにメールでお知らせします。",
 }
 
 export default messages

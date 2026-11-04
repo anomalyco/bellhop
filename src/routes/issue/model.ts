@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import type { Actor, AppDetail, Attachment, CloseReason, Comment, Issue, IssueEvent, IssueStatus, Me, ModerationReason } from "../../../shared/api"
+import type { Actor, AppDetail, Approval, Attachment, CloseReason, Comment, Issue, IssueEvent, IssueStatus, Me, ModerationReason } from "../../../shared/api"
 import type { IssueActions } from "./Properties"
 
 /** Everything an issue layout needs: the data, the editors' actions and the composer's handlers. Layouts only differ in presentation. */
@@ -66,15 +66,41 @@ export interface EventEntry {
   event: IssueEvent
 }
 
-export type Entry = MessageEntry | EventEntry | HiddenEntry
+/** Help desk team: an agent's reply held for review. */
+export interface HeldEntry {
+  kind: "held"
+  key: string
+  comment: Comment
+}
+
+/** Help desk team: an agent's approval request, in its latest state. */
+export interface ApprovalEntry {
+  kind: "approval"
+  key: string
+  approval: Approval
+}
+
+export type Entry = MessageEntry | EventEntry | HiddenEntry | HeldEntry | ApprovalEntry
 
 /** The conversation after the report: the timeline, then comments still on their way. */
 export function entries(model: IssueModel): Entry[] {
   const { issue, pending, viewer, member } = model
   const list: Entry[] = []
+  // Every approval event carries the approval's current state; the last one seen for an id is the newest
+  const approvals = new Map<string, Approval>()
+  for (const item of issue.timeline)
+    if (item.kind === "event" && item.event.type.startsWith("approval.")) {
+      const a = item.event.data.approval as Approval | undefined
+      if (a) approvals.set(a.id, a)
+    }
   for (const item of issue.timeline) {
     if (item.kind === "comment") {
       const c = item.comment
+      // Held replies and approvals are the team's (the server sends them to nobody else)
+      if (c.held) {
+        if (member) list.push({ kind: "held", key: c.id, comment: c })
+        continue
+      }
       // Notes are the team's; the server never sends them to anyone else, and the page never shows one if it did.
       if (c.internal && !member) continue
       if (c.hidden && !member) list.push({ kind: "hidden", key: c.id, reason: c.hidden.reason })
@@ -90,6 +116,9 @@ export function entries(model: IssueModel): Entry[] {
           comment: c,
           internal: !!c.internal,
         })
+    } else if (item.event.type === "approval.requested") {
+      const a = approvals.get((item.event.data.approval as Approval | undefined)?.id ?? "")
+      if (member && a) list.push({ kind: "approval", key: item.event.id, approval: a })
     } else list.push({ kind: "event", key: item.event.id, event: item.event })
   }
   if (viewer)
@@ -112,6 +141,8 @@ export type Block =
   | { kind: "run"; key: string; author: Actor; byAuthor: boolean; internal: boolean; messages: MessageEntry[] }
   | { kind: "events"; key: string; events: IssueEvent[] }
   | { kind: "hidden"; key: string; reason: ModerationReason }
+  | HeldEntry
+  | ApprovalEntry
 
 const sameActor = (a: Actor, b: Actor) => a.type === b.type && a.id === b.id
 
@@ -124,7 +155,7 @@ export function blocks(list: Entry[]): Block[] {
       // Notes and replies never share a run, so a note always reads as one.
       if (last?.kind === "run" && sameActor(last.author, e.author) && last.internal === e.internal) last.messages.push(e)
       else out.push({ kind: "run", key: e.key, author: e.author, byAuthor: e.byAuthor, internal: e.internal, messages: [e] })
-    } else if (e.kind === "hidden") out.push(e)
+    } else if (e.kind === "hidden" || e.kind === "held" || e.kind === "approval") out.push(e)
     else if (last?.kind === "events") last.events.push(e.event)
     else out.push({ kind: "events", key: e.key, events: [e.event] })
   }

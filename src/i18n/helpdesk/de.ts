@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor} hat den Typ zu {type} geändert; das Weiterleitungsziel ist nicht verfügbar, daher ist die Anfrage nicht zugewiesen",
   "event.typeRemoved": "{actor} hat den Anfragetyp entfernt",
   "event.someType": "einem anderen Typ",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "Entwurf von {agent}",
+  "held.title": "Entwurf von {agent} · wartet auf Prüfung",
+  "held.send": "Senden",
+  "held.sending": "Wird gesendet…",
+  "held.editSend": "Bearbeiten & senden",
+  "held.editLabel": "Entwurf vor dem Senden bearbeiten",
+  "held.discard": "Verwerfen",
+  "held.discardTitle": "Entwurf verwerfen",
+  "held.discardText": "Diesen Entwurf verwerfen? Die anfragende Person sieht ihn nie.",
+  "held.discardConfirm": "Entwurf verwerfen",
+  "held.gone": "Jemand anderes hat diesen Entwurf bereits gesendet oder verworfen. Die Unterhaltung ist auf dem neuesten Stand.",
+  "held.sentBy": "Gesendet von {name}",
+
+  // Review: approvals
+  "approval.title": "{agent} bittet um Freigabe für {action}",
+  "approval.summaryLabel": "Beschreibung des Agents (nicht geprüft)",
+  "approval.details": "Was du freigibst (genau so, wie gesendet)",
+  "approval.noDetails": "Keine Details: Die Freigabe gilt nur für die Aktion selbst.",
+  "approval.pending": "Wartet auf Entscheidung",
+  "approval.expires": "Gültig bis {time}",
+  "approval.expired": "Ohne Entscheidung abgelaufen",
+  "approval.approvedBy": "Freigegeben von {name}",
+  "approval.rejectedBy": "Abgelehnt von {name}",
+  "approval.used": "Der Agent hat sie genutzt.",
+  "approval.tokenExpired": "Die 30 Minuten, in denen der Agent handeln durfte, sind abgelaufen.",
+  "approval.note": "Notiz: {note}",
+  "approval.approve": "Freigeben…",
+  "approval.reject": "Ablehnen…",
+  "approval.confirmApprove": "{action} mit genau diesen Details freigeben?",
+  "approval.confirmReject": "{action} ablehnen?",
+  "approval.noteLabel": "Notiz für den Agent (optional)",
+  "approval.back": "Zurück",
+  "approval.approveConfirm": "Freigeben",
+  "approval.rejectConfirm": "Ablehnen",
+  "approval.deciding": "Wird gespeichert…",
+  "approval.changed": "Die Details haben sich geändert, seit du das geöffnet hast. Prüfe sie erneut, bevor du entscheidest.",
+  "approval.unavailable": "Über diese Freigabe wurde bereits entschieden oder sie ist abgelaufen.",
+  "event.approvalApproved": "{actor} hat {action} freigegeben",
+  "event.approvalRejected": "{actor} hat {action} abgelehnt",
+
+  // Review queue on the list
+  "queue.title": "Zu prüfen",
+  "queue.held": "Agent-Entwürfe",
+  "queue.approvals": "Warten auf Freigabe",
+  "queue.heldFlag": "Entwurf",
+  "queue.heldTitle": "Eine Antwort eines Agents wartet auf Prüfung",
+  "queue.approvalFlag": "Freigabe",
+  "queue.approvalTitle": "Ein Agent wartet auf eine Freigabe",
+  "queue.helpHeld": "Anfragen mit einem Agent-Entwurf, der auf Prüfung wartet",
+  "queue.helpApproval": "Anfragen mit einer Freigabe, die auf Entscheidung wartet",
+
+  // Notification settings
+  "notify.approvals": "Freigaben und Agent-Entwürfe in Helpdesks",
+  "notify.approvalsText": "Für Helpdesk-Teams: eine E-Mail, wenn ein Agent um eine Freigabe bittet oder eine Antwort zur Prüfung zurückhält.",
 }
 
 export default messages

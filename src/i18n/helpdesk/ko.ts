@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor}이(가) 유형을 {type}(으)로 변경했습니다. 전달 대상을 사용할 수 없어 담당자가 지정되지 않았습니다",
   "event.typeRemoved": "{actor}이(가) 문의 유형을 해제했습니다",
   "event.someType": "다른 유형",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "{agent}의 초안",
+  "held.title": "{agent}의 초안 · 검토 대기 중",
+  "held.send": "보내기",
+  "held.sending": "보내는 중…",
+  "held.editSend": "수정 후 보내기",
+  "held.editLabel": "보내기 전에 초안 수정",
+  "held.discard": "버리기",
+  "held.discardTitle": "초안 버리기",
+  "held.discardText": "이 초안을 버릴까요? 문의자에게는 표시되지 않아요.",
+  "held.discardConfirm": "초안 버리기",
+  "held.gone": "다른 사람이 이미 이 초안을 보내거나 버렸어요. 대화는 최신 상태예요.",
+  "held.sentBy": "{name}이(가) 보냄",
+
+  // Review: approvals
+  "approval.title": "{agent}이(가) {action} 승인을 요청해요",
+  "approval.summaryLabel": "에이전트가 작성한 설명",
+  "approval.details": "승인할 내용 (전송된 값 그대로)",
+  "approval.noDetails": "세부 정보 없음: 이 작업 자체만 승인해요.",
+  "approval.pending": "결정 대기 중",
+  "approval.expires": "{time} 만료",
+  "approval.expired": "결정 없이 만료됨",
+  "approval.approvedBy": "{name}이(가) 승인함",
+  "approval.rejectedBy": "{name}이(가) 거부함",
+  "approval.used": "에이전트가 승인을 사용했어요.",
+  "approval.tokenExpired": "실행 가능 시간 30분이 지났어요.",
+  "approval.note": "메모: {note}",
+  "approval.approve": "승인…",
+  "approval.reject": "거부…",
+  "approval.confirmApprove": "{action}을(를) 정확히 이 내용으로 승인할까요?",
+  "approval.confirmReject": "{action}을(를) 거부할까요?",
+  "approval.noteLabel": "에이전트에게 남길 메모 (선택 사항)",
+  "approval.back": "뒤로",
+  "approval.approveConfirm": "승인",
+  "approval.rejectConfirm": "거부",
+  "approval.deciding": "저장 중…",
+  "approval.changed": "이 화면을 연 뒤 세부 내용이 바뀌었어요. 결정하기 전에 다시 확인하세요.",
+  "approval.unavailable": "이미 결정됐거나 만료된 승인이에요.",
+  "event.approvalApproved": "{actor}이(가) {action}을(를) 승인했습니다",
+  "event.approvalRejected": "{actor}이(가) {action}을(를) 거부했습니다",
+
+  // Review queue on the list
+  "queue.title": "검토 필요",
+  "queue.held": "에이전트 초안",
+  "queue.approvals": "승인 대기 중",
+  "queue.heldFlag": "초안",
+  "queue.heldTitle": "에이전트의 답변이 검토를 기다리고 있어요",
+  "queue.approvalFlag": "승인",
+  "queue.approvalTitle": "에이전트가 승인을 기다리고 있어요",
+  "queue.helpHeld": "검토를 기다리는 에이전트 초안이 있는 문의",
+  "queue.helpApproval": "결정을 기다리는 승인이 있는 문의",
+
+  // Notification settings
+  "notify.approvals": "헬프데스크의 승인 요청과 에이전트 초안",
+  "notify.approvalsText": "헬프데스크 팀용: 에이전트가 승인을 요청하거나 답변을 검토 대기로 보류하면 이메일을 받아요.",
 }
 
 export default messages

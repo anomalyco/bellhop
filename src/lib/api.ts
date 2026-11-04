@@ -20,6 +20,7 @@ import type {
   NewIdentityKey,
   Verification,
   RequestType,
+  Approval,
   RequestTypeInput,
   FeedApp,
   FeedList,
@@ -231,6 +232,12 @@ export const api = {
   patchComment: (slug: string, number: number, id: string, body: string) =>
     request<Comment>("PATCH", `${app(slug)}/issues/${number}/comments/${enc(id)}`, { body }),
   deleteComment: (slug: string, number: number, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}`),
+  // Help desk review: an agent's held reply (sent as is or edited, or discarded) and approvals
+  sendHeld: (slug: string, number: number, id: string, body?: string) =>
+    request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/send`, body === undefined ? {} : { body }),
+  discardHeld: (slug: string, number: number, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}?held=1`),
+  decideApproval: (slug: string, number: number, id: string, input: { decision: "approve" | "reject"; details_hash: string; note?: string }) =>
+    request<Approval>("POST", `${app(slug)}/issues/${number}/approvals/${enc(id)}/decide`, input),
   hideComment: (slug: string, number: number, id: string, reason: ModerationReason) =>
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`, { reason }),
   unhideComment: (slug: string, number: number, id: string) => request<Comment>("DELETE", `${app(slug)}/issues/${number}/comments/${enc(id)}/hide`),

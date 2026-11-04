@@ -338,6 +338,62 @@ const messages: Translation<typeof en> = {
   "event.retypedUnavailable": "{actor} a remplacé le type par {type} ; le destinataire prévu n'est pas disponible, la demande n'est donc attribuée à personne",
   "event.typeRemoved": "{actor} a retiré le type de demande",
   "event.someType": "un autre type",
+
+  // Review: an agent's held reply (autonomy "suggest")
+  "held.label": "Brouillon de {agent}",
+  "held.title": "Brouillon de {agent} · en attente de relecture",
+  "held.send": "Envoyer",
+  "held.sending": "Envoi…",
+  "held.editSend": "Modifier et envoyer",
+  "held.editLabel": "Modifiez le brouillon avant de l'envoyer",
+  "held.discard": "Supprimer",
+  "held.discardTitle": "Supprimer le brouillon",
+  "held.discardText": "Supprimer ce brouillon ? Le demandeur ne le verra jamais.",
+  "held.discardConfirm": "Supprimer le brouillon",
+  "held.gone": "Quelqu'un d'autre a déjà envoyé ou supprimé ce brouillon. La conversation est à jour.",
+  "held.sentBy": "Envoyé par {name}",
+
+  // Review: approvals
+  "approval.title": "{agent} demande l'approbation de {action}",
+  "approval.summaryLabel": "Description fournie par l'agent",
+  "approval.details": "Ce que vous approuvez (valeurs exactes envoyées)",
+  "approval.noDetails": "Aucun détail : l'approbation porte uniquement sur l'action.",
+  "approval.pending": "En attente de décision",
+  "approval.expires": "Expire le {time}",
+  "approval.expired": "Expirée sans décision",
+  "approval.approvedBy": "Approuvée par {name}",
+  "approval.rejectedBy": "Refusée par {name}",
+  "approval.used": "L'agent l'a utilisée.",
+  "approval.tokenExpired": "Le délai de 30 minutes accordé à l'agent pour agir est écoulé.",
+  "approval.note": "Note : {note}",
+  "approval.approve": "Approuver…",
+  "approval.reject": "Refuser…",
+  "approval.confirmApprove": "Approuver {action} avec exactement ces détails ?",
+  "approval.confirmReject": "Refuser {action} ?",
+  "approval.noteLabel": "Note pour l'agent (facultatif)",
+  "approval.back": "Retour",
+  "approval.approveConfirm": "Approuver",
+  "approval.rejectConfirm": "Refuser",
+  "approval.deciding": "Enregistrement…",
+  "approval.changed": "Les détails ont changé depuis que vous avez ouvert cette page. Vérifiez-les à nouveau avant de décider.",
+  "approval.unavailable": "Cette demande d'approbation a déjà été traitée ou a expiré.",
+  "event.approvalApproved": "{actor} a approuvé {action}",
+  "event.approvalRejected": "{actor} a refusé {action}",
+
+  // Review queue on the list
+  "queue.title": "À relire",
+  "queue.held": "Brouillons d'agent",
+  "queue.approvals": "En attente d'approbation",
+  "queue.heldFlag": "Brouillon",
+  "queue.heldTitle": "Une réponse d'agent attend une relecture",
+  "queue.approvalFlag": "Approbation",
+  "queue.approvalTitle": "Un agent attend une approbation",
+  "queue.helpHeld": "Demandes avec un brouillon d'agent en attente de relecture",
+  "queue.helpApproval": "Demandes avec une approbation en attente de décision",
+
+  // Notification settings
+  "notify.approvals": "Approbations et brouillons d'agent des centres d'aide",
+  "notify.approvalsText": "Pour les équipes de centre d'aide : un e-mail quand un agent demande une approbation ou retient une réponse pour relecture.",
 }
 
 export default messages
