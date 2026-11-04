@@ -9,6 +9,8 @@ import { appendTimeline } from "../../lib/issues"
 import { appPath } from "../../lib/site"
 import { Editor } from "../../ui/Editor"
 import { contentsText, sourceText } from "../../ui/features/Diagnostics"
+import { SavedRepliesMenu } from "../../ui/features/SavedRepliesMenu"
+import { actorName } from "../../ui/Actor"
 import { ChevronDownIcon, LockIcon, PaperclipIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { GuestLine, useNamePrompt } from "../../ui/NamePrompt"
@@ -304,6 +306,22 @@ export function Composer({ model }: { model: IssueModel }) {
           }
           actions={
             <>
+              {member && (
+                <SavedRepliesMenu
+                  slug={app.slug}
+                  reporter={actorName(issue.author)}
+                  onInsert={(text) => {
+                    setBody((b) => (b.trim() ? `${b.replace(/\s*$/, "")}\n\n${text}` : text))
+                    // Back to the text, caret at the end, so the reply can be adjusted and sent from the keyboard.
+                    requestAnimationFrame(() => {
+                      const area = dock.current?.querySelector("textarea")
+                      if (!area) return
+                      area.focus()
+                      area.setSelectionRange(area.value.length, area.value.length)
+                    })
+                  }}
+                />
+              )}
               {splitControl}
               <Button ref={sendButton} variant="primary" onClick={(e) => void comment(e.currentTarget)} disabled={!canSend || busy || working} trailing={<kbd className="kbd">{sendKey}</kbd>}>
                 {busy ? "Uploading…" : note ? "Add note" : "Send"}

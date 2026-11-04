@@ -1,5 +1,7 @@
 import type {
   AgentAccess,
+  Analytics,
+  AuditPage,
   ApiError,
   App,
   AppAgent,
@@ -37,6 +39,8 @@ import type {
   ReportKey,
   ReportMetadata,
   Revision,
+  SavedReply,
+  SavedReplyInput,
   Person,
   Template,
   TemplateInput,
@@ -264,6 +268,18 @@ export const api = {
   declineInvitation: (id: string) => request<{ ok: true }>("POST", `/api/me/invitations/${enc(id)}/decline`),
   /** Leave a workspace you're on (not as its last owner). */
   leaveApp: (slug: string) => request<{ ok: true }>("DELETE", `${app(slug)}/members/me`),
+  analytics: (slug: string, days: 7 | 30 | 90) => get<Analytics>(`${app(slug)}/analytics?days=${days}`),
+  audit: (slug: string, params: { actor?: string; action?: string; cursor?: string } = {}) => {
+    const qs = new URLSearchParams()
+    if (params.actor) qs.set("actor", params.actor)
+    if (params.action) qs.set("action", params.action)
+    if (params.cursor) qs.set("cursor", params.cursor)
+    return get<AuditPage>(`${app(slug)}/audit${qs.size ? `?${qs}` : ""}`)
+  },
+  savedReplies: (slug: string) => get<SavedReply[]>(`${app(slug)}/saved-replies`),
+  createSavedReply: (slug: string, input: SavedReplyInput) => request<SavedReply>("POST", `${app(slug)}/saved-replies`, input),
+  patchSavedReply: (slug: string, id: string, input: SavedReplyInput) => request<SavedReply>("PATCH", `${app(slug)}/saved-replies/${enc(id)}`, input),
+  deleteSavedReply: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/saved-replies/${enc(id)}`),
 }
 
 // Cache keys, so every page agrees on where a resource lives.
@@ -296,6 +312,10 @@ export const keys = {
   reportKeys: (slug: string) => `report-keys:${slug}`,
   similar: (slug: string, title: string) => `similar:${slug}:${title}`,
   invitations: "invitations",
+  analytics: (slug: string, days: number) => `analytics:${slug}:${days}`,
+  /** Every audit page of an app shares this prefix; then the actor and action filters. */
+  audit: (slug: string, actor = "", action = "") => `audit:${slug}:${actor}|${action}`,
+  savedReplies: (slug: string) => `saved-replies:${slug}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

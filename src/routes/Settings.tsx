@@ -18,24 +18,42 @@ import { ColorField, randomColor } from "../ui/ColorField"
 import { Tiers } from "./settings/Tiers"
 import { ReportKeys } from "./settings/ReportKeys"
 import { WebhookEvents, sameEvents } from "./settings/WebhookEvents"
+import { Insights } from "./settings/Insights"
+import { AuditLog } from "./settings/AuditLog"
+import { SavedReplies } from "./settings/SavedReplies"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
 import "../styles/moderation.css"
 
-type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "report-keys" | "members" | "tiers" | "blocked"
+type Section =
+  | "general"
+  | "insights"
+  | "labels"
+  | "templates"
+  | "saved-replies"
+  | "agents"
+  | "webhook"
+  | "report-keys"
+  | "members"
+  | "tiers"
+  | "blocked"
+  | "audit"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 const sections: { id: Section; label: string; min: Role }[] = [
   { id: "general", label: "General", min: "viewer" },
+  { id: "insights", label: "Insights", min: "member" },
   { id: "labels", label: "Labels", min: "viewer" },
   { id: "templates", label: "Templates", min: "viewer" },
+  { id: "saved-replies", label: "Saved replies", min: "viewer" },
   { id: "members", label: "Members", min: "member" },
   { id: "agents", label: "Agents", min: "admin" },
   { id: "webhook", label: "Webhook", min: "admin" },
   { id: "report-keys", label: "Report keys", min: "admin" },
   { id: "tiers", label: "Tiers", min: "member" },
   { id: "blocked", label: "Blocked", min: "member" },
+  { id: "audit", label: "Audit log", min: "admin" },
 ]
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
@@ -101,6 +119,9 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
         </nav>
         <div className="settings-main">
           {active === "general" && <General app={app} />}
+          {active === "insights" && <Insights app={app} />}
+          {active === "saved-replies" && <SavedReplies app={app} />}
+          {active === "audit" && <AuditLog app={app} />}
           {active === "labels" && <Labels app={app} />}
           {active === "templates" && <Templates app={app} />}
           {active === "agents" && <Agents app={app} />}
