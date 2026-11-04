@@ -20,6 +20,9 @@
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description? } -> AppDetail        owner
+//   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  owner
+//   DELETE /api/apps/:slug/icon                          -> AppDetail          owner; back to the Bellhop mark
+//   GET    /icon/:slug/:version                          -> the app's icon (public, immutable; SVG is not accepted)
 //   GET    /api/apps/:slug/settings                      -> AppSettings        member
 //   PUT    /api/apps/:slug/webhook { url: string|null }  -> AppSettings        owner
 //   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        owner; new signing secret
@@ -95,6 +98,8 @@ export interface App {
   name: string
   description: string
   created_at: string
+  /** The app's own icon (favicon and top-left logo on its pages), or null for the Bellhop mark. Versioned URL. */
+  icon_url: string | null
   /** The viewer's role in this application, null for guests. */
   role: "owner" | "member" | null
 }

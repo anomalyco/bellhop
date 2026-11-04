@@ -21,11 +21,11 @@ export function appUrl(env: Env, origin: string, slug: string, path = "/") {
 }
 /** Slugs double as subdomains, so names with other meanings stay unavailable. */
 export const reservedSlugs = new Set(
-  "admin api app assets auth blog cdn dev docs help mail mcp media new settings static status support www".split(" ")
+  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www".split(" ")
 )
 export const rows = async <T>(stmt: D1PreparedStatement) => (await stmt.all<T>()).results
 
-type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503
+type ErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 415 | 416 | 426 | 428 | 429 | 500 | 501 | 502 | 503
 export class ApiFailure extends Error {
   constructor(
     readonly status: ErrorStatus,

@@ -6,7 +6,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/media/*", "/mcp"]
+    "run_worker_first": ["/api/*", "/auth/*", "/media/*", "/icon/*", "/mcp"]
   },
   "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],

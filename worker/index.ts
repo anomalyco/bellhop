@@ -5,6 +5,7 @@ import { auth, currentUser, firstContact } from "./auth"
 import { ApiFailure, dbError, denied, missing, sql } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, issueRoom } from "./events"
+import { icons } from "./icons"
 import { issueNumber } from "./issues"
 import { issues } from "./mutations"
 import { media } from "./media"
@@ -19,13 +20,13 @@ const limit = bodyLimit({
 })
 api.use("*", async (c, next) => {
   if (!c.req.path.startsWith("/media/")) c.header("Cache-Control", "no-store")
-  if (c.req.path !== "/mcp") firstContact(c)
+  if (c.req.path !== "/mcp" && !c.req.path.startsWith("/icon/")) firstContact(c)
   const origin = c.req.header("origin")
   // Behind a TLS-terminating proxy the request URL is http while the browser's Origin is PUBLIC_ORIGIN.
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
   if (origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
   if (c.req.path.startsWith("/api/")) await currentUser(c)
-  if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/uploads$/.test(c.req.path))
+  if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
     return limit(c, next)
   await next()
 })
@@ -35,6 +36,7 @@ api.use("/api/apps/:slug/*", async (c, next) => {
 })
 api.route("/", auth)
 api.route("/", apps)
+api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
 async function live(c: Ctx, number?: string) {

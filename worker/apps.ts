@@ -34,10 +34,11 @@ import type { Bindings, Ctx } from "./core"
 import { guestActor } from "./auth"
 import { enqueueWebhook, webhookUrl } from "./webhooks"
 
+const appCols = `a.id,a.slug,a.name,a.description,a.created_at,m.role,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
 export async function loadApp(c: Ctx) {
   const app = await sql(
     c.env,
-    `SELECT a.id,a.slug,a.name,a.description,a.created_at,m.role FROM apps a
+    `SELECT ${appCols} FROM apps a
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
     c.var.user?.id ?? null,
     c.req.param("slug")
@@ -79,7 +80,7 @@ export async function counts(env: Env, appId: string) {
     appId
   ).first<AppDetail["counts"]>())!
 }
-async function detail(c: Ctx): Promise<AppDetail> {
+export async function detail(c: Ctx): Promise<AppDetail> {
   const app = c.var.app
   const [ls, ts, totals] = await Promise.all([labels(c.env, app.id), templates(c.env, app.id), counts(c.env, app.id)])
   return { ...app, labels: ls, templates: ts, counts: totals }
@@ -155,7 +156,7 @@ apps.get("/api/apps", async (c) => {
     await rows<App>(
       sql(
         c.env,
-        `SELECT a.id,a.slug,a.name,a.description,a.created_at,m.role FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
+        `SELECT ${appCols} FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
         c.var.user.id
       )
     )
@@ -174,6 +175,7 @@ apps.post("/api/apps", async (c) => {
     name: str(b.name, "name", 120).trim(),
     description: str(b.description ?? "", "description", 4000, true),
     created_at: now(),
+    icon_url: null,
     role: "owner"
   }
   const q = [
