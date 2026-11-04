@@ -6,6 +6,8 @@ import { bad, body, denied, email, fail, hex, missing, now, scopedGuestId, secre
 import type { Bindings, Ctx, User } from "./core"
 import { claimGuest, renameGuest } from "./guest-history"
 import { firstRow, type Read } from "./read-scope"
+import { activeContact, hostWorkspace } from "./contact-session"
+import { emailConfigured } from "./mail-provider"
 
 const month = 30 * 86400
 /** Shared cookies cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
@@ -75,15 +77,16 @@ export async function sessionHash(c: Ctx) {
   const token = getCookie(c, "bh_session")
   return token && /^[a-f0-9]{64}$/.test(token) ? sha256(token) : null
 }
-export async function userBySession(c: Ctx, hash: string | null, read?: Read) {
+export async function userBySession(c: Ctx, hash: string | null, read?: Read, slug = hostWorkspace(c)) {
   const row = hash
     ? await firstRow<User & { locale: Locale | null }>(
         sql(
           c.env,
           `SELECT u.id,u.email,u.name,u.avatar_url,u.locale FROM sessions s JOIN users u ON s.user_id=u.id
-    WHERE s.token_hash=? AND s.expires_at>?`,
+    WHERE s.token_hash=? AND s.expires_at>? AND NOT EXISTS(SELECT 1 FROM apps a WHERE a.slug=? AND a.mode='helpdesk' AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=a.id AND m.user_id=u.id))`,
           hash,
-          now()
+          now(),
+          slug
         ),
         read
       )
@@ -113,7 +116,7 @@ export async function human(c: Ctx): Promise<boolean> {
   const sig = Uint8Array.from(match[2]!.match(/../g)!, (h) => parseInt(h, 16))
   return crypto.subtle.verify("HMAC", await signingKey(c), sig, proofData(c.var.guestId, match[1]!))
 }
-async function requireHuman(c: Ctx) {
+export async function requireHuman(c: Ctx) {
   if (!(await human(c))) fail(428, "human_required", "Complete the human check to continue")
 }
 export async function allowWrite(c: Ctx) {
@@ -127,7 +130,7 @@ export async function allowWrite(c: Ctx) {
     ).first())
   )
     fail(403, "blocked", "You are blocked from writing in this workspace")
-  if (!c.var.user) await requireHuman(c)
+  if (!c.var.user && !c.var.contact) await requireHuman(c)
 }
 export async function postBody(c: Ctx) {
   await allowWrite(c)
@@ -135,7 +138,7 @@ export async function postBody(c: Ctx) {
 }
 export async function namedPost(c:Ctx,b:Record<string,unknown>){
   const actor=c.var.actor
-  if (actor.type === "guest") {
+  if (actor.type === "guest" && !c.var.contact) {
     const name = b.guest_name === undefined ? actor.name : await saveGuestName(c, b.guest_name, actor.name)
     if (!name) fail(400, "name_required", "Choose a display name before posting")
     c.set("actor", { ...actor, name })
@@ -155,7 +158,7 @@ function nextPath(c: Ctx, input?: string) {
   const url = new URL(input, origin)
   return url.origin === origin && !url.pathname.startsWith("//") ? url.pathname + url.search + url.hash : "/"
 }
-async function signIn(c: Ctx, address: string, name: string, picture: string | null, sub: string | null) {
+export async function signIn(c: Ctx, address: string, name: string | null, picture: string | null, sub: string | null) {
   const token = secret(),
     hash = await sha256(token),
     preference = guestLocale(c)
@@ -163,14 +166,16 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
     sql(
       c.env,
       `INSERT INTO users(id,email,name,avatar_url,google_sub,locale) VALUES(?,?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET
-      name=excluded.name,avatar_url=excluded.avatar_url,google_sub=coalesce(excluded.google_sub,users.google_sub),locale=coalesce(users.locale,excluded.locale)
+      name=CASE WHEN ? IS NULL THEN users.name ELSE excluded.name END,avatar_url=CASE WHEN ? IS NULL THEN users.avatar_url ELSE excluded.avatar_url END,google_sub=coalesce(excluded.google_sub,users.google_sub),locale=coalesce(users.locale,excluded.locale)
       WHERE users.google_sub IS NULL OR excluded.google_sub IS NULL OR users.google_sub=excluded.google_sub`,
       uid(),
       address,
-      name,
+      name ?? address.split("@")[0]!,
       picture,
       sub,
-      preference
+      preference,
+      name,
+      name
     ),
     sql(
       c.env,
@@ -184,8 +189,10 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
   ])
   const session = result[1]?.results[0]
   if (!session) denied()
+  const account = (await userBySession(c, hash, undefined, null)) ?? missing()
+  c.set("user", account)
   if (preference) cookie(c, "bh_locale", "", 0, true)
-  if (c.var.existingGuest) await claimGuest(c, { id: session.user_id, email: address, name, avatar_url: picture })
+  if (c.var.existingGuest) await claimGuest(c, account)
   cookie(c, "bh_session", token, month, true)
 }
 /** Behind a TLS-terminating proxy (the tailnet dev URL) the Worker sees http, so PUBLIC_ORIGIN can pin the origin. */
@@ -204,6 +211,7 @@ export function config(c: Ctx): Config {
   return {
     turnstile_site_key: c.env.TURNSTILE_SITE_KEY,
     google_enabled: !!(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
+    email_sign_in: emailConfigured(c.env),
     dev_login: c.env.DEV_LOGIN === "1"
   }
 }
@@ -211,10 +219,13 @@ auth.get("/api/config", (c) => c.json(config(c)))
 export async function me(
   c: Ctx,
   guest: string | null | Promise<string | null> = guestName(c),
-  saved?: Locale | null
+  saved?: Locale | null,
+  slug = hostWorkspace(c)
 ): Promise<Me> {
   const [{ id, handle }, name, verified] = await Promise.all([guestActor(c, "me", false), guest, human(c)])
-  return { ...requestLocale(c, saved), user: c.var.user, guest: { id, handle, name }, human: verified }
+  const contact =
+    c.var.contact !== undefined ? c.var.contact : slug ? ((await activeContact(c, slug))?.contact ?? null) : null
+  return { ...requestLocale(c, saved), user: c.var.user, guest: { id, handle, name }, human: verified, contact }
 }
 auth.get("/api/me", async (c) => {
   shareSession(c)

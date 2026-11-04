@@ -73,7 +73,7 @@ export async function handleInboundMessage(env: Env, ctx: Access["ctx"], m: Inco
   const token = targets[0]!.slice(6).split("@")[0]!,
     p = await sql(
       env,
-      `SELECT p.*,a.name app_name,a.slug,a.public,coalesce(u.name,g.name) name,u.avatar_url FROM mail_people p JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id LEFT JOIN guest_names g ON g.guest_hash=p.guest_hash WHERE p.id=? AND p.address=? AND p.state='on'`,
+      `SELECT p.*,a.name app_name,a.slug,a.public,coalesce(u.name,g.name) name,u.avatar_url FROM mail_people p JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id LEFT JOIN guest_names g ON g.guest_hash=p.guest_hash WHERE p.id=? AND p.address=? AND p.state='on' AND (a.mode='tracker' OR p.user_id IS NULL OR p.role IS NOT NULL)`,
       token.slice(0, 24),
       from
     ).first<Person>()

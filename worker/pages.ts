@@ -176,9 +176,10 @@ export async function page(c: Ctx) {
     card.kind === "home"
       ? `${o}/og/home.png`
       : appPath(`/og/${article ? `issues/${card.number}` : "app"}.png?v=${p.v}${p.reply ? `&a=${p.reply}` : ""}`)
-  const title = article ? `${card.title} · #${card.number} · ${card.name}` : card.title,
+  const desk = payload.app?.mode === "helpdesk"
+  const title = desk ? payload.app!.name : article ? `${card.title} · #${card.number} · ${card.name}` : card.title,
     desc = article?.description ?? card.description
-  const noindex = !p.listed || !(/^\/(?:index\.html)?$/.test(path) || number !== null)
+  const noindex = desk || !p.listed || !(/^\/(?:index\.html)?$/.test(path) || number !== null)
   const icon = card.icon ? `/icon/${card.slug}/${card.icon}` : null
   const meta = (k: string, value: string) =>
     `<meta ${k.startsWith("og:") || k.startsWith("article:") ? "property" : "name"}="${k}" content="${xml(value)}">`
@@ -186,20 +187,24 @@ export async function page(c: Ctx) {
     `<title>${xml(title)}</title>`,
     meta("description", desc),
     `<link rel="canonical" href="${xml(canonical)}">`,
-    meta("og:site_name", "Bellhop"),
+    meta("og:site_name", desk ? payload.app!.name : "Bellhop"),
     meta("og:type", article ? "article" : "website"),
     meta("og:title", title),
     meta("og:description", desc),
     meta("og:url", canonical),
-    meta("og:image", image),
-    meta("og:image:type", "image/png"),
-    meta("og:image:width", "1200"),
-    meta("og:image:height", "630"),
-    meta("og:image:alt", title),
-    meta("twitter:card", "summary_large_image"),
+    ...(desk
+      ? []
+      : [
+          meta("og:image", image),
+          meta("og:image:type", "image/png"),
+          meta("og:image:width", "1200"),
+          meta("og:image:height", "630"),
+          meta("og:image:alt", title),
+          meta("twitter:card", "summary_large_image")
+        ]),
     meta("twitter:title", title),
     meta("twitter:description", desc),
-    meta("twitter:image", image),
+    ...(desk ? [] : [meta("twitter:image", image)]),
     meta("twitter:image:alt", title),
     meta("theme-color", card.status ? statuses[card.status].color : "#161616"),
     `<link rel="icon" href="${xml(icon ?? "/favicon.svg")}"><link rel="apple-touch-icon" href="${xml(icon ?? "/apple-touch-icon.png")}">`
@@ -211,7 +216,7 @@ export async function page(c: Ctx) {
       `<link rel="alternate" type="application/json+oembed" href="${xml(`${o}/oembed?url=${encodeURIComponent(canonical)}&format=json`)}">`
     )
   if (nonce) tags.push(`<meta property="csp-nonce" nonce="${nonce}">`)
-  if (slug && p.code === 200 && (number || /^\/(?:index\.html)?$/.test(path))) {
+  if (!desk && slug && p.code === 200 && (number || /^\/(?:index\.html)?$/.test(path))) {
     const href = appPath(number ? `/issues/${number}/feed.atom` : "/feed.atom")
     tags.push(`<link rel="alternate" type="application/atom+xml" href="${xml(href)}">`)
   }
@@ -329,7 +334,11 @@ export async function atom(c: Ctx, number?: string) {
           slug,
           number
         )
-      : sql(c.env, "SELECT name,public,created_at,NULL issue_id,NULL issue_title FROM apps WHERE slug=?", slug),
+      : sql(
+          c.env,
+          "SELECT name,public,created_at,NULL issue_id,NULL issue_title FROM apps WHERE slug=? AND mode!='helpdesk'",
+          slug
+        ),
     number
       ? sql(
           c.env,
@@ -380,6 +389,9 @@ export async function atom(c: Ctx, number?: string) {
 }
 
 export async function ogImage(c: Ctx) {
+  const host = workspace(c)
+  if (host && (await sql(c.env, "SELECT 1 FROM apps WHERE slug=? AND mode='helpdesk'", host).first()))
+    return notFound(c)
   const path = c.env.APP_DOMAIN ? c.req.path : c.req.path.replace(/^\/[^/]+(?=\/og\/)/, "")
   const home = c.req.path === "/og/home.png",
     number = /^\/og\/issues\/([1-9]\d*)\.png$/.exec(path)?.[1] ?? null

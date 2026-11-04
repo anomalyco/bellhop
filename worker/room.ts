@@ -271,7 +271,8 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT s.token_hash hash,s.user_id id,m.role IS NOT NULL team FROM sessions s LEFT JOIN members m ON m.user_id=s.user_id AND m.app_id=? WHERE s.expires_at>? AND s.token_hash IN(SELECT value FROM json_each(?))`,
+            `SELECT s.token_hash hash,s.user_id id,m.role IS NOT NULL team FROM sessions s JOIN apps a ON a.id=?1 LEFT JOIN members m ON m.user_id=s.user_id AND m.app_id=a.id WHERE (a.mode!='helpdesk' OR m.role IS NOT NULL) AND s.expires_at>?2 AND s.token_hash IN(SELECT value FROM json_each(?3))
+             UNION ALL SELECT s.hash,s.contact_id,0 FROM contact_sessions s JOIN apps a ON a.id=s.app_id WHERE a.id=?1 AND a.mode='helpdesk' AND s.expires>unixepoch() AND s.hash IN(SELECT value FROM json_each(?3))`,
             app,
             now(),
             JSON.stringify([...new Set(sessions)])
@@ -403,6 +404,7 @@ export class Room extends DurableObject<Env> {
               options.moved &&
               g &&
               g.app_id === options.moved.target &&
+              !v.actorId?.startsWith("ct_") &&
               sees(v, options.moved.gate) &&
               sees({ ...v, team: targets.has(v.actorId ?? "") }, g)
             )

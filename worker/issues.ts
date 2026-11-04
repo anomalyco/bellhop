@@ -38,6 +38,7 @@ import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
+import { contactQuery, proofQuery, verification, type ContactRow, type ProofRow } from "./helpdesk-data"
 
 const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
@@ -288,7 +289,8 @@ export async function listIssues(
     limit?: number
     allStates?: boolean
     sort?: unknown
-    reporterLocale?: boolean
+    requesterDetails?: boolean
+    contactId?: string
   },
   viewer: Viewer = outsider,
   read?: Read
@@ -310,6 +312,11 @@ export async function listIssues(
       : new Map<string, string>(),
     filter = issueFilter(appIdSQL(scope), options, viewer, parsed, handles),
     values = [appKey(scope), ...filter.values]
+  if (options.contactId) {
+    filter.where += " AND json_extract(i.author,'$.id')=?"
+    values.push(options.contactId)
+    filter.values.push(options.contactId)
+  }
   const base = ` FROM issues i WHERE ${filter.where}`
   const totals = sql(
     env,
@@ -368,10 +375,24 @@ export async function listIssues(
     ],
     read
   )
-  const roles = roleMap(team), project = options.reporterLocale ? reporterSummary : summary
+  const roles = roleMap(team),
+    project = options.requesterDetails ? reporterSummary : summary
+  const visible = items.slice(0, limit),
+    extra = new Map<string, { contact: Issue["contact"]; verifications: Issue["verifications"] }>()
+  if (viewer.team && options.requesterDetails && typeof scope === "string") {
+    const ids = JSON.stringify([...new Set([...visible, ...pins].map((i) => i.id))])
+    const [cs, vs] = await env.DB.batch([
+      contactQuery(env, scope, "SELECT value FROM json_each(?)", ids),
+      proofQuery(env, scope, "SELECT value FROM json_each(?)", ids)
+    ])
+    for (const i of [...visible, ...pins]) extra.set(i.id, { contact: null, verifications: [] })
+    for (const { issue_id, ...c } of cs!.results as ContactRow[]) extra.get(issue_id)!.contact = c
+    for (const v of vs!.results as ProofRow[]) extra.get(v.issue_id)!.verifications.push(verification(v))
+  }
+  const item = (r: StoredSummary) => ({ ...project(r, roles), ...extra.get(r.id) })
   return {
-    issues: items.slice(0, limit).map((r) => project(r, roles)),
-    pinned: pins.map((r) => project(r, roles)),
+    issues: visible.map(item),
+    pinned: pins.map(item),
     counts: counts[0]!,
     next_cursor:
       items.length > limit
@@ -407,7 +428,8 @@ export async function feed(
   voter: string | null | { sessionHash: string; guest: string; user: Promise<{ id: string } | null> } = null,
   reportIds?: string[],
   guestCookie?: string | null,
-  read?: Read
+  read?: Read,
+  reportApp?: string
 ): Promise<FeedList> {
   const parsed = parseSearch(options.q, true),
     sort = parsed.sort ?? "updated",
@@ -441,8 +463,10 @@ export async function feed(
     ),
     filter = reportIds
       ? {
-          where: "i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?))",
-          values: [JSON.stringify(reportIds)]
+          where:
+            "i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?)) AND " +
+            (reportApp ? "i.app_id=?" : "i.app_id IN (SELECT id FROM apps WHERE mode='tracker')"),
+          values: [JSON.stringify(reportIds), ...(reportApp ? [reportApp] : [])]
         }
       : issueFilter("a.id", { query: options.q }, outsider, parsed, undefined, user, ids)
   let boundary = "",
@@ -541,7 +565,7 @@ export async function getIssue(
     target = `SELECT id FROM issues WHERE ${where}`,
     key = appKey(scope)
   const {
-    data: [items, team, files, comments, events, relations, reports]
+    data: [items, team, files, comments, events, relations, reports, contacts, proofs]
   } = await readBatch<
     [
       StoredSummary & {
@@ -580,7 +604,9 @@ export async function getIssue(
         ref_private: number
         ref_hidden: string | null
       },
-      ReportRow
+      ReportRow,
+      ContactRow,
+      ProofRow
     ]
   >(
     env,
@@ -635,7 +661,17 @@ export async function getIssue(
         key,
         number
       ),
-      reportQuery(env, scope, v, "issue", number)
+      reportQuery(env, scope, v, "issue", number),
+      contactQuery(env, scope, `${target} AND ?`, key, number, Number(v.team)),
+      proofQuery(
+        env,
+        scope,
+        `${target} AND (? OR json_extract(author,'$.id') IN(SELECT value FROM json_each(?)))`,
+        key,
+        number,
+        Number(v.team),
+        JSON.stringify(actorIds(v))
+      )
     ],
     read
   )
@@ -720,9 +756,24 @@ export async function getIssue(
     })
   }
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
+  const verifications = proofs.map(verification)
+  for (const proof of verifications)
+    if (proof.state === "verified")
+      timeline.push({
+        kind: "event",
+        event: {
+          id: proof.id,
+          type: "verified",
+          actor: s.author,
+          created_at: proof.verified_at!,
+          data: { verification_id: proof.id }
+        }
+      })
   timeline.sort((a, b) => time(a).localeCompare(time(b)))
   return {
     ...s,
+    contact: contacts.length ? (({ issue_id, ...c }) => c)(contacts[0]!) : null,
+    verifications,
     edited_at: r.edited_at,
     imported: r.github_repo
       ? {
@@ -753,6 +804,8 @@ export async function getIssue(
 }
 export function summaryOf(issue: Issue): IssueSummary {
   const {
+    contact,
+    verifications,
     imported,
     body,
     template_id,

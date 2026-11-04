@@ -1,5 +1,17 @@
 import type { Locale } from "../shared/api"
 
+// Machine-translated. The only identity in code mail is the sending workspace.
+export const deskCopy: Record<Locale,{signin:string;verify:string;code:string;confirm:string;intro:string}>={
+ en:{signin:'Sign in to {workspace}',verify:'Verify your email for {workspace}',code:'Your code for {workspace} is {code}. It expires in 10 minutes. If you did not request it, ignore this email.',confirm:'Confirm email updates from {workspace}',intro:'Confirm that you want updates about your support request.'},
+ es:{signin:'Inicia sesión en {workspace}',verify:'Verifica tu correo para {workspace}',code:'Tu código para {workspace} es {code}. Caduca en 10 minutos. Si no lo solicitaste, ignora este correo.',confirm:'Confirma las notificaciones de {workspace}',intro:'Confirma que quieres recibir novedades sobre tu solicitud.'},
+ 'pt-BR':{signin:'Entre em {workspace}',verify:'Verifique seu e-mail para {workspace}',code:'Seu código para {workspace} é {code}. Ele expira em 10 minutos. Se você não o solicitou, ignore este e-mail.',confirm:'Confirme as notificações de {workspace}',intro:'Confirme que deseja receber atualizações sobre sua solicitação.'},
+ fr:{signin:'Connexion à {workspace}',verify:'Vérifiez votre adresse pour {workspace}',code:'Votre code pour {workspace} est {code}. Il expire dans 10 minutes. Si vous ne l’avez pas demandé, ignorez cet e-mail.',confirm:'Confirmez les notifications de {workspace}',intro:'Confirmez que vous souhaitez recevoir les mises à jour de votre demande.'},
+ de:{signin:'Bei {workspace} anmelden',verify:'E-Mail-Adresse für {workspace} bestätigen',code:'Dein Code für {workspace} lautet {code}. Er ist 10 Minuten gültig. Wenn du ihn nicht angefordert hast, ignoriere diese E-Mail.',confirm:'Benachrichtigungen von {workspace} bestätigen',intro:'Bestätige, dass du Updates zu deiner Anfrage erhalten möchtest.'},
+ ja:{signin:'{workspace}にログイン',verify:'{workspace}のメールアドレス確認',code:'{workspace}の確認コードは {code} です。有効期限は10分です。心当たりがない場合は、このメールを無視してください。',confirm:'{workspace}の通知登録をご確認ください',intro:'お問い合わせの更新通知を受け取るには、登録を確認してください。'},
+ 'zh-CN':{signin:'登录 {workspace}',verify:'为 {workspace} 验证邮箱',code:'你在 {workspace} 的验证码是 {code}，10 分钟内有效。如非本人请求，请忽略此邮件。',confirm:'确认订阅 {workspace} 的通知',intro:'请确认你希望收到此请求的更新。'},
+ ko:{signin:'{workspace} 로그인',verify:'{workspace} 이메일 주소 확인',code:'{workspace} 인증 코드는 {code}입니다. 10분간 유효합니다. 직접 요청하지 않았다면 이 메일을 무시하세요.',confirm:'{workspace} 알림 구독 확인',intro:'문의에 대한 업데이트를 받으려면 구독을 확인하세요.'}
+}
+
 // Machine-translated fixed email copy; issue titles, workspace names, authors and
 // message bodies are interpolated as-is, never sent to a translation service.
 const en = {

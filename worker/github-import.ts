@@ -322,7 +322,7 @@ async function step(env: Env, j: Job) {
         sql(
           env,
           `INSERT INTO issues(id,app_id,number,title,body,status,close_reason,author,created_at,updated_at,private,github_workspace,github_repo,github_number)
-        SELECT ?,id,issue_seq,?,?,?,?,?,?,?,max(default_private,?),id,?,? FROM apps WHERE id=? AND changes()=1`,
+        SELECT ?,id,issue_seq,?,?,?,?,?,?,?,max(default_private,?,mode='helpdesk'),id,?,? FROM apps WHERE id=? AND changes()=1`,
           id,
           i.title,
           i.body ?? "",

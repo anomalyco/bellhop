@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import type { IssueSubscription, Locale, NotificationSettings } from "../shared/api"
 import { requestLocale } from "./locale"
-import { mailCopy } from "./mail-copy"
+import { mailCopy, deskCopy, formatMail } from "./mail-copy"
 import { allowWrite } from "./auth"
 import { guestWrite } from "./guest-history"
 import { bad, body, denied, email, fail, missing, sha256, sql, type Bindings, type Ctx } from "./core"
@@ -105,7 +105,8 @@ mailRoutes.put(route, async (c) => {
   const iid = await issueId(c),
     b = await body(c),
     actor = c.var.actor.id,
-    u = c.var.user
+    u = c.var.user,
+    trusted = u?.email ?? c.var.contact?.email
   if (typeof b.subscribed !== "boolean") bad("Expected subscribed")
   if (!b.subscribed) {
     await sql(
@@ -125,7 +126,7 @@ mailRoutes.put(route, async (c) => {
       ).run()
   } else {
     const address =
-      u?.email ??
+      trusted ??
       email(
         b.email ??
           (await sql(c.env, "SELECT address FROM mail_subs WHERE issue_id=? AND actor_id=?", iid, actor).first<string>(
@@ -143,7 +144,7 @@ mailRoutes.put(route, async (c) => {
       ).first()
     )
       denied()
-    if (!u) {
+    if (!trusted) {
       await enforce(c, "RL_HUMAN", `confirm:ip:${clientIP(c)}`)
       await enforce(c, "RL_UPLOAD", `confirm:addr:${await sha256(address)}`)
     }
@@ -156,12 +157,12 @@ mailRoutes.put(route, async (c) => {
         iid,
         actor,
         u?.id ?? null,
-        u ? null : c.var.guestHash,
+        trusted ? null : c.var.guestHash,
         address,
-        u ? "on" : "pending",
+        trusted ? "on" : "pending",
         requestLocale(c).locale
       ),
-      ...(!u
+      ...(!trusted
         ? [
             // Same pending API state regardless of requests on other issues. Only the
             // winning address-wide reservation is allowed to send a confirmation link.
@@ -192,7 +193,7 @@ mailRoutes.put(route, async (c) => {
             )
           ])
     ])
-    const r = !u && reservation?.results[0]
+    const r = !trusted && reservation?.results[0]
     const pending =
       r &&
       (await sql(
@@ -204,15 +205,18 @@ mailRoutes.put(route, async (c) => {
     if (r && pending) {
       const confirm = `${mailOrigin(c.env)}/email/confirm?t=${await mailToken(c.env, "confirm", r)}`,
         unsub = unsubscribeURL(c.env, await mailToken(c.env, "unsubscribe", r)),
-        copy = mailCopy[pending.locale ?? "en"]
+        copy = mailCopy[pending.locale ?? "en"],
+        desk = c.var.desk ? deskCopy[pending.locale ?? "en"] : null,
+        workspace = c.var.app.name.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim(),
+        intro = desk?.intro ?? copy.confirmIntro
       // Neutral double opt-in. Never disclose the issue, workspace or custom text to an unverified address.
       try {
         await sendMail(c.env, "confirm-" + r.nonce, {
           to: address,
-          fromName: "Bellhop",
-          subject: copy.confirmSubject,
-          text: `${copy.confirmIntro}\n${copy.confirmAction}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}\n${copy.stop}: ${unsub}&all=1`,
-          html: `<p>${esc(copy.confirmIntro)}</p><p><a href="${esc(confirm)}">${esc(copy.confirmAction)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a> · <a href="${esc(unsub + "&all=1")}">${esc(copy.stop)}</a></p>`
+          fromName: desk ? workspace : "Bellhop",
+          subject: desk ? formatMail(desk.confirm, { workspace }) : copy.confirmSubject,
+          text: `${intro}\n${copy.confirmAction}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}${desk ? "" : `\n${copy.stop}: ${unsub}&all=1`}`,
+          html: `<p>${esc(intro)}</p><p><a href="${esc(confirm)}">${esc(copy.confirmAction)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a>${desk ? "" : ` · <a href="${esc(unsub + "&all=1")}">${esc(copy.stop)}</a>`}</p>`
         })
       } catch (e) {
         await sql(c.env, "UPDATE mail_subs SET requested=0 WHERE id=? AND nonce=?", r.id, r.nonce).run()
@@ -223,7 +227,7 @@ mailRoutes.put(route, async (c) => {
   return c.json(await subscription(c, iid))
 })
 function page(c: Ctx, text: string, form = "") {
-  return c.html(`<!doctype html><meta charset=utf-8><title>Bellhop email</title><p>${esc(text)}</p>${form}`, 200, {
+  return c.html(`<!doctype html><meta charset=utf-8><title>Email preferences</title><p>${esc(text)}</p>${form}`, 200, {
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
     "X-Robots-Tag": "noindex",
@@ -260,7 +264,7 @@ mailRoutes.on(["GET", "POST"], "/email/unsubscribe", async (c) => {
   if (c.req.method === "GET")
     return page(
       c,
-      all ? "Stop all Bellhop email?" : "Stop email about this issue?",
+      all ? "Stop all email notifications?" : "Stop email about this issue?",
       `<form method="post"><button>Unsubscribe</button></form>`
     )
   if (all)

@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { savedReplies } from "./team-tools"
 import { analytics } from "./analytics"
+import { getContact, requestVerification } from "./helpdesk"
 import { allowed, clientIP } from "./rate-limits"
 import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
@@ -43,6 +44,8 @@ export const toolRoles = {
   list_tiers: "read",
   list_saved_replies: "read",
   get_analytics: "triage",
+  get_contact: "read",
+  request_verification: "respond",
   set_tier: "triage",
   list_mentionables: "read",
   transfer_issue: "triage",
@@ -116,6 +119,17 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool("get_contact", "Read a workspace contact and their requests. Supply exactly one identifier.", {
+    id: text,
+    email: text,
+    external_id: text
+  }),
+  tool(
+    "request_verification",
+    "Email a verification code. Only the requester can confirm it; codes are never returned.",
+    { number, email: text },
+    ["number", "email"]
+  ),
   tool(
     "get_analytics",
     "Read workspace response, resolution and agent-resolved metrics (member; defaults to 30 days).",
@@ -344,6 +358,10 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "get_contact":
+      return textResult(await getContact(env, app.id, b))
+    case "request_verification":
+      return textResult(await requestVerification(c, app, n(), b.email, actor, { team: true, actorId: actor.id }))
     case "get_analytics":
       return textResult(await analytics(c, app.id, b.days === undefined ? 30 : integer(b.days, "days")))
     case "list_saved_replies":
@@ -457,7 +475,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           app.id,
           {
             allStates: name === "search_issues",
-            reporterLocale: true,
+            requesterDetails: true,
             sort: b.sort,
             state: b.state === undefined ? undefined : choice(b.state, states, "state"),
             label: b.label === undefined ? undefined : str(b.label, "label", 60),

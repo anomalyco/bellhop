@@ -3,6 +3,8 @@ import { bodyLimit } from "hono/body-limit"
 import { apps, detail, loadApp, viewerApp } from "./apps"
 import { auth, browserGuest, currentUser, firstContact, reportCookies, sessionHash } from "./auth"
 import { reportActors } from "./guest-history"
+import { helpdesk, processVerifications } from "./helpdesk"
+import { hostWorkspace } from "./contact-session"
 import { clientIP, enforce, workspaceLimit } from "./rate-limits"
 import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
 import type { Bindings, Ctx } from "./core"
@@ -133,6 +135,21 @@ api.get("/api/feed", async (c) =>
 )
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
 api.get("/api/me/reports", async (c) => {
+  const slug = hostWorkspace(c)
+  if (slug && (await sql(c.env, "SELECT 1 FROM apps WHERE slug=? AND mode='helpdesk'", slug).first())) {
+    const { app, viewer } = await viewerApp(c, slug)
+    return c.json(
+      await feed(
+        c.env,
+        { state: c.req.query("state"), cursor: c.req.query("cursor") },
+        viewer.voter,
+        viewer.actorId ? [viewer.actorId] : [],
+        undefined,
+        undefined,
+        app.id
+      )
+    )
+  }
   const cookie = browserGuest(c),
     ids = await reportActors(c, reportCookies(c))
   return c.json(
@@ -164,6 +181,7 @@ api.use("/api/apps/:slug/*", async (c, next) => {
   await next()
 })
 api.route("/", auth)
+api.route("/", helpdesk)
 api.route("/", mailRoutes)
 api.route("/", oauth)
 api.route("/", agents)
@@ -265,6 +283,7 @@ export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(pruneAudit(env))
+    ctx.waitUntil(processVerifications(env))
     ctx.waitUntil(expireReports(env))
     ctx.waitUntil(wakeImports(env))
     if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))
