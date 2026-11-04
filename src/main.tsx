@@ -32,6 +32,42 @@ const ContactsPage = lazy(() => import("./routes/helpdesk/Contacts").then((m) =>
 const ContactPageView = lazy(() => import("./routes/helpdesk/Contacts").then((m) => ({ default: m.ContactPageView })))
 const NotificationSettings = lazy(() => import("./routes/NotificationSettings").then((m) => ({ default: m.NotificationSettingsPage })))
 
+// A deploy swaps hashed /assets/* chunks across edge colos over a few seconds, and open tabs can outlive their
+// lazy chunks: reload once per location on a chunk/preload failure so mid-deploy visitors recover without looping.
+const chunkReloadKey = "bh:chunk-reload"
+let chunkFailed = false
+let chunkReloading = false
+function reloadOnChunkError(prevent?: () => void) {
+  chunkFailed = true
+  if (chunkReloading) {
+    prevent?.()
+    return
+  }
+  try {
+    const here = window.location.pathname + window.location.search
+    if (sessionStorage.getItem(chunkReloadKey) === here) return
+    sessionStorage.setItem(chunkReloadKey, here)
+  } catch {
+    return
+  }
+  chunkReloading = true
+  prevent?.()
+  window.location.reload()
+}
+window.addEventListener("vite:preloadError", (e) => reloadOnChunkError(() => e.preventDefault()))
+window.addEventListener("unhandledrejection", (e) => {
+  const msg = e.reason instanceof Error ? e.reason.message : String(e.reason ?? "")
+  if (/Failed to fetch dynamically imported module|error loading dynamically imported module|Importing a module script failed/i.test(msg))
+    reloadOnChunkError(() => e.preventDefault())
+})
+window.setTimeout(() => {
+  if (!chunkFailed) {
+    try {
+      sessionStorage.removeItem(chunkReloadKey)
+    } catch {}
+  }
+}, 10_000)
+
 const homePages = homeSegments
 
 // Old /<slug>/… links on the home domain move to the app's subdomain.
@@ -86,6 +122,7 @@ function start() {
   // first render, so the first paint is the real page with no API calls ahead of it.
   const boot = readBoot()
   const render = () =>
+    !chunkReloading &&
     createRoot(document.getElementById("root")!).render(
       <StrictMode>
         <LocaleSync />
