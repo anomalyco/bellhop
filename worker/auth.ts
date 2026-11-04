@@ -264,8 +264,8 @@ auth.put("/api/me/guest", async (c) => {
   await saveGuestName(c, b.name, await guestName(c))
   return c.json(await me(c))
 })
-auth.post("/api/human", async (c) => {
-  const token = str((await body(c)).token, "token", 2048)
+export async function siteverify(c: Ctx, value: unknown, hostname: string) {
+  const token = str(value, "turnstile_token", 2048)
   if (!c.env.TURNSTILE_SECRET_KEY) fail(503, "misconfigured", "Human verification unavailable")
   const params = new URLSearchParams({ secret: c.env.TURNSTILE_SECRET_KEY, response: token })
   const ip = c.req.header("CF-Connecting-IP")
@@ -278,7 +278,10 @@ auth.post("/api/human", async (c) => {
   if (!response.ok) fail(502, "siteverify_failed", "Human verification unavailable")
   const result = await response.json<{ success: boolean; hostname?: string }>()
   const devTest = c.env.DEV_LOGIN === "1" && c.env.TURNSTILE_SITE_KEY === "1x00000000000000000000AA"
-  if (!result.success || (!devTest && result.hostname !== new URL(c.req.url).hostname)) denied()
+  if (result.success !== true || (!devTest && result.hostname !== hostname)) denied()
+}
+auth.post("/api/human", async (c) => {
+  await siteverify(c, (await body(c)).token, new URL(c.req.url).hostname)
   const exp = String(Date.now() + 3600000)
   const sig = await crypto.subtle.sign("HMAC", await signingKey(c), proofData(c.var.guestId, exp))
   cookie(c, "bh_human", `${exp}.${hex(sig)}`, 3600)

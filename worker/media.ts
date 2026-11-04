@@ -1,4 +1,4 @@
-import { Hono } from "hono"
+import { Hono, type MiddlewareHandler } from "hono"
 import type { Attachment } from "../shared/api"
 import { allowWrite } from "./auth"
 import { viewerApp } from "./apps"
@@ -11,6 +11,8 @@ import { attachment } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { reportLog } from "./report-data"
 import type { Ctx } from "./core"
+import { authorize, checkHost, cors } from "./v1/access"
+import { clientIP, enforce } from "./rate-limits"
 
 const MiB = 1024 * 1024
 function tooLarge(): never {
@@ -115,6 +117,20 @@ media.post("/api/apps/:slug/uploads", async (c) => {
   }
   return c.json(attachment({ id, name, mime, size, kind }), 201)
 })
+// Uploads remain on their existing route. Widgets can fetch the regular media
+// URL with their bearer (never a credential in an <img> URL or query string).
+export const endUserMedia:MiddlewareHandler<Bindings>=async(c,next)=>{
+  const id=c.req.param('id')!,name=c.req.param('name')!
+  if(c.req.method==='OPTIONS'){
+    checkHost(c);await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const origin=c.req.header('Origin')
+    if(!origin||c.req.header('Access-Control-Request-Method')!=='GET')missing()
+    const row=await sql(c.env,`SELECT a.slug FROM attachments f JOIN apps a ON a.id=f.app_id JOIN api_keys k ON k.app_id=a.id JOIN api_origins o ON o.key_id=k.id WHERE f.id=? AND a.mode='helpdesk' AND o.origin=? LIMIT 1`,id,origin).first<{slug:string}>();if(!row)missing();checkHost(c,row.slug);cors(c,origin);c.header('Access-Control-Allow-Headers','Authorization, Range, If-None-Match');c.header('Access-Control-Allow-Methods','GET');return c.body(null,204)
+  }
+  if(!/^Bearer bh_us_/i.test(c.req.header('Authorization')??''))return next()
+  await enforce(c,'RL_IP','v1:ip:'+clientIP(c));const s=await authorize(c,'session')
+  const file=await sql(c.env,`SELECT f.name,f.mime,f.kind,f.size,f.object_key FROM attachments f JOIN attachment_links l ON l.attachment_id=f.id JOIN issues i ON i.id=l.issue_id AND i.app_id=f.app_id LEFT JOIN comments m ON m.id=l.comment_id AND m.issue_id=i.id WHERE f.app_id=? AND f.id=? AND f.name=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND (l.comment_id IS NULL OR (m.internal=0 AND m.hidden IS NULL))`,s.app,id,name,s.user!.id).first<AttachmentRow&{object_key:string}>()??missing()
+  const r=await serveFile(c,file,true);if(s.origin){r.headers.set('Access-Control-Allow-Origin',s.origin);r.headers.set('Vary','Origin')}return r
+}
 function range(value: string, size: number) {
   const m = /^bytes=(\d*)-(\d*)$/i.exec(value.trim())
   if (!m || (!m[1] && !m[2])) return null

@@ -49,6 +49,7 @@ export interface Access {
   origin: string
   locale?: Locale
   desk?: boolean
+  credentialGuard?: D1PreparedStatement
 }
 function access(c: Ctx): Access {
   return {
@@ -88,6 +89,7 @@ function guestNameGuard(a: Access) {
           JSON.stringify(actorIds(who(a)))
         )
       ]
+  if (a.credentialGuard) guard.push(a.credentialGuard)
   return a.actor.type === "guest" && a.guestHash
     ? [
         ...guard,
@@ -151,7 +153,7 @@ function systemInfo(value: unknown): SystemInfo | null {
     entries.map(([key, v]) => [str(key, "system info key", 120), str(v, "system info value", 2048, true)])
   )
 }
-async function createIssue(a: Access, b: Record<string, unknown>) {
+export async function createIssue(a: Access, b: Record<string, unknown>) {
   const { env, app, actor } = a,
     id = uid(),
     at = now(),

@@ -234,6 +234,10 @@
 //   GET    /api/apps/:slug/identity-keys                 -> IdentityKey[]      admin
 //   POST   /api/apps/:slug/identity-keys { name }        -> NewIdentityKey     admin; the secret is only returned here
 //   DELETE /api/apps/:slug/identity-keys/:id             -> { ok: true }       admin
+//   GET    /api/apps/:slug/api-keys                      -> ApiKey[]           admin; public API v1 keys (shared/v1.ts)
+//   POST   /api/apps/:slug/api-keys { name, kind, allowed_origins? } -> NewApiKey   admin; the key is only returned here
+//   PATCH  /api/apps/:slug/api-keys/:id { name?, allowed_origins? } -> ApiKey  admin
+//   DELETE /api/apps/:slug/api-keys/:id                  -> { ok: true }       admin
 // Email verification, in any workspace: someone on a request (the requester, the team, or an agent at responder)
 // asks to verify an address, e.g. "the email on your billing account". Bellhop emails it a code that only the
 // requester can enter; the request then shows the address as verified to the team and agents. Agents never see codes.
@@ -402,6 +406,8 @@ export type AppMode = "tracker" | "helpdesk"
 export interface HelpdeskSettings {
   /** Requesters must be a verified contact (email code or host identity) before submitting. Default true. */
   require_verified_email: boolean
+  /** Public API v1: publishable keys may start anonymous end-user sessions (Turnstile-checked). Default false. */
+  allow_anonymous: boolean
 }
 
 /** How a contact proved who they are: an email code, or the host app's signed identity token. */

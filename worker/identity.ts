@@ -41,8 +41,7 @@ function json(part: string): Record<string, unknown> {
 function text(x: unknown, max: number): x is string {
   return typeof x === "string" && x.length <= max && !!x.trim() && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(x)
 }
-async function verify(c: Ctx, slug: string | null, token: unknown) {
-  if (!slug || !contactHost(c, slug)) return invalid("workspace")
+export async function verifyIdentity(env: Env, slug: string, token: unknown) {
   if (typeof token !== "string" || token.length > 8192) return invalid("format")
   const parts = token.split(".")
   if (parts.length !== 3) return invalid("format")
@@ -53,13 +52,13 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
   const sig = bytes(signature)
   if (sig.byteLength !== 32) return invalid("signature")
   const key = await sql(
-    c.env,
+    env,
     `SELECT k.app_id,k.cipher,a.name workspace FROM identity_keys k JOIN apps a ON a.id=k.app_id WHERE a.slug=? AND a.mode='helpdesk' AND k.id=?`,
     slug,
     h.kid
   ).first<{ app_id: string; cipher: string; workspace: string }>()
   if (!key) return invalid("key")
-  const mac = await verifier(c.env, key.app_id, h.kid, key.cipher)
+  const mac = await verifier(env, key.app_id, h.kid, key.cipher)
   if (!(await crypto.subtle.verify("HMAC", mac, sig, enc.encode(head + "." + payload)))) return invalid("signature")
   const p = json(payload),
     { iat, exp, sub, jti } = p,
@@ -76,7 +75,11 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
     exp - iat > 600
   )
     return invalid("time")
-  if (!text(sub, 255) || !text(jti, 255)) return invalid("identifier")
+  if (!text(jti, 255)) return invalid("identifier")
+  return { app: key.app_id, workspace: key.workspace, slug, kid: h.kid, jti, exp, ...hostClaims(sub, p) }
+}
+export function hostClaims(sub: unknown, p: Record<string, unknown>) {
+  if (!text(sub, 255)) return invalid("identifier")
   if (p.name !== undefined && !text(p.name, 120)) return invalid("name")
   if (p.email_verified !== undefined && typeof p.email_verified !== "boolean") return invalid("verified_flag")
   let address: string | null = null
@@ -90,53 +93,60 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
   }
   if (p.email_verified && !address) return invalid("email")
   return {
-    app: key.app_id,
-    slug,
-    kid: h.kid,
     sub: sub.trim(),
-    workspace: key.workspace,
-    jti,
-    exp,
     name: p.name?.trim() ?? null,
     email: p.email_verified ? address : null,
     display: p.email_verified ? null : address
   }
 }
 
-async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest = false) {
-  const v = await verify(c, slug, token),
-    raw = secret(),
-    at = now(),
-    env = c.env
+export async function consumeIdentity(env: Env, v: Awaited<ReturnType<typeof verifyIdentity>>) {
   // Every write below is in one D1 transaction. A concurrent revoke/expiry
   // gives the first INSERT a NULL app_id; a replay hits its unique constraint.
-  const batch = [
-    sql(
-      env,
-      `INSERT INTO identity_uses(app_id,jti,expires) VALUES((SELECT k.app_id FROM identity_keys k JOIN apps a ON a.id=k.app_id WHERE k.app_id=? AND k.id=? AND a.slug=? AND a.mode='helpdesk' AND unixepoch()<?),?,?)`,
-      v.app,
-      v.kid,
-      v.slug,
-      v.exp,
-      await sha256(v.jti),
-      v.exp
-    ),
-    sql(
-      env,
-      `WITH target AS (SELECT id FROM contacts WHERE app_id=?1 AND (external_id=?2 OR (external_id IS NULL AND email=?3)) ORDER BY external_id IS NOT NULL DESC LIMIT 1),
+  return sql(
+    env,
+    `INSERT INTO identity_uses(app_id,jti,expires) VALUES((SELECT k.app_id FROM identity_keys k JOIN apps a ON a.id=k.app_id WHERE k.app_id=? AND k.id=? AND a.slug=? AND a.mode='helpdesk' AND unixepoch()<?),?,?)`,
+    v.app,
+    v.kid,
+    v.slug,
+    v.exp,
+    await sha256(v.jti),
+    v.exp
+  )
+}
+export function resolveHost(env: Env, v: ReturnType<typeof hostClaims> & { app: string }) {
+  return sql(
+    env,
+    `WITH target AS (SELECT id FROM contacts WHERE app_id=?1 AND (external_id=?2 OR (external_id IS NULL AND email=?3)) ORDER BY external_id IS NOT NULL DESC LIMIT 1),
       chosen AS (SELECT coalesce((SELECT id FROM target),?4) id)
       INSERT INTO contacts(id,app_id,external_id,email,unverified_email,name,verified_via,created_at,last_seen_at)
       SELECT id,?1,?2,CASE WHEN NOT EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=?1 AND t.email=?3 AND t.id!=chosen.id) THEN ?3 END,?5,?6,'host',?7,?7 FROM chosen WHERE true
       ON CONFLICT(id) DO UPDATE SET external_id=excluded.external_id,email=coalesce(excluded.email,contacts.email),unverified_email=coalesce(excluded.unverified_email,contacts.unverified_email),name=coalesce(excluded.name,contacts.name),verified_via='host',last_seen_at=excluded.last_seen_at
       RETURNING id,name,email,external_id,verified_via`,
-      v.app,
-      v.sub,
-      v.email,
-      "ct_" + uid(),
-      v.display,
-      v.name,
-      at
-    ),
+    v.app,
+    v.sub,
+    v.email,
+    "ct_" + uid(),
+    v.display,
+    v.name,
+    now()
+  )
+}
+export function identityFailure(e: unknown): never {
+  const msg = e instanceof Error ? `${e.message} ${e.cause}` : ""
+  if (msg.includes("UNIQUE constraint failed: identity_uses.")) return invalid("replay")
+  if (msg.includes("NOT NULL constraint failed: identity_uses.app_id")) return invalid("key_or_expiry")
+  throw e
+}
+async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest = false) {
+  if (!slug || !contactHost(c, slug)) return invalid("workspace")
+  const env = c.env,
+    v = await verifyIdentity(env, slug, token),
+    raw = secret(),
+    at = now()
+  const batch = [
+    await consumeIdentity(env, v),
+    resolveHost(env, v),
     sql(env, "DELETE FROM contact_sessions WHERE app_id=? AND hash=?", v.app, await contactHash(c, v.slug)),
     sql(
       env,
@@ -152,10 +162,7 @@ async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest 
   try {
     result = await env.DB.batch(batch)
   } catch (e) {
-    const msg = e instanceof Error ? `${e.message} ${e.cause}` : ""
-    if (msg.includes("UNIQUE constraint failed: identity_uses.")) return invalid("replay")
-    if (msg.includes("NOT NULL constraint failed: identity_uses.app_id")) return invalid("key_or_expiry")
-    throw e
+    return identityFailure(e)
   }
   const contact = result[1]!.results[0]!
   // A forwarded GET link authenticates its subject, not the browser that opened
@@ -216,7 +223,8 @@ handoff.get("/identify", async (c) => {
   const slug = c.env.APP_DOMAIN ? hostWorkspace(c) : (c.req.query("app") ?? null),
     token = c.req.query("token")
   try {
-    const v = await verify(c, slug, token)
+    if (!slug || !contactHost(c, slug)) return invalid("workspace")
+    const v = await verifyIdentity(c.env, slug, token)
     if (await sql(c.env, "SELECT 1 FROM identity_uses WHERE app_id=? AND jti=?", v.app, await sha256(v.jti)).first())
       invalid("replay")
     // Preview is read-only: activeContact would renew the previous contact cookie.

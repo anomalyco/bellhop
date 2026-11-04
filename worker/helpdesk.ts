@@ -299,7 +299,7 @@ helpdesk.post(route + "/:id/confirm", async (c) => {
     )
   )
 })
-async function dispatchProof(env: Env, id: string) {
+export async function dispatchProof(env: Env, id: string) {
   const row = await sql(
     env,
     `SELECT ${proofCols},o.destination_hash,a.id app_id,a.name,a.slug,i.number,i.author FROM verification_outbox o JOIN email_codes v ON v.id=o.id JOIN apps a ON a.id=v.app_id JOIN issues i ON i.id=v.issue_id AND i.app_id=a.id WHERE o.id=?`,

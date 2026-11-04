@@ -181,6 +181,7 @@ export async function detail(
         nudge_days: number | null
         mode: AppDetail["mode"]
         require_verified_email: number
+        allow_anonymous: number
         trusted: number
       }
     ]
@@ -199,7 +200,7 @@ export async function detail(
       ),
       sql(
         c.env,
-        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,trusted FROM apps WHERE id=?",
+        "SELECT default_private,reporter_can_choose,nudge_days,mode,require_verified_email,allow_anonymous,trusted FROM apps WHERE id=?",
         scope
       )
     ],
@@ -214,7 +215,7 @@ export async function detail(
     nudge_days: v.nudge_days,
     mode: v.mode,
     ...(can(target.role, "setup") && { trusted: !!v.trusted }),
-    helpdesk: { require_verified_email: !!v.require_verified_email },
+    helpdesk: { require_verified_email: !!v.require_verified_email, allow_anonymous: !!v.allow_anonymous },
     visibility: {
       default: v.default_private || v.mode === "helpdesk" ? "private" : "public",
       reporter_can_choose: v.mode === "tracker" && !!v.reporter_can_choose
@@ -393,7 +394,9 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   if (b.trusted !== undefined) bad("trusted is read-only")
   const mode = b.mode === undefined ? null : choice(b.mode, ["tracker", "helpdesk"] as const, "mode"),
     desk = b.helpdesk === undefined ? null : input(b.helpdesk)
-  if (desk && typeof desk.require_verified_email !== "boolean") bad("Invalid require_verified_email")
+  if (desk)
+    for (const k of ["require_verified_email", "allow_anonymous"])
+      if (desk[k] !== undefined && typeof desk[k] !== "boolean") bad(`Invalid ${k}`)
   const v = b.visibility === undefined ? null : input(b.visibility)
   const def = v ? choice(v.default, ["public", "private"] as const, "default visibility") : null
   if (v && typeof v.reporter_can_choose !== "boolean") bad("Invalid reporter_can_choose")
@@ -407,10 +410,11 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   // An unrelated edit must not undo a concurrent decision to unlist the workspace.
   const change = sql(
     env,
-    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
+    `UPDATE apps SET mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),allow_anonymous=coalesce(?,allow_anonymous),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
     WHERE id=? RETURNING name,description,public`,
     mode,
-    desk ? Number(desk.require_verified_email) : null,
+    desk?.require_verified_email !== undefined ? Number(desk.require_verified_email) : null,
+    desk?.allow_anonymous !== undefined ? Number(desk.allow_anonymous) : null,
     Number(days !== undefined),
     days ?? null,
     def === null ? null : Number(def === "private"),

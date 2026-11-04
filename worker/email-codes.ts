@@ -128,7 +128,14 @@ export async function issueCode(
   }
   return id
 }
-export async function redeemCode(env: Env, x: Challenge, raw: unknown, id?: string, owners?: string[]) {
+export async function redeemCode(
+  env: Env,
+  x: Challenge,
+  raw: unknown,
+  id?: string,
+  owners?: string[],
+  guard?: D1PreparedStatement
+) {
   // Even a malformed attempt consumes a try on a live challenge. HMAC with a
   // server-side key prevents an offline search over a million possible values.
   const row = await sql(
@@ -150,7 +157,7 @@ export async function redeemCode(env: Env, x: Challenge, raw: unknown, id?: stri
     expected = Uint8Array.from((row?.digest ?? "00".repeat(32)).match(/../g)!, (v) => parseInt(v, 16))
   const matched = crypto.subtle.timingSafeEqual(candidate, expected)
   const at = now()
-  const result = await sql(
+  const update = sql(
     env,
     `UPDATE email_codes SET tries=tries+1,state=CASE WHEN expires<=unixepoch() THEN 'expired' WHEN ?1 THEN 'verified' WHEN tries>=4 THEN 'failed' ELSE 'pending' END,
  digest=CASE WHEN expires<=unixepoch() OR ?1 OR tries>=4 THEN NULL ELSE digest END,verified_at=CASE WHEN expires>unixepoch() AND ?1 THEN ?2 END
@@ -160,7 +167,10 @@ export async function redeemCode(env: Env, x: Challenge, raw: unknown, id?: stri
     row?.id ?? null,
     JSON.stringify(owners ?? []),
     x.requester ?? null
-  ).first<{ state: string }>()
+  )
+  const result = guard
+    ? (await env.DB.batch<{ state: string }>([guard, update]))[1]!.results[0]
+    : await update.first<{ state: string }>()
   if (result?.state !== "verified") invalid()
   return row!.id
 }
