@@ -9,7 +9,8 @@ import type {
   Session,
   Upload,
 } from "../../shared/v1"
-import type { Locale, Verification } from "../../shared/api"
+import type { Locale } from "../../shared/api"
+import type { Verification } from "../../shared/v1"
 import { send, type Call, type Transport } from "./http"
 import { subscribe, type Subscription, type SubscribeOptions, type RealtimeHandler } from "./realtime"
 

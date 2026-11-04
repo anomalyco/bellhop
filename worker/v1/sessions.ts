@@ -43,8 +43,8 @@ async function human(c: Ctx, s: Scope, token: unknown) {
   if (!token) fail(428, "human_required", "Turnstile proof required")
   await siteverify(c, token, new URL(s.origin!).hostname)
 }
-async function requester(s: Scope, challenge: string) {
-  return sha256(JSON.stringify(["v1:email", s.key, s.origin, challenge]))
+async function requester(s: Scope, challenge: string, actor = s.user?.id ?? null) {
+  return sha256(JSON.stringify(["v1:email:v2", s.key, s.origin, actor, challenge]))
 }
 export async function startEmail(c: Ctx, s: Scope, b: Record<string, unknown>, seed?: string) {
   await enforce(c, "RL_IP", "code-start:" + clientIP(c))
@@ -86,9 +86,23 @@ export async function mint(
     const challenge = c.req.header("Challenge-Token") ?? ""
     if (!/^[0-9a-f]{64}$/.test(challenge)) fail(400, "invalid_code", "Invalid or expired code")
     if (s.user) q.push(liveGuard(c, s))
+    const bound = await requester(s, challenge)
+    // A key-started flow may finish with the browser's anonymous bearer. The
+    // reverse is not allowed: another session never selects the starter's binding.
+    const binding = s.user
+      ? ((await sql(
+          env,
+          `SELECT requested_by FROM email_codes WHERE kind='contact' AND app_id=? AND email=? AND state='pending' AND requested_by IN (?,?) ORDER BY requested_by=? DESC LIMIT 1`,
+          s.app,
+          address,
+          bound,
+          await requester(s, challenge, null),
+          bound
+        ).first<string>("requested_by")) ?? bound)
+      : bound
     await redeemCode(
       env,
-      { kind: "contact", app: s.app, email: address, requester: await requester(s, challenge) },
+      { kind: "contact", app: s.app, email: address, requester: binding },
       b.code,
       undefined,
       undefined,

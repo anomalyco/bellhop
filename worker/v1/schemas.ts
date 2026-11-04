@@ -80,7 +80,7 @@ export const schemas = {
     id: string,
     email: string,
     state: { enum: ["pending", "verified", "expired", "failed"] },
-    requested_by: ref("Actor"),
+    requested_by: one(ref("Actor"), variant("team", { id: string, name: string, avatar_url: ns })),
     created_at: date,
     verified_at: nullable(date)
   }),

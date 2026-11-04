@@ -66,7 +66,7 @@
 //   PUT    /api/apps/:slug/webhook { url: string|null, events?: WebhookEventType[] } -> AppSettings   admin; events
 //          defaults to DEFAULT_WEBHOOK_EVENTS (today's behaviour)
 //   POST   /api/apps/:slug/webhook/deliveries/:id/redeliver -> { delivery_id }   admin; same payload, new delivery id
-//   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        admin; new signing secret
+//   POST   /api/apps/:slug/webhook/rotate                -> AppSettings        admin; read the new secret via GET settings
 //   POST   /api/apps/:slug/webhook/test                  -> { delivery_id }    admin; sends a `ping` event
 //   GET    /api/apps/:slug/agents                        -> AppAgent[]         admin; every agent with access here
 //   PATCH  /api/apps/:slug/agents/:id { role }           -> AppAgent           admin; capped at the approver's role
@@ -235,7 +235,7 @@
 //   POST   /api/apps/:slug/identity-keys { name }        -> NewIdentityKey     admin; the secret is only returned here
 //   DELETE /api/apps/:slug/identity-keys/:id             -> { ok: true }       admin
 //   GET    /api/apps/:slug/api-keys                      -> ApiKey[]           admin; public API v1 keys (shared/v1.ts)
-//   POST   /api/apps/:slug/api-keys { name, kind, allowed_origins? } -> NewApiKey   admin; the key is only returned here
+//   POST   /api/apps/:slug/api-keys { name, kind, allowed_origins? } -> NewApiKey   admin; secret keys are returned only here
 //   PATCH  /api/apps/:slug/api-keys/:id { name?, allowed_origins? } -> ApiKey  admin
 //   DELETE /api/apps/:slug/api-keys/:id                  -> { ok: true }       admin
 // Email verification, in any workspace: someone on a request (the requester, the team, or an agent at responder)
@@ -677,6 +677,7 @@ export interface Revision {
 }
 
 export interface AppSettings {
+  /** Redacted (null URL, empty secret/events/deliveries) in mutation responses. Only an explicit admin settings read reveals credentials. */
   webhook: { url: string | null; secret: string; events: WebhookEventType[]; deliveries: WebhookDelivery[] }
   members: Member[]
   /** Absolute URL of the MCP endpoint, for the OpenCode config snippet. */

@@ -22,7 +22,7 @@ import { claimContactGuest } from "./guest-history"
 import { clientIP, enforce } from "./rate-limits"
 import { requestLocale } from "./locale"
 import { issueCode, redeemCode, expireCodes } from "./email-codes"
-import { contactCols, proofCols, verification, type ProofRow } from "./helpdesk-data"
+import { contactCols, proofCols, verification, requesterActor, type ProofRow } from "./helpdesk-data"
 import { listIssues, issueNumber, issueSummary } from "./issues"
 import { actorIds, owns, visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { authenticate } from "./mcp"
@@ -297,11 +297,10 @@ helpdesk.post(route + "/:id/confirm", async (c) => {
   } finally {
     c.executionCtx.waitUntil(dispatchProof(c.env, id))
   }
-  return c.json(
-    verification(
-      (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
-    )
+  const proof = verification(
+    (await sql(c.env, `SELECT ${proofCols} FROM email_codes v WHERE id=?`, id).first<ProofRow>()) ?? missing()
   )
+  return c.json(v.team ? proof : { ...proof, requested_by: requesterActor(proof.requested_by) })
 })
 export async function dispatchProof(env: Env, id: string) {
   const row = await sql(

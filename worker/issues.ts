@@ -38,7 +38,7 @@ import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
-import { contactQuery, proofQuery, verification, type ContactRow, type ProofRow } from "./helpdesk-data"
+import { contactQuery, proofQuery, verification,requesterActor, type ContactRow, type ProofRow } from "./helpdesk-data"
 
 const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
@@ -750,13 +750,13 @@ export async function getIssue(
     timeline.push({
       kind: "event",
       event: projectTiers(
-        { ...e, actor: parseActor(e.actor, roles), data },
+        { ...e, actor: privileged?parseActor(e.actor,roles):requesterActor(parseActor(e.actor,roles)), data },
         tier_bag ? JSON.parse(tier_bag) : undefined
       )
     })
   }
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
-  const verifications = proofs.map(verification)
+  const verifications = proofs.map(verification).map(v=>privileged?v:{...v,requested_by:requesterActor(v.requested_by)})
   for (const proof of verifications)
     if (proof.state === "verified")
       timeline.push({

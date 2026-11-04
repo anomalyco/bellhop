@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers"
+import {requesterActor} from './helpdesk-data'
 import { acceptStream, deliverStream } from "./v1/realtime"
 import type { Hint } from "./v1/signals"
 import type { Actor, Comment, IssueSummary, LiveEvent, Role, TimelineItem } from "../shared/api"
@@ -456,6 +457,7 @@ export class Room extends DurableObject<Env> {
               if (!v.team && (e.item.event.data.rule || ["hidden", "unhidden"].includes(e.item.event.type))) continue
               const other = relationId(e.item)
               if (other && !allowed(other)) continue
+              if(!v.team)e={...e,item:{kind:'event',event:{...e.item.event,actor:requesterActor(e.item.event.actor)}}}
             }
           } else if (e.type === "comment.updated") {
             const c = shape(e.comment)

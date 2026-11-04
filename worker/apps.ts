@@ -231,7 +231,7 @@ export function webhookDeliveries(env: Env, id: string) {
     )
   )
 }
-export async function settings(c: Ctx): Promise<AppSettings> {
+export async function settings(c: Ctx,revealSecret=false): Promise<AppSettings> {
   const id = c.var.app.id
   // Members need the roster to assign issues, but not the signing key or token configuration.
   // Re-read after a member mutation: the caller may just have removed or demoted themselves.
@@ -239,14 +239,14 @@ export async function settings(c: Ctx): Promise<AppSettings> {
     Member["role"]
   >("role")
   const mcp_url = new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
-  if (!can(current, "setup"))
+  if (!revealSecret || !can(current, "setup"))
     return {
       webhook: { url: null, secret: "", events: [], deliveries: [] },
       members: can(current, "triage") ? await roster(c.env, id) : [],
       mcp_url
     }
   const [hook, deliveries, members] = await Promise.all([
-    sql(c.env, "SELECT url,secret,events FROM webhook_settings WHERE app_id=?", id).first<{
+    sql(c.env, `SELECT url,secret,events FROM webhook_settings WHERE app_id=? AND EXISTS(SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin'))`, id,id,c.var.user!.id).first<{
       events: string
       url: string | null
       secret: string
@@ -449,7 +449,7 @@ apps.patch("/api/apps/:slug", async (c) => {
 })
 apps.get("/api/apps/:slug/settings", async (c) => {
   requireTeam(c, "triage")
-  return c.json(await settings(c))
+  return c.json(await settings(c,true))
 })
 apps.put("/api/apps/:slug/webhook", async (c) => {
   requireTeam(c, "setup")

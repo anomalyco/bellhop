@@ -16,7 +16,7 @@ import {
   type Bindings,
   type Ctx
 } from "../core"
-import { requireTeam } from "../permissions"
+import { can } from "../permissions"
 
 export function normalizeOrigin(x: unknown) {
   if (typeof x !== "string" || x.length > 2048 || !/^https?:\/\/[^\s/?#@\\*]+\/?$/i.test(x))
@@ -31,12 +31,16 @@ function origins(kind: ApiKey["kind"], x: unknown) {
   return [...new Set(x.map(normalizeOrigin))]
 }
 const fields = `k.id,k.kind,k.name,k.preview,k.created_at,k.last_used_at,(SELECT json_group_array(origin ORDER BY origin) FROM api_origins WHERE key_id=k.id) allowed_origins`
-type Row = Omit<ApiKey, "allowed_origins"> & { allowed_origins: string }
-const projection = (r: Row): ApiKey => ({ ...r, allowed_origins: JSON.parse(r.allowed_origins) })
+type Row = Omit<ApiKey, "allowed_origins"> & { allowed_origins: string; publishable_value?: string | null }
+const projection = ({ publishable_value, ...r }: Row): ApiKey => ({
+  ...r,
+  allowed_origins: JSON.parse(r.allowed_origins),
+  ...(r.kind === "publishable" && publishable_value ? { key: publishable_value } : {})
+})
 const grant = `SELECT app_id FROM members WHERE app_id=? AND user_id=? AND role IN ('admin','owner')`
 function access(c: Ctx) {
-  requireTeam(c, "setup")
-  return [c.var.app.id, c.var.user!.id] as const
+  if (!c.var.user || !can(c.var.app.role, "setup")) denied()
+  return [c.var.app.id, c.var.user.id] as const
 }
 const base = "/api/apps/:slug/api-keys"
 export const apiKeys = new Hono<Bindings>()
@@ -45,7 +49,7 @@ apiKeys.get(base, async (c) =>
     (
       await sql(
         c.env,
-        `SELECT ${fields} FROM api_keys k WHERE k.app_id=(${grant}) ORDER BY k.created_at,k.id`,
+        `SELECT ${fields},k.publishable_value FROM api_keys k WHERE k.app_id=(${grant}) ORDER BY k.created_at,k.id`,
         ...access(c)
       ).all<Row>()
     ).results.map(projection)
@@ -70,13 +74,14 @@ async function save(c: Ctx, id: string, create: boolean) {
     create
       ? sql(
           env,
-          `INSERT INTO api_keys(id,kind,name,hash,preview,created_at,app_id) SELECT ?,?,?,?,?,?,app_id FROM (${grant})`,
+          `INSERT INTO api_keys(id,kind,name,hash,preview,created_at,publishable_value,app_id) SELECT ?,?,?,?,?,?,?,app_id FROM (${grant})`,
           id,
           kind,
           name,
           await sha256(raw!),
           preview,
           now(),
+          kind === "publishable" ? raw : null,
           ...args
         )
       : sql(env, `UPDATE api_keys SET name=coalesce(?,name) WHERE id=? AND app_id=(${grant})`, name, id, ...args),

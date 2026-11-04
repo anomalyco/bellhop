@@ -1,4 +1,5 @@
-import type { Actor, Verification } from "../../shared/api"
+import type { Actor } from "../../shared/api"
+import type { Verification } from "../../shared/v1"
 import type { Conversation, ConversationItem, Message, Page, Participant, Upload } from "../../shared/v1"
 import { bad, fail, ids, input, missing, sql, str, type Ctx } from "../core"
 import { addComment, createIssue, type Access } from "../mutations"
@@ -22,6 +23,8 @@ export async function target(c: Ctx, s: Scope, id: string) {
   )
 }
 export function participant(a: Actor): Participant {
+  if (a.type === "agent" && a.id.startsWith("api-key:"))
+    return { type: "team", id: "workspace-team", name: a.name, avatar_url: null }
   if (a.type === "guest") return { type: "user", id: a.id, name: a.name }
   return {
     type: a.type === "member" ? "team" : "agent",
@@ -136,11 +139,13 @@ function publicProof(row: ProofRow): Verification {
   return {
     ...proof,
     requested_by:
-      a.type === "guest"
-        ? { type: a.type, id: a.id, name: a.name, handle: a.handle }
-        : a.type === "agent"
-          ? { type: a.type, id: a.id, name: a.name }
-          : { type: a.type, id: a.id, name: a.name, avatar_url: a.avatar_url }
+      a.type === "agent" && a.id.startsWith("api-key:")
+        ? { type: "team", id: "workspace-team", name: a.name, avatar_url: null }
+        : a.type === "guest"
+          ? { type: a.type, id: a.id, name: a.name, handle: a.handle }
+          : a.type === "agent"
+            ? { type: a.type, id: a.id, name: a.name }
+            : { type: a.type, id: a.id, name: a.name, avatar_url: a.avatar_url }
   }
 }
 type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {

@@ -10,7 +10,7 @@
 // End users never see "Bellhop": team and agent participants are shown
 // as the workspace presents them.
 //
-// Keys (created by workspace admins in Settings → API keys; shown once):
+// Keys (created by workspace admins in Settings → API keys; secret keys shown only once):
 //   publishable  bh_pk_…  safe to ship in browsers. Names the workspace. Only accepted from the key's allowed origins
 //                         (exact origins; requests without a matching Origin are refused). Starts end-user sessions:
 //                         https://<slug>.blhp.app (the dev path-mode origin locally) is implicitly allowed for its workspace.
@@ -36,8 +36,8 @@
 //          from original mint. Old bearer and sockets stop working. Serialize refreshes; do not retry the old token.
 //   GET    /v1/workspace       publishable key or user session -> Workspace. A null Turnstile site key means email
 //          and anonymous sign-in are unavailable on that origin; use host identity or a hosted workspace frame.
-//          An anonymous session may also call sessions/email and sessions/email/verify. Pass its bearer and the
-//          same Challenge-Token to verify: its workspace history moves to the proved contact, and the old session ends.
+//          An anonymous session may also call sessions/email and sessions/email/verify. On verify, pass the same
+//          anonymous session bearer and Challenge-Token that started the challenge: its workspace history moves to the proved contact, and the old session ends.
 // Limits per minute: session reads 300, writes 60, typing 300 separately (all follow the family on refresh);
 // credential mints and code entries 60/key/IP, secret-key backstop 6000/key. Ingress 600/IP, entry routes 120/IP.
 // Preflights are uncharged and cacheable for 86400 s; signed media has a separate 600/IP budget.
@@ -82,7 +82,8 @@
 //   PATCH  /v1/conversations/:id                           ConversationPatch -> Conversation
 //   POST   /v1/conversations/:id/verifications             { email } -> Verification; subject to workspace mail caps
 
-import type { CloseReason, IssueStatus, Locale, Verification } from "./api"
+import type { CloseReason, IssueStatus, Locale, Verification as StoredVerification } from "./api"
+export type Verification=Omit<StoredVerification,'requested_by'>&{requested_by:StoredVerification['requested_by']|Extract<Participant,{type:'team'}>}
 
 export interface Page<T> {
   data: T[]
@@ -223,6 +224,8 @@ export type RealtimeEvent =
 
 /** Settings → API keys (internal API, admin). */
 export interface ApiKey {
+  /** Publishable keys only, admins only. Absent for older hash-only publishable keys. */
+  key?:string
   id: string
   name: string
   kind: "publishable" | "secret"

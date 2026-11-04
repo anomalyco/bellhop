@@ -938,7 +938,7 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
 /* Webhook */
 
 function Webhook({ app }: { app: AppDetail }) {
-  const { data: settings, error, reload } = useSettings(app.slug)
+  const { data: settings, error, reload } = useResource<AppSettings>(keys.settings(app.slug), () => api.settings(app.slug), -1)
   const [url, setUrl] = useState<string | null>(null)
   const [events, setEvents] = useState<WebhookEventType[] | null>(null)
   const [reveal, setReveal] = useState(false)
@@ -957,7 +957,7 @@ function Webhook({ app }: { app: AppDetail }) {
     setNote(null)
     try {
       const next = await fn()
-      if (next) setData(keys.settings(app.slug), next)
+      if (next) await reload() // Mutation envelopes never contain webhook credentials.
       if (done) setNote(done)
     } catch (err) {
       setActionError(errorMessage(err))
