@@ -113,7 +113,9 @@ export function emit(env: Env, ctx: Work, change: Change) {
       created.length ||
       edited.length ||
       change.deletedComment ||
-      change.changes?.some((x) => ["title", "status", "assignee", "hidden", "comment.hidden"].includes(x))
+      change.changes?.some((x) =>
+        ["title", "status", "close_reason", "assignee", "labels", "hidden", "comment.hidden"].includes(x)
+      )
     )
       ctx.waitUntil(signalContact(env, app.id, issue.author.id, { issue: issue.id, created, edited }))
   }

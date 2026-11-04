@@ -59,6 +59,7 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
   if (!reservation!.meta.changes) {
     const r = read!.results[0]!
     if (r.digest !== digest) fail(422, "idempotency_mismatch", "Key already used for another request")
+    if (r.status === 410 && !r.cipher) fail(410, "erased", "The saved response is no longer available")
     if (!r.cipher || !r.status) {
       c.header("Retry-After", "1")
       fail(409, "request_pending", "Request is pending")
@@ -121,9 +122,10 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
   sealed.set(cipher, 12)
   await sql(
     c.env,
-    `UPDATE api_replays SET status=?,cipher=?,expires=min(expires,unixepoch()+?) WHERE ${where} AND digest=?`,
+    `UPDATE api_replays SET status=?,cipher=?,contact_id=?,expires=min(expires,unixepoch()+CAST(? AS INTEGER)) WHERE ${where} AND digest=? AND status IS NULL`,
     response.status,
     b64(sealed),
+    s.replayContact ?? s.user?.id ?? null,
     response.status >= 400 && response.status < 500 ? 300 : 86400,
     ...ids,
     digest

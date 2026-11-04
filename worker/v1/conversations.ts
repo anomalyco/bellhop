@@ -47,7 +47,7 @@ function access(c: Ctx, s: Scope, id?: string): Access {
 }
 
 const files = `(SELECT json_group_array(json_object('id',a.id,'name',a.name,'type',a.mime,'size',a.size)) FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id WHERE l.issue_id=t.issue_id AND coalesce(l.comment_id,l.issue_id)=t.id)`
-const wire = `json_object('id',t.id,'created_at',t.created_at,'issue_id',t.issue_id,'actor',json(t.actor),'type',t.type,'body',t.body,'edited_at',t.edited_at,'data',json(t.data),'files',json(${files}))`
+export const wire = `json_object('id',t.id,'created_at',t.created_at,'issue_id',t.issue_id,'actor',json(t.actor),'type',t.type,'body',t.body,'edited_at',t.edited_at,'data',json(t.data),'files',json(${files}))`
 type ItemRow = {
   id: string
   issue_id: string
@@ -65,10 +65,10 @@ type ItemRow = {
   files: Omit<Upload, "url">[]
 }
 const audience = (c: Ctx, s: Scope): Audience => ({ env: c.env, app: s.app, who: s.user!.id, origin: apiOrigin(c) })
-async function project(raw: string, a: Audience): Promise<ConversationItem> {
-  const r = JSON.parse(raw) as ItemRow,
-    who = participant(r.actor),
-    base = { id: r.id, created_at: r.created_at }
+export async function project(raw: string, a: Audience, workspace = false): Promise<ConversationItem> {
+  const r = JSON.parse(raw) as ItemRow & { internal?: number; hidden?: number },
+    who = r.actor ? participant(r.actor) : null,
+    base = { id: r.id, created_at: r.created_at, ...(workspace && { internal: !!r.internal, hidden: !!r.hidden }) }
   if (r.type === "message")
     return {
       ...base,
@@ -76,11 +76,26 @@ async function project(raw: string, a: Audience): Promise<ConversationItem> {
       message: {
         ...base,
         conversation_id: r.issue_id,
-        author: who,
+        author: who!,
         body: r.body,
         edited_at: r.edited_at,
-        attachments: await signedFiles(a, r.files)
+        attachments: workspace
+          ? r.files.map((f) => ({
+              ...f,
+              url: `${a.origin}/media/${encodeURIComponent(f.id)}/${encodeURIComponent(f.name)}`
+            }))
+          : await signedFiles(a, r.files)
       }
+    }
+  if (
+    workspace &&
+    (r.internal || !["assigned", "claimed", "status_changed", "verified", "verification_requested"].includes(r.type))
+  )
+    return {
+      ...base,
+      kind: "event",
+      actor: who,
+      event: { type: "workspace_event", action: r.type, data: r.data ?? {} }
     }
   const d = r.data!,
     event =
@@ -97,8 +112,8 @@ async function project(raw: string, a: Audience): Promise<ConversationItem> {
             }
   return { ...base, kind: "event", actor: who, event }
 }
-const cursor = (stamp: string, id: string) => btoa(JSON.stringify([stamp, id]))
-function position(s: string | undefined): [string, string] | null {
+export const cursor = (stamp: string, id: string) => btoa(JSON.stringify([stamp, id]))
+export function position(s: string | undefined): [string, string] | null {
   if (s === undefined) return null
   try {
     const x = JSON.parse(atob(str(s, "cursor", 512)))
@@ -214,7 +229,7 @@ export async function items(c: Ctx, s: Scope, id: string): Promise<Page<Conversa
     last = data.at(-1)
   return { data, next_cursor: rs.length > pageSize ? cursor(last!.created_at, last!.id) : null }
 }
-function message(b: Record<string, unknown>) {
+export function message(b: Record<string, unknown>) {
   const body = str(b.body, "body", 65536, true),
     attachment_ids = ids(b.attachments, "attachments")
   if (!body.trim() && !attachment_ids.length) bad("A message needs text or an attachment")

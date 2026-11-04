@@ -50,6 +50,7 @@ export interface Access {
   locale?: Locale
   desk?: boolean
   credentialGuard?: D1PreparedStatement
+  serverWrite?: (target: string) => D1PreparedStatement[]
 }
 function access(c: Ctx): Access {
   return {
@@ -90,6 +91,15 @@ function guestNameGuard(a: Access) {
         )
       ]
   if (a.credentialGuard) guard.push(a.credentialGuard)
+  else if (a.actor.type === "guest" && a.actor.id.startsWith("ct_"))
+    guard.push(
+      sql(
+        a.env,
+        "INSERT INTO api_guard SELECT 0 WHERE NOT EXISTS(SELECT 1 FROM contacts WHERE id=? AND app_id=?)",
+        a.actor.id,
+        a.app.id
+      )
+    )
   return a.actor.type === "guest" && a.guestHash
     ? [
         ...guard,
@@ -204,7 +214,8 @@ export async function createIssue(a: Access, b: Record<string, unknown>) {
     ),
     ...attach(env, id, null, b.attachment_ids, !!a.credentialGuard),
     ...attachReport(env, app.id, b.metadata_id, id, null),
-    ...guestNameGuard(a)
+    ...guestNameGuard(a),
+    ...(a.serverWrite?.(id) ?? [])
   ]
   const templateEvents = new Set<string>()
   if (actor.type === "guest" && a.guestHash)
@@ -349,6 +360,7 @@ export async function addComment(
     ...attachReport(env, app.id, b.metadata_id, s.id, id),
     ...guestNameGuard(a),
     stillHere(a, s.id),
+    ...(a.serverWrite?.(id) ?? []),
     ...(!internal ? [sql(env, "UPDATE issues SET updated_at=max(updated_at,?) WHERE id=?", at, s.id)] : [])
   ])
   const files = links.length
@@ -388,7 +400,13 @@ export async function addComment(
   })
   return comment
 }
-export async function updateIssue(a: Access, n: number, b: Record<string, unknown>, claim = false) {
+export async function updateIssue(
+  a: Access,
+  n: number,
+  b: Record<string, unknown>,
+  claim = false,
+  resolvedAssignee?: Actor | null
+) {
   const { env, app, actor } = a
   const state = await sql(
     env,
@@ -499,7 +517,11 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
     }
   }
   if (claim || b.assignee_id !== undefined) {
-    const to = claim ? actor : await assignee(env, app.id, b.assignee_id)
+    const to = claim
+      ? actor
+      : resolvedAssignee !== undefined
+        ? resolvedAssignee
+        : await assignee(env, app.id, b.assignee_id)
     if (to?.id !== issue.assignee?.id) {
       field("assignee", to ? JSON.stringify(to) : null)
       if (to?.id === actor.id) record(a, issue.id, "claimed", {}, at, q, items)
@@ -520,7 +542,10 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       record(a, issue.id, "labeled", { label }, at, q, items)
     }
   }
-  if (!changes.length) return issue
+  if (!changes.length) {
+    if (a.serverWrite) await env.DB.batch(a.serverWrite(issue.id))
+    return issue
+  }
   // A conflicting revision violates NOT NULL, rolling the entire batch back (including its timeline).
   q.unshift(
     sql(
@@ -563,7 +588,7 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
         m.id
       )
     )
-  await env.DB.batch([...q, stillHere(a, issue.id), ...guestNameGuard(a)])
+  await env.DB.batch([...q, stillHere(a, issue.id), ...guestNameGuard(a), ...(a.serverWrite?.(issue.id) ?? [])])
   const next = await full(a, n)
   notify(a, { type: "issue.updated", issue: summaryOf(next), changes, items, mentioned })
   return next

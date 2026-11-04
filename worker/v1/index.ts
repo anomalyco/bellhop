@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { bad, denied, fail, input, missing, sql, type Bindings, type Ctx } from "../core"
+import { bad, denied, fail, input, missing, sha256, type Bindings, type Ctx } from "../core"
+import * as server from "./server"
 import { enforce, clientIP } from "../rate-limits"
 import { authorize, checkHost, cors, preflightAllowed, type Auth, type Scope } from "./access"
 import { mintTicket, upgrade, revokeStream } from "./realtime"
@@ -12,19 +13,62 @@ import { schemas, ref, string, type Schema } from "./schemas"
 
 type Action = (c: Ctx, s: Scope, b: Record<string, unknown>, id: string, number: number, seed?: string) => unknown
 type Route = {
-  method: "GET" | "PATCH" | "POST" | "DELETE"
+  method: "GET" | "PATCH" | "POST" | "DELETE" | "PUT"
   path: string
   auth: Auth | "ticket"
   transport?: "multipart" | "socket"
   request?: keyof typeof schemas
   response: keyof typeof schemas
   run: Action
+  workspace?: Action
   status?: 200 | 201
   query?: Record<string, Schema>
 }
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  listContacts: {
+    method: "GET",
+    path: "/contacts",
+    auth: "server",
+    query: { q: string, cursor: string },
+    response: "Contacts",
+    run: server.listContacts
+  },
+  getContactBySubject: {
+    method: "GET",
+    path: "/contacts/by-external-id/:external_id",
+    auth: "server",
+    response: "Contact",
+    run: server.getContact
+  },
+  upsertContact: {
+    method: "PUT",
+    path: "/contacts/by-external-id/:external_id",
+    auth: "server",
+    request: "ContactInput",
+    response: "Contact",
+    run: server.upsert
+  },
+  getContact: { method: "GET", path: "/contacts/:id", auth: "server", response: "Contact", run: server.getContact },
+  eraseContact: { method: "DELETE", path: "/contacts/:id", auth: "server", response: "OK", run: server.erase },
+  updateConversation: {
+    method: "PATCH",
+    path: conv,
+    auth: "server",
+    request: "ConversationPatch",
+    response: "Conversation",
+    run: (c, s, b, id, n) => server.patchConversation(c, s, id, n, b)
+  },
+  requestVerification: {
+    method: "POST",
+    path: conv + "/verifications",
+    auth: "server",
+    request: "VerificationInput",
+    response: "Verification",
+    status: 201,
+    run: (c, s, b, _id, n) => server.requestProof(c, s, n, b)
+  },
   upload: {
     method: "POST",
     path: "/uploads",
@@ -89,15 +133,22 @@ export const routes: Record<string, Route> = {
   listConversations: {
     method: "GET",
     path: "/conversations",
-    auth: "session",
+    auth: "shared",
+    workspace: (c, s) => server.workspaceConversations(c, s),
     response: "Conversations",
-    query: { cursor: string, status: { enum: ["open", "closed"] } },
+    query: {
+      cursor: string,
+      status: { enum: ["open", "closed", "in_progress", "waiting"] },
+      q: string,
+      contact_id: string
+    },
     run: (c, s) => conversations(c, s)
   },
   createConversation: {
     method: "POST",
     path: "/conversations",
-    auth: "session",
+    auth: "shared",
+    workspace: server.openFor,
     request: "ConversationInput",
     response: "Conversation",
     run: open,
@@ -106,14 +157,16 @@ export const routes: Record<string, Route> = {
   getConversation: {
     method: "GET",
     path: conv,
-    auth: "session",
+    auth: "shared",
+    workspace: async (c, s, _b, id) => (await server.workspaceConversations(c, s, id)).data[0],
     response: "Conversation",
     run: async (c, s, _, id) => (await conversations(c, s, id)).data[0]
   },
   listItems: {
     method: "GET",
     path: conv + "/items",
-    auth: "session",
+    auth: "shared",
+    workspace: (c, s, _b, id) => server.workspaceItems(c, s, id),
     response: "Items",
     query: { cursor: string, after: string },
     run: (c, s, _, id) => items(c, s, id)
@@ -121,7 +174,8 @@ export const routes: Record<string, Route> = {
   postMessage: {
     method: "POST",
     path: conv + "/messages",
-    auth: "session",
+    auth: "shared",
+    workspace: (c, s, b, id, n) => server.replyAs(c, s, id, n, b),
     request: "MessageInput",
     response: "Message",
     status: 201,
@@ -156,7 +210,9 @@ const security = {
     key: [{ publishable: [] }, { secret: [] }],
     publishable: [{ publishable: [] }],
     session: [{ session: [] }],
-    ticket: [{ socketTicket: [] }]
+    ticket: [{ socketTicket: [] }],
+    server: [{ secret: [] }],
+    shared: [{ secret: [] }, { session: [] }]
   },
   media = (name: string) => ({ "application/json": { schema: ref(name) } })
 function document() {
@@ -173,8 +229,8 @@ function document() {
           schema: v as typeof string
         }))
       )
-    if (r.method === "POST" && name !== "realtime")
-      parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
+    const idempotent = (r.method === "POST" && r.path !== "/realtime") || (r.auth === "server" && r.method !== "GET")
+    if (idempotent) parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
     if (name === "verifyEmail" || name === "startEmail")
       parameters.push({ in: "header", name: "Challenge-Token", required: name === "verifyEmail", schema: string })
     const responses: Record<string, unknown> = {
@@ -204,7 +260,7 @@ function document() {
       ...(r.query || r.request || r.method === "POST"
         ? { 400: "invalid_input, invalid_code or invalid_attachment" }
         : {}),
-      ...(r.method === "POST"
+      ...(idempotent
         ? { 409: "conflict or request_pending", 422: "idempotency_mismatch: key reused with different input" }
         : {}),
       ...(r.transport === "multipart"
@@ -226,6 +282,7 @@ function document() {
       }
     ;(paths[path] ??= {})[r.method.toLowerCase()] = {
       operationId: name,
+      ...(r.auth==='shared'?{description:'A session receives only its own public conversation view. A secret key without Origin receives the workspace view, including marked staff-only items. For server creation supply contact; for replies supply as.member.'}:{}),
       security: security[r.auth],
       parameters,
       ...(r.request
@@ -298,7 +355,7 @@ export function publicApi() {
   )
   for (const path of new Set(Object.values(routes).map((r) => r.path))) {
     const methods = Object.values(routes)
-      .filter((r) => r.path === path)
+      .filter((r) => r.path === path && r.auth !== "server")
       .map((r) => r.method)
     api.options(path, async (c) => {
       const origin = c.req.header("Origin")
@@ -342,9 +399,21 @@ export function publicApi() {
       }
       const s = await authorize(c, r.auth),
         id = c.req.param("id") ?? "",
-        n = id ? await target(c, s, id) : 0
+        workspace = !s.user && s.kind === "secret",
+        n =
+          id && r.path.startsWith(conv)
+            ? workspace
+              ? await server.workspaceTarget(c, s, id)
+              : await target(c, s, id)
+            : 0
+      if (
+        !workspace &&
+        r.auth === "shared" &&
+        (c.req.query("contact_id") !== undefined || c.req.query("q") !== undefined)
+      )
+        denied()
       if (r.transport === "multipart") return upload(c, s)
-      const raw = r.method === "POST" || r.method === "PATCH" ? await c.req.text() : ""
+      const raw = r.method !== "GET" ? await c.req.text() : ""
       const run = async (seed?: string) => {
         let b: Record<string, unknown> = {}
         if (raw) {
@@ -358,9 +427,34 @@ export function publicApi() {
           }
           b = input(value)
         } else if (r.request) bad("Expected a JSON object")
-        return c.json(await r.run(c, s, b, id, n, seed), r.status ?? 200)
+        if (
+          r.auth === "shared" &&
+          !workspace &&
+          (b.as !== undefined || b.contact !== undefined || (b.internal !== undefined && b.internal !== false))
+        )
+          denied()
+        if (
+          r.path === "/conversations" &&
+          r.method === "POST" &&
+          b.message &&
+          typeof b.message === "object" &&
+          ("as" in b.message || ("internal" in b.message && b.message.internal !== false))
+        )
+          bad("The opening message is authored by the requester and cannot be internal")
+        return c.json(await (workspace && r.workspace ? r.workspace : r.run)(c, s, b, id, n, seed), r.status ?? 200)
       }
-      return r.method === "POST" && r.path !== "/realtime" ? replay(c, s, new URL(c.req.url).pathname, raw, run) : run()
+      const pathname = new URL(c.req.url).pathname,
+        route =
+          r.method === "POST"
+            ? pathname
+            : r.method +
+              " " +
+              (c.req.param("external_id") !== undefined
+                ? "/v1/contacts/by-external-id/" + (await sha256(c.req.param("external_id")!))
+                : pathname)
+      return (r.method === "POST" && r.path !== "/realtime") || (workspace && r.method !== "GET")
+        ? replay(c, s, route, raw, run)
+        : run()
     })
   api.all("*", () => missing())
   return api

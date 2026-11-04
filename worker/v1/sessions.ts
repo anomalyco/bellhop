@@ -4,6 +4,7 @@ import { browserLocale, isLocale } from "../locale"
 import { siteverify } from "../auth"
 import { consumeIdentity, hostClaims, identityFailure, resolveHost, verifyIdentity } from "../identity"
 import { issueCode, redeemCode } from "../email-codes"
+import { keyAudit } from "./server-auth"
 import { clientIP, enforce } from "../rate-limits"
 import { liveGuard, ownOrigin, type Scope } from "./access"
 
@@ -98,6 +99,7 @@ export async function mint(
     anon = "anon_" + uid()
   }
   if (setLocale) q.push(sql(env, "UPDATE contacts SET locale=? WHERE app_id=? AND external_id=?", locale, s.app, sub))
+  if (s.kind === "secret" && sub) q.push(keyAudit(env, s.app, s.key, "api.session.created", "contact", sub, {}, true))
   if (s.kind === "publishable" && ownOrigin(env, s.slug, s.origin, new URL(c.req.url).origin))
     q.push(
       sql(
@@ -129,6 +131,7 @@ export async function mint(
     )
   )
   const result = await env.DB.batch<EndUser>(q).catch(identityFailure)
+  s.replayContact = result.at(-1)!.results[0]!.id
   return {
     token: raw,
     expires_at: new Date(expires * 1000).toISOString(),

@@ -2,6 +2,7 @@ import type { Actor, Locale } from "../shared/api"
 import { email, fail, hex, missing, now, sha256, sql, uid } from "./core"
 import { agentAccessSQL } from "./permissions"
 import { entry } from "./audit"
+import { keyAudit } from "./v1/server-auth"
 import { accountCopy, deskCopy, formatMail } from "./mail-copy"
 import { cleanSender, devMail, emailConfigured, esc, mailOrigin, sendMail, workspaceSender } from "./mail-provider"
 
@@ -41,7 +42,8 @@ export async function issueCode(
   locale: Locale,
   actor?: Actor,
   owners: string[] = [],
-  team = false
+  team = false,
+  serverKey?: string
 ) {
   if (!emailConfigured(env) && !(devMail(env) && env.DEV_LOGIN === "1" && !env.APP_DOMAIN))
     fail(503, "mail_unavailable", "Email delivery unavailable")
@@ -81,7 +83,7 @@ export async function issueCode(
       ? "1"
       : x.kind === "contact"
         ? "EXISTS(SELECT 1 FROM apps WHERE id=?3 AND mode='helpdesk')"
-        : `EXISTS(SELECT 1 FROM issues i JOIN apps a ON a.id=i.app_id WHERE i.id=?4 AND i.app_id=?3 AND (${actor?.type === "agent" ? `EXISTS(SELECT 1 FROM (${agentAccessSQL}) acl WHERE acl.app_id=i.app_id AND agent_id=?9 AND acl.role IN ('responder','member','admin'))` : team ? "EXISTS(SELECT 1 FROM members WHERE app_id=i.app_id AND user_id=?9)" : "i.hidden IS NULL AND json_extract(i.author,'$.id') IN(SELECT value FROM json_each(?10)) AND (a.mode!='helpdesk' OR EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=i.app_id AND t.id=?9))"}))`
+        : `EXISTS(SELECT 1 FROM issues i JOIN apps a ON a.id=i.app_id WHERE i.id=?4 AND i.app_id=?3 AND (${serverKey ? "a.mode='helpdesk' AND EXISTS(SELECT 1 FROM api_keys WHERE app_id=i.app_id AND kind='secret' AND id=?9)" : actor?.type === "agent" ? `EXISTS(SELECT 1 FROM (${agentAccessSQL}) acl WHERE acl.app_id=i.app_id AND agent_id=?9 AND acl.role IN ('responder','member','admin'))` : team ? "EXISTS(SELECT 1 FROM members WHERE app_id=i.app_id AND user_id=?9)" : "i.hidden IS NULL AND json_extract(i.author,'$.id') IN(SELECT value FROM json_each(?10)) AND (a.mode!='helpdesk' OR EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=i.app_id AND t.id=?9))"}))`
   const google = "(?2='account' AND EXISTS(SELECT 1 FROM users WHERE email=?5 AND google_sub IS NOT NULL))",
     index = q.length
   q.push(
@@ -96,10 +98,12 @@ export async function issueCode(
       actor ? JSON.stringify(actor) : x.requester,
       hash,
       now(),
-      ...(actor ? [actor.id, ...(team ? [] : [JSON.stringify(owners)])] : [])
+      ...(actor ? [serverKey ?? actor.id, ...(team ? [] : [JSON.stringify(owners)])] : [])
     )
   )
-  if (team && x.issue && actor && x.app)
+  if (serverKey && x.issue && x.app)
+    q.push(keyAudit(env, x.app, serverKey, "api.verification.requested", "issue", x.issue, { verification_id: id }))
+  else if (team && x.issue && actor && x.app)
     q.push(entry(env, x.app, actor, "verification.requested", { type: "issue", id: x.issue }, { verification_id: id }))
   const row = (await env.DB.batch<{ state: string; trusted: number | null }>(q))[index]!.results[0] ?? missing()
   const googleOnly = x.kind === "account" && row.state === "failed"

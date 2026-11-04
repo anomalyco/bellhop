@@ -21,6 +21,19 @@ export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
+  Contacts: page("Contact"),
+  Contact: { allOf: [ref("EndUser"), obj({ unverified_email: ns, created_at: date, last_seen_at: nullable(date) })] },
+  ContactInput: obj({ email: string, email_verified: bool, link_existing: bool, name: string, locale }, []),
+  ConversationPatch: obj(
+    {
+      status,
+      close_reason: reason,
+      assignee: nullable(one(obj({ member: string }), obj({ agent: string }))),
+      labels: arr(string)
+    },
+    []
+  ),
+  VerificationInput: obj({ email: string }),
   OK: obj({ ok: { const: true } }),
   Error: obj({ error: obj({ code: string, message: string }) }),
   EndUser: obj({
@@ -73,49 +86,94 @@ export const schemas = {
     variant("typing", { conversation_id: string, participant: ref("Participant") }),
     variant("activity", { conversation_id: string, participant: ref("Participant"), text: ns })
   ),
-  MessageInput: obj({ body: { type: "string", maxLength: 65536 }, attachments: arr(string) }, ["body"]),
+  MessageInput: obj(
+    {
+      body: { type: "string", maxLength: 65536 },
+      attachments: arr(string),
+      internal: bool,
+      as: { ...obj({ member: string }), description: "Required with a server key; not available to an end user." }
+    },
+    ["body"]
+  ),
   ConversationInput: obj(
-    { subject: { type: "string", maxLength: 256 }, message: ref("MessageInput"), metadata_id: string },
+    {
+      subject: { type: "string", maxLength: 256 },
+      message: ref("MessageInput"),
+      metadata_id: string,
+      contact: {
+        ...one(obj({ id: string }), obj({ external_id: string })),
+        description: "Required with a server key; not available to an end user."
+      }
+    },
     ["message"]
   ),
-  Message: obj({
-    id: string,
-    conversation_id: string,
-    author: ref("Participant"),
-    body: string,
-    attachments: arr(ref("Upload")),
-    created_at: date,
-    edited_at: nullable(date)
-  }),
+  Message: obj(
+    {
+      internal: bool,
+      id: string,
+      conversation_id: string,
+      author: ref("Participant"),
+      body: string,
+      attachments: arr(ref("Upload")),
+      created_at: date,
+      edited_at: nullable(date)
+    },
+    ["id", "conversation_id", "author", "body", "attachments", "created_at", "edited_at"]
+  ),
   Event: one(
+    variant("workspace_event", { action: string, data: { type: "object" } }),
     variant("status_changed", { status, close_reason: reason }),
     variant("assigned", { assignee: nullable(ref("Participant")) }),
     variant("verification_requested", { verification_id: string }),
     variant("verified", { verification_id: string })
   ),
-  Item: one(
-    obj({ kind: { const: "message" }, id: string, created_at: date, message: ref("Message") }),
-    obj({
-      kind: { const: "event" },
+  Item: {
+    allOf: [
+      obj({ internal: bool, hidden: bool }, []),
+      one(
+        obj({ kind: { const: "message" }, id: string, created_at: date, message: ref("Message") }),
+        obj({
+          kind: { const: "event" },
+          id: string,
+          created_at: date,
+          actor: nullable(ref("Participant")),
+          event: ref("Event")
+        })
+      )
+    ]
+  },
+  Conversation: obj(
+    {
+      labels: arr(string),
+      contact_id: ns,
+      hidden: bool,
+      created_via: { const: "api" },
       id: string,
+      number: integer,
+      subject: string,
+      status,
+      close_reason: reason,
       created_at: date,
-      actor: nullable(ref("Participant")),
-      event: ref("Event")
-    })
+      updated_at: date,
+      last_item: nullable(ref("Item")),
+      unread: integer,
+      assignee: nullable(ref("Participant")),
+      verifications: arr(ref("Verification"))
+    },
+    [
+      "id",
+      "number",
+      "subject",
+      "status",
+      "close_reason",
+      "created_at",
+      "updated_at",
+      "last_item",
+      "unread",
+      "assignee",
+      "verifications"
+    ]
   ),
-  Conversation: obj({
-    id: string,
-    number: integer,
-    subject: string,
-    status,
-    close_reason: reason,
-    created_at: date,
-    updated_at: date,
-    last_item: nullable(ref("Item")),
-    unread: integer,
-    assignee: nullable(ref("Participant")),
-    verifications: arr(ref("Verification"))
-  }),
   Conversations: page("Conversation"),
   Items: page("Item"),
   OpenAPI: obj({ openapi: { const: "3.1.0" }, info: { type: "object" }, paths: { type: "object" } })

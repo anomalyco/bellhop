@@ -53,9 +53,21 @@
 //          per conversation and merge by item id. Refresh the conversation list for new requests or changed state.
 //          If the anchor was deleted/hidden, reload that timeline. Close 4401 means the session is no longer authorized.
 //
-// Server API (secret key), next phase, outline only: contacts (list, get, upsert by external id), conversations
-// (list and search all, get, reply as the workspace or a named team member, internal notes, status, assignee,
-// labels, request a verification), and the same events as webhooks. Agents keep using MCP.
+// As a workspace (secret bearer, Origin MUST be absent; help desks only). Agents keep using MCP.
+// All server writes accept Idempotency-Key (24 h) and record the key name and preview in the workspace audit log.
+//   GET    /v1/contacts?q=&cursor=                         -> Page<Contact> (persistent contacts, not anonymous sessions)
+//   GET    /v1/contacts/:id                                -> Contact
+//   GET    /v1/contacts/by-external-id/:external_id         -> Contact
+//   PUT    /v1/contacts/by-external-id/:external_id  ContactInput -> Contact; same verified-email linking rules as mint
+//   DELETE /v1/contacts/:id                                -> { ok: true }; removes the identity, proof records on their
+//          requests, subscriptions and sessions. Request content/files remain; author snapshots say Deleted user.
+//   GET    /v1/conversations?status=&contact_id=&q=&cursor= -> Page<Conversation>; shared list-search qualifiers
+//   GET    /v1/conversations/:id                           -> Conversation
+//   GET    /v1/conversations/:id/items?cursor=&after=       -> Page<ConversationItem>; includes notes and staff events
+//   POST   /v1/conversations                               ConversationInput (contact required) -> Conversation
+//   POST   /v1/conversations/:id/messages                  MessageInput (as.member required) -> Message
+//   PATCH  /v1/conversations/:id                           ConversationPatch -> Conversation
+//   POST   /v1/conversations/:id/verifications             { email } -> Verification; subject to workspace mail caps
 
 import type { CloseReason, IssueStatus, Locale, Verification } from "./api"
 
@@ -83,6 +95,21 @@ export interface EndUser {
   locale: Locale
 }
 
+/** Workspace directory view. Unverified email is display-only, never a matching or delivery address. */
+export interface Contact extends EndUser {
+  unverified_email: string | null
+  created_at: string
+  last_seen_at: string | null
+}
+export interface ContactInput { email?: string; email_verified?: boolean; link_existing?:boolean; name?: string; locale?: Locale }
+export type ContactSelector = { id: string } | { external_id: string }
+export interface ConversationPatch {
+  status?: IssueStatus
+  close_reason?: CloseReason
+  assignee?: { member: string } | { agent: string } | null
+  labels?: string[]
+}
+
 /** Who wrote a message or did something, as end users see them. */
 export type Participant =
   | { type: "user"; id: string; name: string | null }
@@ -91,6 +118,11 @@ export type Participant =
 
 /** A conversation is a help desk request (an issue). */
 export interface Conversation {
+  /** Workspace-only fields. created_via is set on requests opened on behalf of a contact by a server key. */
+  contact_id?: string | null
+  labels?: string[]
+  hidden?: boolean
+  created_via?: "api"
   id: string
   /** The request number the team sees (#12). */
   number: number
@@ -108,6 +140,7 @@ export interface Conversation {
 }
 
 export interface ConversationInput {
+  contact?: ContactSelector
   /** Defaults to the start of the first message. */
   subject?: string
   message: MessageInput
@@ -116,6 +149,9 @@ export interface ConversationInput {
 }
 
 export interface MessageInput {
+  /** Workspace credential only. member is a currently joined team member's email. */
+  as?: { member: string }
+  internal?: boolean
   /** Markdown. */
   body: string
   /** Upload ids. */
@@ -127,11 +163,13 @@ export interface Upload {
   name: string
   type: string
   size: number
-  /** Signed for one object/contact for 1 hour; anyone holding the whole URL can read it while access remains valid. */
+  /** User view: signed for one object/contact for 1 h and transferable while access remains valid. Workspace view:
+   * fetch with the server's secret bearer; no shareable URL is issued for internal or hidden content. */
   url: string
 }
 
 export interface Message {
+  internal?: boolean
   id: string
   conversation_id: string
   author: Participant
@@ -143,14 +181,16 @@ export interface Message {
 }
 
 export type ConversationEvent =
+  | { type: "workspace_event"; action: string; data: Record<string,unknown> }
   | { type: "status_changed"; status: IssueStatus; close_reason: CloseReason | null }
   | { type: "assigned"; assignee: Participant | null }
   | { type: "verification_requested"; verification_id: string }
   | { type: "verified"; verification_id: string }
 
-export type ConversationItem =
+export type ConversationItem = { internal?: boolean; hidden?: boolean } & (
   | { kind: "message"; id: string; created_at: string; message: Message }
   | { kind: "event"; id: string; created_at: string; actor: Participant | null; event: ConversationEvent }
+)
 
 export type RealtimeEvent =
   | { type: "item.created"; conversation_id: string; item: ConversationItem }

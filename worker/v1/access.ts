@@ -3,7 +3,7 @@ import type { Locale } from "../../shared/api"
 import { denied, fail, missing, sha256, sql, type Ctx } from "../core"
 import { clientIP, enforce } from "../rate-limits"
 
-export type Auth = "public" | "key" | "publishable" | "session"
+export type Auth = "public" | "key" | "publishable" | "session" | "server" | "shared"
 type Workspace = {
   app: string
   slug: string
@@ -18,6 +18,7 @@ export type Scope = Workspace & {
   origin: string | null
   hash: string
   user: EndUser | null
+  replayContact?: string
 }
 const workspace = "a.id app,a.slug,a.name,a.mode,a.allow_anonymous,a.require_verified_email,k.id key,k.kind"
 const rejected = () => fail(401, "invalid_credential", "Invalid or expired credential")
@@ -59,36 +60,38 @@ export async function preflightAllowed(c: Ctx, origin: string, app: string | nul
 export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<Scope> {
   const m = /^Bearer (bh_(pk|sk|us)_[0-9a-f]{64})$/i.exec(c.req.header("Authorization") ?? "")
   if (m?.[2]?.toLowerCase() === "sk" && c.req.raw.headers.has("Origin")) denied()
-  if (!m || (auth === "session") !== (m[2] === "us")) return rejected()
+  if (!m) return rejected()
+  const session = m[2] === "us"
+  if ((auth === "server" && m[2] !== "sk") || (auth === "shared" && m[2] === "pk")) denied()
+  if (auth !== "shared" && auth !== "server" && (auth === "session") !== session) return rejected()
   const hash = await sha256(m[1]!),
     origin = c.req.header("origin") ?? null,
     env = c.env
-  const row =
-    auth === "session"
-      ? await sql(
-          env,
-          `SELECT ${workspace},s.origin bound,coalesce(t.id,s.anon_id) actor,coalesce(t.name,s.anon_name) display,t.email,t.external_id,t.verified_via,coalesce(t.locale,s.locale) locale,s.anon_id IS NOT NULL anonymous
+  const row = session
+    ? await sql(
+        env,
+        `SELECT ${workspace},s.origin bound,coalesce(t.id,s.anon_id) actor,coalesce(t.name,s.anon_name) display,t.email,t.external_id,t.verified_via,coalesce(t.locale,s.locale) locale,s.anon_id IS NOT NULL anonymous
     FROM api_sessions s JOIN apps a ON a.id=s.app_id JOIN api_keys k ON k.id=s.key_id LEFT JOIN contacts t ON t.id=s.contact_id AND t.app_id=s.app_id WHERE s.hash=? AND s.expires>unixepoch()`,
-          hash
-        ).first<
-          Workspace & {
-            key: string
-            kind: Scope["kind"]
-            bound: string | null
-            actor: string
-            display: string | null
-            email: string | null
-            external_id: string | null
-            verified_via: EndUser["verified_via"]
-            locale: Locale
-            anonymous: number
-          }
-        >()
-      : await sql(
-          env,
-          `SELECT ${workspace},NULL actor FROM api_keys k JOIN apps a ON a.id=k.app_id WHERE k.hash=?`,
-          hash
-        ).first<Workspace & Pick<Scope, "key" | "kind"> & { actor: null }>()
+        hash
+      ).first<
+        Workspace & {
+          key: string
+          kind: Scope["kind"]
+          bound: string | null
+          actor: string
+          display: string | null
+          email: string | null
+          external_id: string | null
+          verified_via: EndUser["verified_via"]
+          locale: Locale
+          anonymous: number
+        }
+      >()
+    : await sql(
+        env,
+        `SELECT ${workspace},NULL actor FROM api_keys k JOIN apps a ON a.id=k.app_id WHERE k.hash=?`,
+        hash
+      ).first<Workspace & Pick<Scope, "key" | "kind"> & { actor: null }>()
   if (!row) return rejected()
   checkHost(c, row.slug)
   if (row.kind === "publishable" && !origin) denied()

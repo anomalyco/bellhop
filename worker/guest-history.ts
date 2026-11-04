@@ -261,6 +261,12 @@ export async function claimContactGuest(
     json = JSON.stringify(actor)
   const [hits] = await c.env.DB.batch<RoomHit>([
     affectedRooms(c.env, JSON.stringify([previous]), app),
+    sql(
+      c.env,
+      "INSERT INTO api_guard SELECT 0 WHERE NOT EXISTS(SELECT 1 FROM contacts WHERE id=? AND app_id=?)",
+      contact.id,
+      app
+    ),
     ...locations.map((s) => {
       const named = contact.name ? "?" : `json_set(?,'$.name',json_extract(${s.col},'${s.path}.name'))`
       return sql(

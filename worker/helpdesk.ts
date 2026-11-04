@@ -222,7 +222,8 @@ export async function requestVerification(
   n: number,
   address: unknown,
   actor: Actor,
-  v: Viewer
+  v: Viewer,
+  serverKey?: string
 ): Promise<Verification> {
   const i = await requestTarget(c.env, app.id, n, v)
   if (c.var.desk && !v.team && !c.var.contact) fail(401, "contact_required", "Sign in to request verification")
@@ -235,7 +236,8 @@ export async function requestVerification(
     i.reporter_locale ?? requestLocale(c).locale,
     actor,
     actorIds(v),
-    v.team
+    v.team,
+    serverKey
   )
   c.executionCtx.waitUntil(signalContact(c.env, app.id, i.reporter, { issue: i.id, created: ["request:" + id] }))
   return verification(
