@@ -331,8 +331,8 @@ function Help({ scope, onBack }: { scope: Scope; onBack: () => void }) {
 
 function FilterIcon() {
   return (
-    <svg className="icon" width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" aria-hidden="true">
-      <path d="M2.5 4.25h11M4.75 8h6.5M7 11.75h2" />
+    <svg className="icon" width={14} height={14} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M2.5 3.5h11l-4.25 5v3.75l-2.5 1.25v-5z" />
     </svg>
   )
 }

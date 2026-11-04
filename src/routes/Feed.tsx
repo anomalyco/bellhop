@@ -15,6 +15,7 @@ import { Header, Page, useMe } from "../ui/Shell"
 import { AppLink, SiteLink } from "../ui/SiteLink"
 import { NoClosed, NoOpen, NoPublicWorkspaces, NoResults } from "../ui/onboarding/EmptyStates"
 import { IssueRow, SearchBox, SkeletonRows } from "./Issues"
+import { FilterMenu } from "../ui/features/FilterMenu"
 import "../styles/feed.css"
 
 export { feedKey }
@@ -168,6 +169,9 @@ export function Feed() {
                 onSubmit={(draft) => go(parseQuery(draft))}
                 onClear={() => go({ ...filter, text: "" })}
               />
+              <div className="feed-filter">
+                <FilterMenu scope="feed" query={q} onChange={(next) => go(parseQuery(next))} />
+              </div>
             </div>
 
             {/* A zero-height sticky slot: the button floats over the top of the list and follows the reader down */}

@@ -18,6 +18,7 @@ import { AppLink } from "../ui/SiteLink"
 import { NoClosed, NoIssues, NoResults } from "../ui/onboarding/EmptyStates"
 import { SetupChecklist, useSetupChecklistSettled } from "../ui/onboarding/SetupChecklist"
 import { MineFilter } from "../ui/features/QuickLinks"
+import { FilterMenu } from "../ui/features/FilterMenu"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -54,6 +55,7 @@ function IssuesLoading({ slug }: { slug: string }) {
         </div>
         <div className="list-label">
           <MineFilter filter={filter} disabled />
+          <FilterMenu query={q} disabled />
           <button type="button" className="btn list-sort" data-variant="default" disabled>
             <SortIcon size={14} />
             <span className="filter-text list-sort-text">{sortLabel[filter.sort ?? "newest"]}</span>
@@ -232,6 +234,7 @@ function IssuesList({ app }: { app: AppDetail }) {
         />
         <div className="list-label">
           <MineFilter filter={filter} onChange={go} />
+          <FilterMenu query={q} slug={slug} member={!!app.role} onChange={(next) => go(parseQuery(next))} />
           <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>

@@ -10,8 +10,11 @@
   min-width: 0;
 }
 .list-toolbar.feed-toolbar {
-  grid-template-columns: auto minmax(0, 1fr);
-  grid-template-areas: "states search";
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas: "states search filter";
+}
+.feed-filter {
+  grid-area: filter;
 }
 /* Until the counts arrive the toolbar keeps its place but isn't painted, so the tabs never widen on screen */
 .feed-toolbar[data-loading] {
@@ -158,10 +161,10 @@
 
 @media (max-width: 640px) {
   .list-toolbar.feed-toolbar {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-areas:
-      "states"
-      "search";
+      "states states"
+      "search filter";
   }
   .feed-toolbar .list-states {
     justify-self: start;

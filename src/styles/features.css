@@ -1006,3 +1006,10 @@ input[type="checkbox"].switch:hover:not(:disabled) {
     font-size: 16px;
   }
 }
+
+/* Phones: the filter menu's Author → Me covers "Mine", so the toolbar keeps three buttons beside the search. */
+@media (max-width: 640px) {
+  .list-label .btn.list-mine {
+    display: none;
+  }
+}

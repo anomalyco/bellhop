@@ -38,7 +38,7 @@ export function MineFilter({ filter, onChange, disabled }: { filter: Filter; onC
   return (
     <button
       type="button"
-      className="btn"
+      className="btn list-mine"
       data-variant="default"
       data-active={on ? "" : undefined}
       aria-pressed={on}
