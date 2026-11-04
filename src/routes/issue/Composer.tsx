@@ -1,10 +1,15 @@
-import { useLayoutEffect, useRef, useState, type CSSProperties } from "react"
-import type { AppDetail, Attachment, CloseReason, Issue, IssueStatus } from "../../../shared/api"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type RefObject } from "react"
+import type { Attachment, CloseReason, Me } from "../../../shared/api"
+import { api, errorMessage, keys } from "../../lib/api"
+import { setData } from "../../lib/cache"
+import { ensureHuman } from "../../lib/human"
+import { signInHref } from "../../lib/site"
 import { Editor } from "../../ui/Editor"
-import { ChevronDownIcon, KebabIcon } from "../../ui/icons"
+import { ChevronDownIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Button, StateIcon } from "../../ui/primitives"
-import { statusOptions } from "./Sidebar"
+import { SiteLink } from "../../ui/SiteLink"
+import type { IssueModel } from "./model"
 
 const closeOptions: { reason: CloseReason; label: string; description: string }[] = [
   { reason: "completed", label: "Close as completed", description: "Done, closed, fixed, resolved" },
@@ -65,28 +70,19 @@ function useDock() {
   return { slot, dock, dockStyle }
 }
 
+/** A guest's display name: 1–40 characters after trimming. */
+export const validGuestName = (name: string) => name.trim().length >= 1 && name.trim().length <= 40
+
 /**
- * The reply box pinned to the bottom of the viewport. "split": close/reopen as a split button beside Send. "menu": a small menu beside
- * Send with the status changes and the close options (the chat layout).
+ * The reply box pinned to the bottom of the viewport, with close/reopen as a split button beside Send. Guests see
+ * who they post as above it; until they have a name, that line is the name field, and the name goes with the post.
  */
-export function Composer({
-  app,
-  issue,
-  onComment,
-  onStatus,
-  onDuplicate,
-  variant = "split",
-  placeholder,
-}: {
-  app: AppDetail
-  issue: Issue
-  onComment: (body: string, attachmentIds: string[]) => Promise<boolean>
-  onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
-  onDuplicate: (other: number) => Promise<void>
-  variant?: "split" | "menu"
-  placeholder?: string
-}) {
-  const member = !!app.role
+export function Composer({ model, nameField }: { model: IssueModel; nameField: RefObject<HTMLInputElement | null> }) {
+  const { app, issue, me, member, onStatus, onDuplicate } = model
+  const guest = me && !me.user ? me.guest : null
+  const [changing, setChanging] = useState(false)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const naming = !!guest && (!guest.name || changing || model.askName)
   const { slot, dock, dockStyle } = useDock()
   const [body, setBody] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -97,13 +93,29 @@ export function Composer({
   const [working, setWorking] = useState(false)
   const hasText = !!body.trim()
 
+  useEffect(() => {
+    if (model.askName) nameField.current?.focus()
+  }, [model.askName, nameField])
+
   const comment = async () => {
     if (!hasText || busy) return true
+    let guestName: string | undefined
+    if (naming) {
+      guestName = nameField.current?.value.trim() ?? ""
+      if (!validGuestName(guestName)) {
+        setNameError(guestName ? "Up to 40 characters." : "Add your name to post.")
+        nameField.current?.focus()
+        return false
+      }
+    }
+    setNameError(null)
     const text = body
     const ids = attachments.filter((a) => text.includes(a.url)).map((a) => a.id)
     setBody("")
     setAttachments([])
-    return onComment(text, ids)
+    const ok = await model.onComment(text, ids, guestName)
+    if (ok) setChanging(false)
+    return ok
   }
 
   const close = async (why: CloseReason = reason) => {
@@ -174,66 +186,22 @@ export function Composer({
     </span>
   )
 
-  const after = hasText ? " (posts your reply first)" : ""
-  const menuControl = !member ? null : (
-    <Menu
-      align="end"
-      width={280}
-      trigger={(p) => <Button iconOnly variant="invisible" aria-label="Status and close options" title="Status and close options" icon={<KebabIcon />} {...p} />}
-    >
-      {(dismiss) =>
-        issue.status === "closed" ? (
-          <MenuItem
-            description={hasText ? "Posts your reply first" : undefined}
-            onSelect={() => {
-              dismiss()
-              void reopen()
-            }}
-          >
-            <StateIcon state="open" size={14} />
-            {reopenLabel}
-          </MenuItem>
-        ) : (
-          <>
-            {statusOptions
-              .filter((o) => o.status !== issue.status)
-              .map((o) => (
-                <MenuItem
-                  key={o.status}
-                  onSelect={() => {
-                    dismiss()
-                    onStatus(o.status).catch(() => {})
-                  }}
-                >
-                  <StateIcon state={o.status} size={14} />
-                  Mark as {o.label.toLowerCase()}
-                </MenuItem>
-              ))}
-            <div className="menu-sep" role="separator" />
-            {closeOptions.map((o) => (
-              <MenuItem
-                key={o.reason}
-                description={o.reason === "duplicate" ? "Asks which issue" : o.description + after}
-                onSelect={() => {
-                  dismiss()
-                  setDupError(null)
-                  if (o.reason === "duplicate") setReason("duplicate")
-                  else void close(o.reason)
-                }}
-              >
-                <StateIcon state={o.reason === "completed" ? "closed" : "not_planned"} size={14} />
-                {o.label}
-              </MenuItem>
-            ))}
-          </>
-        )
-      }
-    </Menu>
-  )
-
   return (
     <div className="composer-slot" ref={slot}>
-      <div className="composer" ref={dock} data-variant={variant} style={dockStyle}>
+      <div className="composer" ref={dock} style={dockStyle}>
+        {guest && (
+          <GuestBar
+            me={me!}
+            naming={naming}
+            nameField={nameField}
+            error={nameError}
+            onChange={() => setChanging(true)}
+            onDone={() => {
+              setChanging(false)
+              setNameError(null)
+            }}
+          />
+        )}
         <Editor
           variant="chat"
           slug={app.slug}
@@ -244,7 +212,6 @@ export function Composer({
           onBusyChange={setBusy}
           onSubmit={() => void comment()}
           label="Reply"
-          placeholder={placeholder}
           minHeight={40}
           extra={
             duplicating && (
@@ -256,23 +223,13 @@ export function Composer({
                   <span className="input-prefix mono">#</span>
                   <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
                 </div>
-                {variant === "menu" && (
-                  <>
-                    <Button size="small" onClick={() => void close("duplicate")} disabled={busy || working}>
-                      Close as duplicate
-                    </Button>
-                    <Button size="small" variant="invisible" onClick={() => setReason("completed")}>
-                      Cancel
-                    </Button>
-                  </>
-                )}
                 {dupError && <span className="field-error">{dupError}</span>}
               </div>
             )
           }
           actions={
             <>
-              {variant === "menu" ? menuControl : splitControl}
+              {splitControl}
               <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
                 {busy ? "Uploading…" : "Send"}
               </Button>
@@ -281,5 +238,107 @@ export function Composer({
         />
       </div>
     </div>
+  )
+}
+
+/** "Posting as Alex · Change name · Sign in", or the name field while a guest names (or renames) themselves. */
+function GuestBar({
+  me,
+  naming,
+  nameField,
+  error,
+  onChange,
+  onDone,
+}: {
+  me: Me
+  naming: boolean
+  nameField: RefObject<HTMLInputElement | null>
+  error: string | null
+  onChange: () => void
+  onDone: () => void
+}) {
+  const saved = me.guest.name
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // A rename without posting: PUT /api/me/guest. A first name just goes along with the post.
+  const save = async (e: FormEvent) => {
+    e.preventDefault()
+    const name = nameField.current?.value.trim() ?? ""
+    if (!validGuestName(name)) return setSaveError(name ? "Up to 40 characters." : "Add a name.")
+    if (name === saved) return onDone()
+    setSaving(true)
+    setSaveError(null)
+    try {
+      await ensureHuman(false)
+      setData<Me>(keys.me, await api.setGuestName(name))
+      onDone()
+    } catch (err) {
+      setSaveError(errorMessage(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const signIn = (
+    <SiteLink href={signInHref()} className="guest-bar-link">
+      Sign in
+    </SiteLink>
+  )
+
+  if (!naming)
+    return (
+      <div className="guest-bar">
+        <span className="guest-bar-text">
+          Posting as <strong>{saved}</strong>
+        </span>
+        <span aria-hidden="true">·</span>
+        <button type="button" className="guest-bar-link" onClick={onChange}>
+          Change name
+        </button>
+        <span aria-hidden="true">·</span>
+        {signIn}
+      </div>
+    )
+
+  const problem = error ?? saveError
+  return (
+    <form className="guest-bar" onSubmit={saved ? save : (e) => e.preventDefault()}>
+      <label htmlFor="guest-name">Your name</label>
+      <div className="input" data-size="small" data-invalid={problem ? "" : undefined}>
+        <input
+          ref={nameField}
+          id="guest-name"
+          defaultValue={saved ?? ""}
+          maxLength={40}
+          autoComplete="name"
+          placeholder="Name"
+          aria-invalid={!!problem}
+          aria-describedby={problem ? "guest-name-error" : undefined}
+          autoFocus={!!saved}
+        />
+      </div>
+      {saved && (
+        <>
+          <Button type="submit" size="small" disabled={saving}>
+            Save
+          </Button>
+          <Button size="small" variant="invisible" onClick={onDone}>
+            Cancel
+          </Button>
+        </>
+      )}
+      {problem && (
+        <span id="guest-name-error" className="field-error">
+          {problem}
+        </span>
+      )}
+      {!saved && (
+        <>
+          <span className="spacer" />
+          {signIn}
+        </>
+      )}
+    </form>
   )
 }

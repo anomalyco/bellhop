@@ -3,7 +3,7 @@ import { Link, useLocation, useSearch } from "wouter"
 import type { AppDetail, IssueList, IssueSummary, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, useResource } from "../lib/cache"
-import { applyActivity, applySummary, formatQuery, listKey, parseQuery, prefetchIssue, visibleState, type Filter } from "../lib/issues"
+import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, prefetchIssue, visibleState, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
@@ -42,6 +42,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
       if (event.type === "issue.created") applySummary(slug, event.issue, true)
       else if (event.type === "issue.updated") applySummary(slug, event.issue)
       else if (event.type === "activity") applyActivity(slug, event.issue_id, event.activity)
+      else if (event.type === "actor.updated") applyActorUpdate(slug, event.previous_id, event.actor)
     },
     (reconnected) => {
       // Events sent while we were away are gone; refetch what's on screen.

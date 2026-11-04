@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import type { Actor, AppDetail, Attachment, CloseReason, Issue, IssueEvent, IssueStatus, Me } from "../../../shared/api"
-import type { IssueActions } from "./Sidebar"
+import type { IssueActions } from "./Properties"
 
 /** Everything an issue layout needs: the data, the editors' actions and the composer's handlers. Layouts only differ in presentation. */
 export interface IssueModel {
@@ -14,9 +14,12 @@ export interface IssueModel {
   viewer: Actor | null
   actions: IssueActions
   /** Comments still on their way, each with a "Sending…" or "Not sent: … Retry · Discard" note. */
-  pending: { id: string; body: string; note: ReactNode }[]
+  pending: { id: string; body: string; note: ReactNode; name?: string }[]
   actionError: string | null
-  onComment: (body: string, attachmentIds: string[]) => Promise<boolean>
+  /** The server asked for a guest name (400 name_required); the composer shows and focuses the field. */
+  askName: boolean
+  /** Posts a comment; `guestName` goes along for guests who are naming themselves. */
+  onComment: (body: string, attachmentIds: string[], guestName?: string) => Promise<boolean>
   onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
   onDuplicate: (other: number) => Promise<void>
 }
@@ -29,8 +32,6 @@ export interface MessageEntry {
   body: string
   attachments: Attachment[]
   byAuthor: boolean
-  /** The issue's own description. */
-  opener?: boolean
   note?: ReactNode
 }
 
@@ -42,21 +43,10 @@ export interface EventEntry {
 
 export type Entry = MessageEntry | EventEntry
 
-/** The conversation in order: optionally the description first, then the timeline, then pending comments. */
-export function entries(model: IssueModel, withOpener: boolean): Entry[] {
+/** The conversation after the report: the timeline, then comments still on their way. */
+export function entries(model: IssueModel): Entry[] {
   const { issue, pending, viewer } = model
   const list: Entry[] = []
-  if (withOpener)
-    list.push({
-      kind: "message",
-      key: "opener",
-      author: issue.author,
-      createdAt: issue.created_at,
-      body: issue.body,
-      attachments: issue.attachments,
-      byAuthor: true,
-      opener: true,
-    })
   for (const item of issue.timeline) {
     if (item.kind === "comment") {
       const c = item.comment
@@ -65,7 +55,16 @@ export function entries(model: IssueModel, withOpener: boolean): Entry[] {
   }
   if (viewer)
     for (const p of pending)
-      list.push({ kind: "message", key: p.id, author: viewer, createdAt: new Date().toISOString(), body: p.body, attachments: [], byAuthor: issue.viewer_is_author, note: p.note })
+      list.push({
+        kind: "message",
+        key: p.id,
+        author: p.name && viewer.type === "guest" ? { ...viewer, name: p.name } : viewer,
+        createdAt: new Date().toISOString(),
+        body: p.body,
+        attachments: [],
+        byAuthor: issue.viewer_is_author,
+        note: p.note,
+      })
   return list
 }
 
@@ -92,9 +91,4 @@ export function blocks(list: Entry[]): Block[] {
 /** Every file on the issue: the description's, then each comment's. */
 export function allAttachments(issue: Issue): Attachment[] {
   return [...issue.attachments, ...issue.timeline.flatMap((t) => (t.kind === "comment" ? t.comment.attachments : []))]
-}
-
-/** Uploaded images and videos shown inline get the full message width. */
-export function hasMedia(body: string, attachments: Attachment[]) {
-  return attachments.some((a) => a.kind !== "file" && body.includes(a.url)) || /\/media\/\S+\.(mp4|m4v|webm|mov|ogv|png|jpe?g|gif|webp)\b/i.test(body)
 }

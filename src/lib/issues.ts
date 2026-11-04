@@ -1,7 +1,7 @@
-import type { Activity, AppDetail, Issue, IssueList, IssueRef, IssueSummary, TimelineItem } from "../../shared/api"
+import type { Activity, Actor, AppDetail, Issue, IssueList, IssueRef, IssueSummary, TimelineItem } from "../../shared/api"
 import type { VisibleState } from "../ui/primitives"
 import { api, keys } from "./api"
-import { entries, peek, prefetch, setData, updateAll } from "./cache"
+import { entries, load, peek, prefetch, setData, updateAll } from "./cache"
 
 export interface Filter {
   state: "open" | "closed"
@@ -142,4 +142,52 @@ export function findSummary(slug: string, number: number): IssueSummary | undefi
 
 export function prefetchIssue(slug: string, number: number) {
   prefetch(keys.issue(slug, number), () => api.issue(slug, number))
+}
+
+const isActor = (v: unknown): v is Actor =>
+  !!v && typeof v === "object" && "id" in v && "type" in v && ["guest", "member", "agent"].includes((v as Actor).type)
+
+/**
+ * `actor.updated`: a guest renamed, or their posts moved to an account. Swaps that actor in every cached list and
+ * issue (authors, assignees, activity, comments, events and actors inside event data), keeping untouched objects
+ * as they are so nothing re-renders that didn't change. Refreshes `me` when it's this browser's own guest.
+ */
+export function applyActorUpdate(slug: string, previousId: string, actor: Actor) {
+  const swap = <T extends Actor | null>(a: T): T => (a && a.id === previousId ? (actor as T) : a)
+  const swapActivity = (a: Activity | null) => (a && a.actor.id === previousId ? { ...a, actor } : a)
+  const swapSummary = <T extends IssueSummary>(i: T): T => {
+    const author = swap(i.author)
+    const assignee = swap(i.assignee)
+    const activity = swapActivity(i.activity)
+    return author === i.author && assignee === i.assignee && activity === i.activity ? i : { ...i, author, assignee, activity }
+  }
+  const swapItem = (t: TimelineItem): TimelineItem => {
+    if (t.kind === "comment") {
+      const author = swap(t.comment.author)
+      return author === t.comment.author ? t : { kind: "comment", comment: { ...t.comment, author } }
+    }
+    const e = t.event
+    let data = e.data
+    for (const [k, v] of Object.entries(e.data)) if (isActor(v) && v.id === previousId) data = { ...data, [k]: actor }
+    const by = swap(e.actor)
+    return by === e.actor && data === e.data ? t : { kind: "event", event: { ...e, actor: by, data } }
+  }
+
+  updateAll<IssueList>(keys.lists(slug), (list) => {
+    const issues = list.issues.map(swapSummary)
+    return issues.some((i, n) => i !== list.issues[n]) ? { ...list, issues } : undefined
+  })
+  updateAll<Issue>(`issue:${slug}:`, (issue) => {
+    const next = swapSummary(issue)
+    const timeline = issue.timeline.map(swapItem)
+    const changed = timeline.some((t, n) => t !== issue.timeline[n])
+    if (next === issue && !changed) return undefined
+    return { ...next, timeline: changed ? timeline : issue.timeline }
+  })
+
+  const me = peek<{ guest: { id: string } }>(keys.me)
+  if (me?.guest.id === previousId) {
+    load(keys.me, api.me).catch(() => {})
+    load(keys.app(slug), () => api.app(slug)).catch(() => {})
+  }
 }

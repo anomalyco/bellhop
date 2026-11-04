@@ -315,6 +315,13 @@ a.btn[data-variant="primary"]:hover {
   color: var(--fg-muted);
   box-shadow: inset 0 0 0 0.5px var(--border-strong);
 }
+/* A named guest: a quiet word, not a badge */
+.guest-marker {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
 
 /* Avatars: OpenCode's project-avatar palette, round for people, square with the bell for agents */
 .avatar {

@@ -1,15 +1,18 @@
-import { useEffect, useState, type FormEvent } from "react"
+import { useEffect, useRef, useState, type FormEvent } from "react"
 import { Link, useLocation, useSearch } from "wouter"
-import type { AppDetail, Attachment, SystemInfo, Template } from "../../shared/api"
-import { api, errorMessage } from "../lib/api"
+import type { AppDetail, Attachment, Me, SystemInfo, Template } from "../../shared/api"
+import { ApiFailure, api, errorMessage, keys } from "../lib/api"
+import { setData } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
 import { storeIssue } from "../lib/issues"
 import { collectSystemInfo } from "../lib/sysinfo"
 import { Editor } from "../ui/Editor"
 import { XIcon } from "../ui/icons"
-import { AppLayout, Page } from "../ui/Shell"
+import { AppLayout, Page, useMe } from "../ui/Shell"
 import { Button, Label } from "../ui/primitives"
-import { appPath } from "../lib/site"
+import { SiteLink } from "../ui/SiteLink"
+import { appPath, signInHref } from "../lib/site"
+import { validGuestName } from "./issue/Composer"
 
 export function NewIssue({ slug }: { slug: string }) {
   return <AppLayout slug={slug} tab="issues">{(app) => <NewIssueBody app={app} />}</AppLayout>
@@ -52,6 +55,12 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
 function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
   const [, navigate] = useLocation()
   const member = !!app.role
+  const { data: me } = useMe()
+  const guest = me && !me.user ? me.guest : null
+  const [guestName, setGuestName] = useState<string | null>(null)
+  const name = guestName ?? guest?.name ?? ""
+  const [nameError, setNameError] = useState<string | null>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
   const [title, setTitle] = useState(template?.title ?? "")
   const [body, setBody] = useState(template?.body ?? "")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -72,8 +81,14 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
   const submit = async (e?: FormEvent) => {
     e?.preventDefault()
     if (!title.trim() || busy || submitting) return
+    if (guest && !validGuestName(name)) {
+      setNameError(name.trim() ? "Up to 40 characters." : "Add your name to post.")
+      nameInput.current?.focus()
+      return
+    }
     setSubmitting(true)
     setError(null)
+    setNameError(null)
     try {
       await ensureHuman(member)
       const used = attachments.filter((a) => body.includes(a.url))
@@ -83,11 +98,16 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         template_id: template?.id,
         attachment_ids: used.length ? used.map((a) => a.id) : undefined,
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
+        guest_name: guest ? name.trim() : undefined,
       })
+      if (guest) setData<Me>(keys.me, (m) => (m ? { ...m, guest: { ...m.guest, name: name.trim() } } : m))
       storeIssue(app.slug, issue)
       navigate(appPath(app.slug, `/issues/${issue.number}`))
     } catch (err) {
-      setError(errorMessage(err))
+      if (err instanceof ApiFailure && err.code === "name_required") {
+        setNameError("Add your name to post.")
+        nameInput.current?.focus()
+      } else setError(errorMessage(err))
       setSubmitting(false)
     }
   }
@@ -99,6 +119,37 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
       <form className="issue-form" onSubmit={submit}>
+        {guest && (
+          <div className="field guest-name-field">
+            <div className="field-label-row">
+              <label className="field-label" htmlFor="guest-name">
+                Your name
+              </label>
+              <SiteLink href={signInHref()} className="field-label-aside">
+                Sign in instead
+              </SiteLink>
+            </div>
+            <div className="input" data-size="large" data-invalid={nameError ? "" : undefined}>
+              <input
+                ref={nameInput}
+                id="guest-name"
+                value={name}
+                onChange={(e) => setGuestName(e.target.value)}
+                placeholder="Shown with what you post"
+                autoComplete="name"
+                maxLength={40}
+                aria-invalid={!!nameError}
+                aria-describedby={nameError ? "guest-name-error" : undefined}
+                autoFocus={!guest.name}
+              />
+            </div>
+            {nameError && (
+              <p id="guest-name-error" className="field-error">
+                {nameError}
+              </p>
+            )}
+          </div>
+        )}
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
             Title
@@ -109,7 +160,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Title"
-              autoFocus={!template?.title}
+              autoFocus={!template?.title && !(guest && !guest.name)}
               required
               maxLength={256}
             />

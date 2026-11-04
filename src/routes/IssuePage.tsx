@@ -1,24 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Link, useSearch } from "wouter"
-import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Relation } from "../../shared/api"
+import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Me, Relation } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
-import { load, peek, useResource } from "../lib/cache"
+import { load, peek, setData, useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
-import { appendTimeline, applyActivity, applySummary, findSummary, stateText, storeIssue, visibleState } from "../lib/issues"
+import { appendTimeline, applyActivity, applyActorUpdate, applySummary, findSummary, storeIssue } from "../lib/issues"
 import { useLive } from "../lib/live"
-import { Time } from "../lib/time"
-import { ActorName } from "../ui/Actor"
-import { PersonIcon } from "../ui/icons"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
-import { Button, StateLabel } from "../ui/primitives"
-import { relationRequest, Sidebar, type IssueActions, type RelationKind } from "./issue/Sidebar"
-import { ActivityRow, CommentItem, EventItem, Message } from "./issue/Timeline"
-import { appPath } from "../lib/site"
-import { CardLayout } from "./issue/CardLayout"
-import { ChatLayout } from "./issue/ChatLayout"
-import { Composer } from "./issue/Composer"
-import { BodyForm, TitleForm } from "./issue/Editing"
+import { IssueView } from "./issue/IssueView"
 import type { IssueModel } from "./issue/model"
+import { relationRequest, type IssueActions, type RelationKind } from "./issue/Properties"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
   return (
@@ -32,6 +22,8 @@ interface Pending {
   id: string
   body: string
   attachmentIds: string[]
+  /** Sent as guest_name by a guest naming themselves with this post. */
+  guestName?: string
   error?: string
 }
 
@@ -45,8 +37,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const [pending, setPending] = useState<Pending[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const member = !!app.role
-  // Temporary: ?layout=chat or ?layout=card tries an alternative issue page; no param keeps the current one.
-  const layout = new URLSearchParams(useSearch()).get("layout")
+  const [askName, setAskName] = useState(false)
+  const nameField = useRef<HTMLInputElement>(null)
   // The room's hello can beat the first fetch; hold its activity until the issue is known.
   const helloActivity = useRef<Activity | null | undefined>(undefined)
   const issueId = issue?.id
@@ -78,6 +70,9 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
           break
         case "activity":
           applyActivity(slug, event.issue_id, event.activity)
+          break
+        case "actor.updated":
+          applyActorUpdate(slug, event.previous_id, event.actor)
           break
       }
     },
@@ -153,23 +148,31 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
 
   const send = async (p: Pending) => {
     setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error: undefined } : x)))
+    // A retry after "name required" picks up whatever is in the name field now.
+    const guestName = nameField.current?.value.trim() || p.guestName
     try {
       await ensureHuman(member)
       const comment: Comment = await api.comment(slug, number, {
         body: p.body,
         attachment_ids: p.attachmentIds.length ? p.attachmentIds : undefined,
+        guest_name: guestName,
       })
       appendTimeline(slug, number, { kind: "comment", comment })
       setPending((list) => list.filter((x) => x.id !== p.id))
+      if (guestName) setData<Me>(keys.me, (m) => (m ? { ...m, guest: { ...m.guest, name: guestName } } : m))
+      setAskName(false)
       return true
     } catch (e) {
-      setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error: errorMessage(e) } : x)))
+      const nameRequired = e instanceof ApiFailure && e.code === "name_required"
+      if (nameRequired) setAskName(true)
+      const error = nameRequired ? "Add your name, then retry." : errorMessage(e)
+      setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error, guestName } : x)))
       return false
     }
   }
 
-  const postComment = (body: string, attachmentIds: string[]) => {
-    const p: Pending = { id: `pending-${Date.now()}`, body, attachmentIds }
+  const postComment = (body: string, attachmentIds: string[], guestName?: string) => {
+    const p: Pending = { id: `pending-${Date.now()}`, body, attachmentIds, guestName }
     setPending((list) => [...list, p])
     return send(p)
   }
@@ -191,9 +194,11 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     viewer: viewerActor,
     actions,
     actionError,
+    askName,
     pending: pending.map((p) => ({
       id: p.id,
       body: p.body,
+      name: p.guestName,
       note: p.error ? (
         <span className="pending-error">
           Not sent: {p.error}{" "}
@@ -217,151 +222,27 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     },
   }
 
-  if (layout === "chat") return <ChatLayout model={model} />
-  if (layout === "card") return <CardLayout model={model} />
-  return <ClassicLayout model={model} />
-}
-
-function ClassicLayout({ model }: { model: IssueModel }) {
-  const { app, issue, me, viewers, canEdit, viewer, actions, actionError } = model
-  const slug = app.slug
-  return (
-    <Page>
-      <IssueHeader app={app} issue={issue} viewers={viewers} canEdit={canEdit} />
-      <div className="issue-layout">
-        <div className="issue-main">
-          <div className="thread">
-            <IssueBodyBox app={app} issue={issue} canEdit={canEdit} />
-            {issue.timeline.map((item) =>
-              item.kind === "comment" ? (
-                <CommentItem key={item.comment.id} slug={slug} comment={item.comment} />
-              ) : (
-                <EventItem key={item.event.id} slug={slug} event={item.event} />
-              ),
-            )}
-            {viewer &&
-              model.pending.map((p) => (
-                <Message
-                  key={p.id}
-                  slug={slug}
-                  author={viewer}
-                  createdAt={new Date().toISOString()}
-                  body={p.body}
-                  attachments={[]}
-                  byAuthor={issue.viewer_is_author}
-                  pending={p.note}
-                />
-              ))}
-            <ActivityRow activity={issue.activity} />
-          </div>
-          {actionError && (
-            <p className="flash" data-tone="danger">
-              {actionError}
-            </p>
-          )}
-          <Composer app={app} issue={issue} onComment={model.onComment} onStatus={model.onStatus} onDuplicate={model.onDuplicate} />
-        </div>
-        <Sidebar app={app} issue={issue} me={me} actions={actions} />
-      </div>
-    </Page>
-  )
+  return <IssueView model={model} nameField={nameField} />
 }
 
 function IssueLoading({ app, number }: { app: AppDetail; number: number }) {
   const summary = findSummary(app.slug, number)
   return (
     <Page>
-      <div className="issue-header">
-        <h1 className="issue-heading">
-          {summary ? <span className="issue-heading-title">{summary.title}</span> : <span className="skeleton" style={{ width: 320, height: 20 }} />}{" "}
-          <span className="mono issue-heading-number">#{number}</span>
-        </h1>
-        <div className="issue-state-row">
-          {summary ? <StateLabel state={visibleState(summary)} text={stateText(summary)} /> : <span className="skeleton" style={{ width: 80, height: 24, borderRadius: 12 }} />}
-        </div>
-      </div>
-      <div className="issue-layout">
-        <div className="issue-main">
-          <div className="thread">
-            <div className="msg">
-              <span className="msg-avatar">
-                <span className="skeleton" style={{ width: 28, height: 28, borderRadius: 14 }} />
-              </span>
-              <div className="msg-main skeleton-lines">
-                <span className="skeleton" style={{ width: 160, height: 12 }} />
-                <span className="skeleton" style={{ width: "80%", height: 12 }} />
-                <span className="skeleton" style={{ width: "60%", height: 12 }} />
-              </div>
-            </div>
+      <div className="issue">
+        <header className="report">
+          <div className="report-head">
+            <h1 className="report-title">
+              {summary ? summary.title : <span className="skeleton" style={{ width: 320, height: 20 }} />}{" "}
+              <span className="mono report-number">#{number}</span>
+            </h1>
           </div>
-        </div>
-        <aside className="issue-sidebar" />
+          <div className="report-body skeleton-lines">
+            <span className="skeleton" style={{ width: "80%", height: 12 }} />
+            <span className="skeleton" style={{ width: "60%", height: 12 }} />
+          </div>
+        </header>
       </div>
     </Page>
-  )
-}
-
-function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: Issue; viewers: number | null; canEdit: boolean }) {
-  const [editing, setEditing] = useState(false)
-  const comments = issue.comment_count
-  return (
-    <div className="issue-header">
-      {editing ? (
-        <TitleForm app={app} issue={issue} onDone={() => setEditing(false)} />
-      ) : (
-        <div className="issue-title-row">
-          <h1 className="issue-heading">
-            <span className="issue-heading-title">{issue.title}</span> <span className="mono issue-heading-number">#{issue.number}</span>
-          </h1>
-          <div className="issue-title-actions">
-            {canEdit && (
-              <Button variant="invisible" onClick={() => setEditing(true)}>
-                Edit
-              </Button>
-            )}
-            <Link href={appPath(app.slug, "/new")} className="btn issue-new-link" data-variant="default">
-              New issue
-            </Link>
-          </div>
-        </div>
-      )}
-      <div className="issue-state-row">
-        <StateLabel state={visibleState(issue)} text={stateText(issue)} />
-        <span className="issue-state-meta">
-          <ActorName actor={issue.author} badge={false} /> opened this <Time iso={issue.created_at} /> · {comments}{" "}
-          {comments === 1 ? "comment" : "comments"}
-          {viewers !== null && viewers > 0 && (
-            <span className="viewers" title="People on this page now">
-              {" "}
-              · <PersonIcon size={14} /> {viewers} viewing
-            </span>
-          )}
-        </span>
-      </div>
-    </div>
-  )
-}
-
-function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; canEdit: boolean }) {
-  const [editing, setEditing] = useState(false)
-  return (
-    <Message
-      slug={app.slug}
-      author={issue.author}
-      createdAt={issue.created_at}
-      body={issue.body}
-      attachments={issue.attachments}
-      byAuthor
-      verb="opened"
-      actions={
-        canEdit && !editing ? (
-          <Button size="small" variant="invisible" onClick={() => setEditing(true)}>
-            Edit
-          </Button>
-        ) : undefined
-      }
-    >
-      {editing ? <BodyForm app={app} issue={issue} onDone={() => setEditing(false)} /> : undefined}
-    </Message>
   )
 }

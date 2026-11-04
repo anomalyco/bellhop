@@ -249,6 +249,15 @@ a.box-row:hover {
   font-size: var(--text-ui);
   font-weight: var(--weight-medium);
 }
+.field-label-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.field-label-aside {
+  font-size: var(--text-small);
+}
 .field-error {
   margin: 0;
   color: var(--danger);
@@ -996,34 +1005,44 @@ a.box-row:hover {
   pointer-events: auto;
 }
 
-/* Issue page: title and state, then the conversation beside the sidebar */
-.issue-header {
-  padding-bottom: 20px;
+/* Issue page: the report on the page itself (title, by-line, body, files, property pills), a hairline, then the
+   thread grouped by person and the pinned composer. One 760 px column, no surfaces around the report. */
+.issue {
+  display: grid;
+  max-width: 760px;
+  margin: 0 auto;
+}
+.report {
+  display: grid;
+  min-width: 0;
+  padding-bottom: 16px;
   border-bottom: 1px solid var(--border-muted);
 }
-.issue-title-row {
+.report-head {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  gap: 12px;
 }
-.issue-heading {
+.report-title {
   flex: 1;
   min-width: 0;
   margin: 0;
-  font-size: var(--text-heading);
+  font-size: 22px;
   font-weight: var(--weight-semibold);
-  line-height: 28px;
-  letter-spacing: -0.018em;
+  line-height: 30px;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
-.issue-heading-number {
+.report-number {
   color: var(--fg-faint);
   font-size: 17px;
   font-weight: 400;
 }
-.issue-title-actions {
+.report-actions {
   display: flex;
-  gap: 8px;
+  flex: none;
+  gap: 6px;
+  margin-top: 3px;
 }
 .issue-title-form {
   display: flex;
@@ -1034,118 +1053,216 @@ a.box-row:hover {
 .issue-title-form .field-error {
   flex-basis: 100%;
 }
-.issue-state-row {
+.report-by {
   display: flex;
   align-items: center;
-  gap: 8px 10px;
-  flex-wrap: wrap;
-  margin-top: 10px;
-}
-.issue-state-meta {
+  gap: 8px;
+  margin: 8px 0 0;
   color: var(--fg-muted);
   font-size: var(--text-ui);
 }
-.issue-state-meta .actor-name {
+.report-by .actor-name {
   color: var(--fg);
   font-weight: var(--weight-medium);
 }
-.viewers .icon {
-  vertical-align: -2px;
+.report-by .role-badge,
+.report-by .guest-marker {
+  margin-left: 6px;
+  vertical-align: 1px;
 }
-
-.issue-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 256px;
-  gap: 48px;
-  align-items: start;
+.report-viewers .icon {
+  vertical-align: -1px;
 }
-.issue-main {
-  display: grid;
-  min-width: 0;
-}
-.issue-main > .flash {
-  margin-top: 8px;
-}
-
-/* The conversation */
-.thread {
-  display: flex;
-  flex-direction: column;
-  padding: 16px 0 4px;
-}
-.msg {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 12px;
-  margin: 0 -14px;
-  padding: 12px 14px;
-  border-radius: 14px;
-}
-.msg + .msg {
-  margin-top: 6px;
-}
-.msg[data-agent] {
-  background: rgb(255 255 255 / 0.035);
-  box-shadow: inset 0 0 0 0.5px var(--border-muted);
-}
-.msg-avatar {
-  display: inline-flex;
-}
-.msg-main {
-  min-width: 0;
-}
-.msg-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  min-height: 20px;
-  margin-top: 4px;
-  font-size: var(--text-ui);
-}
-.msg-head .actor-name {
-  color: var(--fg);
-  font-size: var(--text-body);
-  font-weight: var(--weight-medium);
-}
-.msg-time {
-  color: var(--fg-faint);
-  font-size: var(--text-small);
-}
-.msg-actions {
-  margin: -4px 0 -4px auto;
-}
-@media (hover: hover) {
-  .msg-actions {
-    opacity: 0;
-    transition: opacity 85ms ease-out;
-  }
-  .msg:hover .msg-actions,
-  .msg-actions:focus-within {
-    opacity: 1;
-  }
-}
-.msg-body {
-  margin-top: 4px;
+.report-body {
+  margin-top: 18px;
   font-size: var(--text-body);
   line-height: 22px;
 }
-.msg[data-pending] .msg-body {
+.report-edit-body {
+  margin-top: 6px;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-small);
+  color: var(--fg-faint);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.report-edit-body:hover {
+  color: var(--fg);
+}
+.report > .attachments {
+  margin-top: 14px;
+}
+.report-props {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+}
+.report-props .menu-root {
+  display: inline-flex;
+}
+/* A property pill: a hairline pill that opens its editor in place */
+.prop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 11px;
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 1px var(--border);
+  cursor: pointer;
+}
+.prop .icon {
+  flex: none;
+  color: var(--icon-muted);
+}
+.prop .state-icon .icon {
+  color: inherit;
+}
+.prop .ai-badge,
+.prop .role-badge {
+  margin-left: -2px;
+}
+.prop[data-labels] {
+  gap: 4px;
+  padding: 0 4px;
+}
+.prop[data-static] {
+  cursor: default;
+}
+button.prop:hover,
+.prop[aria-expanded="true"] {
+  background: var(--hover);
+}
+.prop-relations {
+  display: grid;
+  gap: 6px;
+  padding: 6px 6px 2px;
+  font-size: var(--text-ui);
+}
+.prop-relations .relation-form {
+  padding: 6px 0 2px;
+}
+.prop-relations .relation-group + .relation-form {
+  margin-top: 4px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-muted);
+}
+.report-sysinfo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0 8px;
+  font: inherit;
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+.report-sysinfo:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+.report-sysinfo .icon {
+  transition: transform 120ms var(--ease);
+}
+.report-sysinfo[aria-expanded="true"] .icon {
+  transform: rotate(180deg);
+}
+.report > .sysinfo {
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px 16px;
+  margin-top: 14px;
+}
+
+/* The thread: one name over each run of messages, quiet event lines, the typing line last */
+.thread {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 18px 0 4px;
+}
+.group {
+  display: grid;
+  gap: 4px;
+  padding: 8px 0;
+}
+.group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  font-size: var(--text-ui);
+}
+.group-head .actor-name {
+  color: var(--fg);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+}
+.group-head .ai-badge,
+.group-head .role-badge,
+.group-head .guest-marker {
+  margin-left: -2px;
+}
+.group-avatar {
+  display: inline-flex;
+  flex: none;
+  border-radius: 50%;
+}
+/* The reporter: a thin ring around the avatar instead of a badge */
+.group-avatar[data-reporter] {
+  box-shadow:
+    0 0 0 1.5px var(--bg),
+    0 0 0 2.5px var(--fg-faint);
+}
+.group-time {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.group-msg {
+  padding-left: 28px;
+  font-size: var(--text-body);
+  line-height: 22px;
+}
+.group-msg + .group-msg {
+  margin-top: 6px;
+}
+.group-msg[data-pending] .markdown {
   opacity: 0.6;
 }
-.msg-edit {
-  display: grid;
-  gap: 8px;
-  margin-top: 8px;
+.group-note {
+  margin-top: 2px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
 }
 .pending-error {
   color: var(--danger);
 }
-.typing .msg-head {
+.msg-edit {
+  display: grid;
+  gap: 8px;
+}
+.typing .group-head {
   gap: 8px;
 }
 .typing-text {
   color: var(--fg-muted);
+  font-size: var(--text-ui);
   overflow-wrap: anywhere;
 }
 .attachments {
@@ -1185,37 +1302,37 @@ a.box-row:hover {
   font-size: 11px;
 }
 
-/* Timeline events: quiet system lines between messages */
 .event {
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 12px;
-  margin: 0 -14px;
-  padding: 3px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 3px 0;
   color: var(--fg-faint);
   font-size: var(--text-ui);
-  line-height: 22px;
-}
-.msg + .event,
-.event + .msg {
-  margin-top: 10px;
+  line-height: 20px;
 }
 .event-icon {
-  display: flex;
+  display: inline-flex;
+  flex: none;
   justify-content: center;
+  width: 20px;
   padding-top: 3px;
   color: var(--icon-muted);
 }
-.event[data-tone="open"] .event-icon {
+.event[data-tone="open"] .event-icon,
+.event-icon[data-tone="open"] {
   color: var(--open);
 }
-.event[data-tone="in_progress"] .event-icon {
+.event[data-tone="in_progress"] .event-icon,
+.event-icon[data-tone="in_progress"] {
   color: var(--progress);
 }
-.event[data-tone="waiting"] .event-icon {
+.event[data-tone="waiting"] .event-icon,
+.event-icon[data-tone="waiting"] {
   color: var(--waiting);
 }
-.event[data-tone="closed"] .event-icon {
+.event[data-tone="closed"] .event-icon,
+.event-icon[data-tone="closed"] {
   color: var(--closed);
 }
 .event-text {
@@ -1226,11 +1343,6 @@ a.box-row:hover {
   font-weight: var(--weight-medium);
 }
 .event-text .label {
-  vertical-align: 1px;
-}
-.event-text .ai-badge {
-  display: inline-flex;
-  margin: 0 2px 0 4px;
   vertical-align: 1px;
 }
 .event-text del {
@@ -1258,11 +1370,63 @@ a.box-row:hover {
   font-weight: 400;
 }
 
+/* More than two events in a row: one line that expands */
+.burst {
+  display: grid;
+}
+.burst-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: -6px;
+  padding: 3px 10px 3px 6px;
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: left;
+  color: var(--fg-faint);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+.burst-toggle:hover {
+  color: var(--fg-muted);
+  background: var(--hover);
+}
+.burst-icons {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+}
+.burst-icons .event-icon {
+  width: 14px;
+  padding: 0;
+}
+.burst-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.burst-toggle > .icon {
+  flex: none;
+  transition: transform 120ms var(--ease);
+}
+.burst[data-open] .burst-toggle > .icon {
+  transform: rotate(180deg);
+}
+.issue > .flash {
+  margin-top: 8px;
+}
+
 /* Composer: pinned to the bottom of the viewport at the thread column's width (Composer.tsx measures the slot).
    The slot keeps its height in the flow so the end of the thread is never hidden behind it. */
 .composer-slot {
   height: var(--composer-h, 0px);
-  margin: 8px -14px 0;
+  margin-top: 8px;
 }
 .composer {
   position: fixed;
@@ -1271,6 +1435,14 @@ a.box-row:hover {
   padding: 12px 0 max(12px, env(safe-area-inset-bottom));
   background: var(--bg);
   box-shadow: 0 -1px 0 0 var(--border-muted);
+}
+/* Cover the avatar gutter on both sides too, so thread content scrolling underneath never peeks out */
+.composer::before {
+  content: "";
+  position: absolute;
+  inset: 0 -48px;
+  z-index: -1;
+  background: var(--bg);
 }
 .dup-form {
   display: flex;
@@ -1287,77 +1459,48 @@ a.box-row:hover {
   text-overflow: ellipsis;
 }
 
-/* Sidebar */
-.issue-sidebar {
-  display: grid;
-  gap: 22px;
-  align-content: start;
-  min-width: 0;
-  padding-top: 20px;
-  font-size: var(--text-ui);
-}
-.sidebar-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: 24px;
-  margin-bottom: 6px;
-}
-.sidebar-heading h3 {
-  margin: 0;
-  color: var(--fg-faint);
-  font-size: var(--text-small);
-  font-weight: var(--weight-medium);
-}
-.sidebar-gear {
-  display: inline-grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  margin-right: -4px;
-  color: var(--icon-muted);
-  background: none;
-  border: 0;
-  border-radius: var(--radius-small);
-  cursor: pointer;
-}
-.sidebar-gear:hover,
-.sidebar-gear[aria-expanded="true"] {
-  color: var(--fg);
-  background: var(--hover);
-}
-.sidebar-gear .icon {
-  color: inherit;
-}
-.sidebar-select {
-  width: 100%;
-  justify-content: flex-start;
-}
-.sidebar-select-text {
-  flex: 1;
-  text-align: left;
-}
-.issue-sidebar .menu-root {
-  display: flex;
-}
-.sidebar-value {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.sidebar-value .actor-name {
-  font-weight: var(--weight-medium);
-}
-.sidebar-empty {
-  color: var(--fg-faint);
-}
-.sidebar-labels {
+/* Guests: who they post as, or the name field, above the composer */
+.guest-bar {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px;
+  align-items: center;
+  gap: 6px 8px;
+  min-height: 24px;
+  margin: 0 2px 8px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
 }
-.sidebar-labels a:hover {
-  text-decoration: none;
+.guest-bar strong {
+  color: var(--fg-muted);
+  font-weight: var(--weight-medium);
+}
+.guest-bar label {
+  color: var(--fg-muted);
+  font-weight: var(--weight-medium);
+}
+.guest-bar .input {
+  width: 200px;
+}
+.guest-bar-link {
+  padding: 0;
+  font: inherit;
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.guest-bar-link:hover {
+  color: var(--fg);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+.input[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--danger-border);
+}
+
+/* Relations and system info, inside the property pills' popovers */
+.sidebar-empty {
+  color: var(--fg-faint);
 }
 .relation-group + .relation-group {
   margin-top: 10px;
@@ -1434,12 +1577,6 @@ a.box-row:hover {
   line-height: 17px;
   overflow-wrap: anywhere;
 }
-.issue-sidebar .attachments {
-  display: grid;
-  justify-items: start;
-  margin: 0;
-}
-
 /* Settings */
 .settings {
   display: grid;
@@ -1692,23 +1829,6 @@ a.box-row:hover {
 
 /* Narrow screens */
 @media (max-width: 1012px) {
-  .issue-layout {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-  /* The sidebar stacks under the thread here, so the composer's space moves to the end of the page. */
-  .issue-main .composer-slot {
-    height: 0;
-  }
-  .page:has(.issue-main .composer-slot) {
-    padding-bottom: calc(var(--composer-h, 0px) + 24px);
-  }
-  .issue-sidebar {
-    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 20px 32px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border-muted);
-  }
   .home-grid {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1788,25 +1908,20 @@ a.box-row:hover {
   .issue-row-activity-name {
     display: none;
   }
-  .issue-title-row {
-    gap: 8px;
-  }
-  .issue-new-link {
-    display: none;
-  }
-  .issue-heading {
-    font-size: 18px;
+  .report-title {
+    font-size: 19px;
     line-height: 26px;
   }
-  .msg,
-  .event {
-    gap: 10px;
-    margin: 0 -10px;
-    padding-left: 10px;
-    padding-right: 10px;
+  .report-head .report-new {
+    display: none;
   }
-  .composer-slot {
-    margin: 8px -10px 0;
+  .group-msg {
+    padding-left: 0;
+  }
+  .guest-bar .input {
+    flex: 1;
+    width: auto;
+    min-width: 140px;
   }
   .composer {
     padding: 8px 0 max(8px, env(safe-area-inset-bottom));
@@ -1828,9 +1943,6 @@ a.box-row:hover {
   .editor[data-variant="chat"] .editor-actions > .btn:not([data-variant="primary"]) {
     width: var(--control-medium);
     padding: 0;
-  }
-  .issue-sidebar {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 

@@ -67,6 +67,7 @@ const app = (slug: string) => `/api/apps/${enc(slug)}`
 export const api = {
   config: () => get<Config>("/api/config"),
   me: () => get<Me>("/api/me"),
+  setGuestName: (name: string) => request<Me>("PUT", "/api/me/guest", { name }),
   apps: () => get<App[]>("/api/apps"),
   createApp: (input: NewApp) => request<AppDetail>("POST", "/api/apps", input),
   app: (slug: string) => get<AppDetail>(app(slug)),

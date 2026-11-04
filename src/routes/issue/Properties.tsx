@@ -1,16 +1,14 @@
-import { useState, type FormEvent, type ReactNode } from "react"
+import { useState, type FormEvent } from "react"
 import { Link } from "wouter"
-import type { Actor, AppDetail, AppSettings, Issue, IssueStatus, Me, Relation, RelationType, SystemInfo } from "../../../shared/api"
+import type { Actor, AppDetail, AppSettings, Issue, IssueStatus, Relation, RelationType, SystemInfo } from "../../../shared/api"
 import { api, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
 import { visibleState } from "../../lib/issues"
-import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
-import { ChevronDownIcon, SettingsIcon, StatusIcon, XIcon } from "../../ui/icons"
-import { Menu, MenuItem } from "../../ui/Menu"
-import { Button, Label, StateIcon } from "../../ui/primitives"
-import { AttachmentList } from "./Timeline"
 import { appPath } from "../../lib/site"
-import { allAttachments } from "./model"
+import { ActorAvatar, actorName } from "../../ui/Actor"
+import { StatusIcon, XIcon } from "../../ui/icons"
+import { Menu, MenuItem } from "../../ui/Menu"
+import { Button } from "../../ui/primitives"
 
 type Trigger = Parameters<typeof Menu>[0]["trigger"]
 
@@ -54,103 +52,11 @@ export function relationRequest(kind: RelationKind): { type: RelationType; outgo
   }
 }
 
-function Section({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
-  return (
-    <section className="sidebar-section">
-      <div className="sidebar-heading">
-        <h3>{title}</h3>
-        {action}
-      </div>
-      {children}
-    </section>
-  )
-}
-
-const gear = (props: object, label: string) => (
-  <button type="button" className="sidebar-gear" aria-label={label} {...props}>
-    <SettingsIcon size={14} />
-  </button>
-)
-
 export const statusOptions: { status: IssueStatus; label: string; description: string }[] = [
   { status: "open", label: "Open", description: "Not started yet" },
   { status: "in_progress", label: "In progress", description: "Someone is working on it" },
   { status: "waiting", label: "Waiting on reporter", description: "Needs more information" },
 ]
-
-export function Sidebar({ app, issue, me, actions }: { app: AppDetail; issue: Issue; me: Me | undefined; actions: IssueActions }) {
-  const member = !!app.role
-  const files = allAttachments(issue)
-
-  return (
-    <aside className="issue-sidebar">
-      {member && issue.status !== "closed" && (
-        <Section title="Status">
-          <StatusMenu
-            issue={issue}
-            onSet={actions.setStatus}
-            trigger={(p) => (
-              <button type="button" className="btn sidebar-select" data-variant="default" {...p}>
-                <StateIcon state={visibleState(issue)} size={14} />
-                <span className="sidebar-select-text">{statusOptions.find((o) => o.status === issue.status)?.label}</span>
-                <ChevronDownIcon size={14} />
-              </button>
-            )}
-          />
-        </Section>
-      )}
-
-      <Section title="Assignee" action={member ? <AssignMenu app={app} issue={issue} onAssign={actions.assign} /> : undefined}>
-        {issue.assignee ? (
-          <div className="sidebar-value">
-            <ActorAvatar actor={issue.assignee} size={20} />
-            <ActorName actor={issue.assignee} />
-          </div>
-        ) : member && me?.user ? (
-          <div className="sidebar-empty">
-            No one ·{" "}
-            <button
-              type="button"
-              className="link-button"
-              onClick={() => actions.assign({ type: "member", id: me.user!.id, name: me.user!.name, avatar_url: me.user!.avatar_url })}
-            >
-              assign yourself
-            </button>
-          </div>
-        ) : (
-          <div className="sidebar-empty">No one</div>
-        )}
-      </Section>
-
-      <Section
-        title="Labels"
-        action={
-          member ? (
-            <LabelMenu app={app} selected={issue.labels.map((l) => l.id)} onToggle={actions.toggleLabel} />
-          ) : undefined
-        }
-      >
-        {issue.labels.length ? <LabelLinks app={app} issue={issue} /> : <div className="sidebar-empty">None yet</div>}
-      </Section>
-
-      <Section title="Relationships" action={member ? <RelationAdd onAdd={actions.addRelation} /> : undefined}>
-        <RelationList app={app} issue={issue} onRemove={member ? actions.removeRelation : undefined} />
-      </Section>
-
-      {issue.system_info && (
-        <Section title="System info">
-          <SystemInfoList info={issue.system_info} />
-        </Section>
-      )}
-
-      {files.length > 0 && (
-        <Section title="Attachments">
-          <AttachmentList attachments={files} />
-        </Section>
-      )}
-    </aside>
-  )
-}
 
 export function StatusMenu({ issue, onSet, trigger }: { issue: Issue; onSet: (s: IssueStatus) => void; trigger: Trigger }) {
   return (
@@ -171,18 +77,6 @@ export function StatusMenu({ issue, onSet, trigger }: { issue: Issue; onSet: (s:
         ))
       }
     </Menu>
-  )
-}
-
-export function LabelLinks({ app, issue }: { app: AppDetail; issue: Issue }) {
-  return (
-    <div className="sidebar-labels">
-      {issue.labels.map((l) => (
-        <Link key={l.id} href={appPath(app.slug, `?q=${encodeURIComponent(`is:open label:${/\s/.test(l.name) ? `"${l.name}"` : l.name}`)}`)} title={l.description}>
-          <Label name={l.name} color={l.color} />
-        </Link>
-      ))}
-    </div>
   )
 }
 
@@ -235,7 +129,7 @@ export function SystemInfoList({ info }: { info: SystemInfo | "hidden" }) {
   )
 }
 
-export function AssignMenu({ app, issue, onAssign, trigger }: { app: AppDetail; issue: Issue; onAssign: (a: Actor | null) => void; trigger?: Trigger }) {
+export function AssignMenu({ app, issue, onAssign, trigger }: { app: AppDetail; issue: Issue; onAssign: (a: Actor | null) => void; trigger: Trigger }) {
   const [open, setOpen] = useState(false)
   const { data: settings, error } = useResource<AppSettings>(open ? keys.settings(app.slug) : null, () => api.settings(app.slug), 30_000)
   const members = settings?.members
@@ -245,7 +139,7 @@ export function AssignMenu({ app, issue, onAssign, trigger }: { app: AppDetail; 
       align="end"
       width={260}
       onOpenChange={setOpen}
-      trigger={trigger ?? ((p) => gear(p, "Assign"))}
+      trigger={trigger}
     >
       {(close) => (
         <>
@@ -285,11 +179,11 @@ export function AssignMenu({ app, issue, onAssign, trigger }: { app: AppDetail; 
   )
 }
 
-export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail; selected: string[]; onToggle: (id: string) => void; trigger?: Trigger }) {
+export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail; selected: string[]; onToggle: (id: string) => void; trigger: Trigger }) {
   const [query, setQuery] = useState("")
   const shown = app.labels.filter((l) => l.name.toLowerCase().includes(query.toLowerCase()))
   return (
-    <Menu align="end" width={280} onOpenChange={(o) => !o && setQuery("")} trigger={trigger ?? ((p) => gear(p, "Edit labels"))}>
+    <Menu align="end" width={280} onOpenChange={(o) => !o && setQuery("")} trigger={trigger}>
       {() => (
         <>
           <div className="menu-filter">
@@ -312,14 +206,6 @@ export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail
           </div>
         </>
       )}
-    </Menu>
-  )
-}
-
-export function RelationAdd({ onAdd, trigger }: { onAdd: (kind: RelationKind, number: number) => Promise<void>; trigger?: Trigger }) {
-  return (
-    <Menu align="end" width={260} trigger={trigger ?? ((p) => gear(p, "Add relationship"))}>
-      {(close) => <RelationForm onAdd={onAdd} onDone={close} />}
     </Menu>
   )
 }

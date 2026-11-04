@@ -5,6 +5,7 @@ import {
   ImageIcon,
   IssueOpenIcon,
   KebabIcon,
+  LinkIcon,
   PaperclipIcon,
   PersonIcon,
   PlusIcon,
@@ -270,8 +271,9 @@ export function DesignSystem() {
               </div>
               <div style={row}>
                 <AiBadge />
-                <span className="role-badge">Reporter</span>
+                <span className="role-badge">Owner</span>
                 <span className="role-badge">Member</span>
+                <span className="guest-marker">Guest</span>
                 <Counter>8</Counter>
                 <Counter>142</Counter>
               </div>
@@ -464,69 +466,109 @@ function IssueList() {
 function Conversation() {
   return (
     <div style={{ display: "grid" }}>
-      <div className="thread" style={{ paddingTop: 0 }}>
-        <article className="msg">
-          <span className="msg-avatar">
-            <Avatar seed="guest-7f3a" name="guest-7f3a" size={28} />
-          </span>
-          <div className="msg-main">
-            <header className="msg-head">
-              <strong className="actor-name">guest-7f3a</strong>
-              <span className="role-badge">Reporter</span>
-              <span className="msg-time">opened 3m ago</span>
-            </header>
-            <div className="msg-body">Anything over about 50 MB stops at 99% in Safari. Recording attached.</div>
-          </div>
-        </article>
-        <div className="event">
-          <span className="event-icon">
-            <TagIcon size={14} />
-          </span>
-          <span className="event-text">
-            <strong className="actor-name">guest-7f3a</strong> added <Label name="safari" color="ff832b" /> · 3m ago
-          </span>
+      <header className="report" style={{ paddingBottom: 14 }}>
+        <div className="report-head">
+          <h1 className="report-title" style={{ fontSize: 18, lineHeight: "26px" }}>
+            Uploads stall at 99% on Safari 18 <span className="mono report-number">#142</span>
+          </h1>
         </div>
-        <div className="event" data-tone="in_progress">
-          <span className="event-icon">
+        <p className="report-by">
+          <Avatar seed="guest-7f3a" name="Alex" size={18} />
+          <span>
+            <strong className="actor-name">Alex</strong>
+            <span className="guest-marker">Guest</span> opened this 3m ago
+          </span>
+        </p>
+        <div className="report-props" style={{ marginTop: 12 }}>
+          <button type="button" className="prop">
             <StateIcon state="in_progress" size={14} />
-          </span>
-          <span className="event-text">
+            In progress
+            <ChevronDownIcon size={12} />
+          </button>
+          <button type="button" className="prop">
+            <AgentAvatar size={16} />
             <strong className="actor-name">OpenCode</strong>
-            <AiBadge /> marked this as in progress · 2m ago
-          </span>
+            <AiBadge />
+          </button>
+          <button type="button" className="prop" data-labels>
+            <Label name="bug" color="fa4d56" />
+            <Label name="safari" color="ff832b" />
+          </button>
+          <button type="button" className="prop">
+            <LinkIcon size={14} />1 relation
+          </button>
         </div>
-        <article className="msg" data-agent>
-          <span className="msg-avatar">
-            <AgentAvatar size={28} />
-          </span>
-          <div className="msg-main">
-            <header className="msg-head">
-              <strong className="actor-name">OpenCode</strong>
-              <AiBadge />
-              <span className="msg-time">1m ago</span>
-            </header>
-            <div className="msg-body markdown">
-              This matches <a href="#">#128</a>: Safari drops multipart uploads when the tab loses focus. The fix ships in <code>1.4.3</code>.
-            </div>
+      </header>
+      <div className="thread" style={{ padding: "8px 0 0" }}>
+        <div className="burst">
+          <button type="button" className="burst-toggle">
+            <span className="burst-icons">
+              <span className="event-icon">
+                <TagIcon size={14} />
+              </span>
+              <span className="event-icon">
+                <PersonIcon size={14} />
+              </span>
+              <span className="event-icon" data-tone="in_progress">
+                <StateIcon state="in_progress" size={14} />
+              </span>
+            </span>
+            <span className="burst-text">3 updates by Alex, OpenCode · 2m ago</span>
+            <ChevronDownIcon size={12} />
+          </button>
+        </div>
+        <section className="group">
+          <header className="group-head">
+            <span className="group-avatar">
+              <AgentAvatar size={20} />
+            </span>
+            <strong className="actor-name">OpenCode</strong>
+            <AiBadge />
+            <span className="group-time">1m ago</span>
+          </header>
+          <div className="group-msg markdown">
+            This matches <a href="#">#128</a>. The fix ships in <code>1.4.3</code>.
           </div>
-        </article>
-        <div className="msg typing" data-agent>
-          <span className="msg-avatar">
-            <AgentAvatar size={28} />
-          </span>
-          <div className="msg-main">
-            <div className="msg-head">
-              <strong className="actor-name">OpenCode</strong>
-              <AiBadge />
-              <Dots />
-              <span className="typing-text">Checking the 1.4.3 changelog</span>
-            </div>
-          </div>
+        </section>
+        <section className="group">
+          <header className="group-head">
+            <span className="group-avatar" data-reporter>
+              <Avatar seed="guest-7f3a" name="Alex" size={20} />
+            </span>
+            <strong className="actor-name">Alex</strong>
+            <span className="guest-marker">Guest</span>
+            <span className="group-time">just now</span>
+          </header>
+          <div className="group-msg">Thanks, I'll update.</div>
+        </section>
+        <div className="group typing">
+          <header className="group-head">
+            <span className="group-avatar">
+              <Avatar seed="member-ryan" name="Ryan" size={20} />
+            </span>
+            <strong className="actor-name">Ryan</strong>
+            <span className="role-badge">Owner</span>
+            <Dots />
+            <span className="typing-text">Writing a reply</span>
+          </header>
         </div>
       </div>
-      <div className="composer" style={{ position: "static", margin: "4px -14px 0", padding: "10px 0 0", background: "none" }}>
+      <div className="composer" style={{ position: "static", padding: "10px 0 0", boxShadow: "0 -1px 0 0 var(--border-muted)" }}>
+        <div className="guest-bar">
+          <span>
+            Posting as <strong>Alex</strong>
+          </span>
+          <span>·</span>
+          <button type="button" className="guest-bar-link">
+            Change name
+          </button>
+          <span>·</span>
+          <a href="#" className="guest-bar-link">
+            Sign in
+          </a>
+        </div>
         <div className="editor" data-variant="chat">
-          <div className="editor-area" style={{ minHeight: 44, color: "var(--fg-faint)" }}>
+          <div className="editor-area" style={{ minHeight: 40, color: "var(--fg-faint)" }}>
             Write a reply…
           </div>
           <div className="editor-foot">
@@ -537,10 +579,6 @@ function Conversation() {
               <Button variant="invisible">Preview</Button>
             </div>
             <div className="editor-actions">
-              <span className="split">
-                <Button icon={<StateIcon state="closed" size={14} />}>Close issue</Button>
-                <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon size={14} />} />
-              </span>
               <Button variant="primary" trailing={<kbd className="kbd">⌘↵</kbd>}>
                 Send
               </Button>

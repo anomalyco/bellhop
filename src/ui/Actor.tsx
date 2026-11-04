@@ -2,8 +2,9 @@ import { useState } from "react"
 import type { Actor } from "../../shared/api"
 import { AgentAvatar, AiBadge, Avatar } from "./primitives"
 
+/** A guest's chosen name, else their handle; everyone else's name. */
 export function actorName(actor: Actor) {
-  return actor.type === "guest" ? actor.handle : actor.name
+  return actor.type === "guest" ? actor.name || actor.handle : actor.name
 }
 
 function Photo({ src, seed, name, size }: { src: string; seed: string; name: string; size: number }) {
@@ -29,12 +30,15 @@ export function ActorAvatar({ actor, size = 20 }: { actor: Actor; size?: number 
   return <Avatar seed={actor.id} name={actorName(actor)} size={size} />
 }
 
-/** The name, plus the AI badge for agents. */
+/** The name, then (with `badge`) the AI badge for agents, Owner/Member from the account's role, or a quiet
+ *  "Guest" after a named guest. A bare handle already reads as a guest. */
 export function ActorName({ actor, badge = true }: { actor: Actor; badge?: boolean }) {
   return (
     <>
       <strong className="actor-name">{actorName(actor)}</strong>
       {badge && actor.type === "agent" && <AiBadge />}
+      {badge && actor.type === "member" && actor.role && <span className="role-badge">{actor.role === "owner" ? "Owner" : "Member"}</span>}
+      {badge && actor.type === "guest" && actor.name && <span className="guest-marker">Guest</span>}
     </>
   )
 }

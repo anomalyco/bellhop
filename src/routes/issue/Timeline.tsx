@@ -1,72 +1,40 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Link } from "wouter"
-import type { Activity, Actor, Attachment, CloseReason, Comment, IssueEvent, IssueRef, IssueStatus, Label as LabelType, Relation } from "../../../shared/api"
+import type { Activity, Actor, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, Relation } from "../../../shared/api"
+import { visibleState } from "../../lib/issues"
+import { appPath } from "../../lib/site"
 import { Time, useUntil } from "../../lib/time"
 import { formatSize } from "../../lib/upload"
 import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
-import { LinkIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon, ImageIcon } from "../../ui/icons"
+import { ChevronDownIcon, ImageIcon, LinkIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon } from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Dots, Label } from "../../ui/primitives"
-import { visibleState } from "../../lib/issues"
-import { appPath } from "../../lib/site"
+import type { MessageEntry } from "./model"
 
-/** One message in the conversation: avatar, name, time, then the text. Agent messages sit on a faint layer. */
-export function Message({
-  slug,
-  author,
-  createdAt,
-  body,
-  attachments,
-  byAuthor,
-  verb,
-  actions,
-  children,
-  pending,
-}: {
-  slug: string
-  author: Actor
-  createdAt: string
-  body: string
-  attachments: Attachment[]
-  byAuthor: boolean
-  verb?: string
-  actions?: ReactNode
-  children?: ReactNode
-  pending?: ReactNode
-}) {
-  const loose = attachments.filter((a) => !body.includes(a.url))
+/** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
+export function MessageGroup({ slug, author, byAuthor, messages }: { slug: string; author: Actor; byAuthor: boolean; messages: MessageEntry[] }) {
   return (
-    <article className="msg" data-agent={author.type === "agent" || undefined} data-pending={pending ? "" : undefined}>
-      <span className="msg-avatar">
-        <ActorAvatar actor={author} size={28} />
-      </span>
-      <div className="msg-main">
-        <header className="msg-head">
-          <ActorName actor={author} />
-          {byAuthor && <span className="role-badge">Reporter</span>}
-          {author.type === "member" && (
-            <span className="role-badge" data-role="member">
-              Member
-            </span>
-          )}
-          <span className="msg-time">
-            {pending ?? (
-              <>
-                {verb && `${verb} `}
-                <Time iso={createdAt} />
-              </>
-            )}
-          </span>
-          {actions && <span className="msg-actions">{actions}</span>}
-        </header>
-        {children ?? (
-          <div className="msg-body">
-            <Markdown source={body} slug={slug} />
+    <section className="group">
+      <header className="group-head">
+        <span className="group-avatar" data-reporter={byAuthor || undefined} title={byAuthor ? `${actorName(author)} opened this issue` : undefined}>
+          <ActorAvatar actor={author} size={20} />
+        </span>
+        <ActorName actor={author} />
+        <span className="group-time">
+          <Time iso={messages[0]!.createdAt} />
+        </span>
+      </header>
+      {messages.map((m) => {
+        const loose = m.attachments.filter((a) => !m.body.includes(a.url))
+        return (
+          <div key={m.key} className="group-msg" data-pending={m.note ? "" : undefined}>
+            <Markdown source={m.body} slug={slug} />
             {loose.length > 0 && <AttachmentList attachments={loose} />}
+            {m.note && <div className="group-note">{m.note}</div>}
           </div>
-        )}
-      </div>
-    </article>
+        )
+      })}
+    </section>
   )
 }
 
@@ -83,19 +51,6 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
         </li>
       ))}
     </ul>
-  )
-}
-
-export function CommentItem({ slug, comment }: { slug: string; comment: Comment }) {
-  return (
-    <Message
-      slug={slug}
-      author={comment.author}
-      createdAt={comment.created_at}
-      body={comment.body}
-      attachments={comment.attachments}
-      byAuthor={comment.by_issue_author}
-    />
   )
 }
 
@@ -211,18 +166,6 @@ export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode
   return { icon, tone, body }
 }
 
-export function EventItem({ slug, event }: { slug: string; event: IssueEvent }) {
-  const { icon, tone, body } = eventContent(slug, event)
-  return (
-    <div className="event" data-tone={tone}>
-      <span className="event-icon">{icon}</span>
-      <span className="event-text">
-        <ActorName actor={event.actor} /> {body} <span className="event-time">· <Time iso={event.created_at} /></span>
-      </span>
-    </div>
-  )
-}
-
 function PencilGlyph() {
   return (
     <svg className="icon" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden="true">
@@ -231,22 +174,60 @@ function PencilGlyph() {
   )
 }
 
-/** The agent (or a member) at work, as the last line of the thread: avatar, name, typing dots and its status. */
-export function ActivityRow({ activity }: { activity: Activity | null }) {
+export function EventLine({ slug, event }: { slug: string; event: IssueEvent }) {
+  const { icon, tone, body } = eventContent(slug, event)
+  return (
+    <div className="event" data-tone={tone}>
+      <span className="event-icon">{icon}</span>
+      <span className="event-text">
+        <ActorName actor={event.actor} badge={false} /> {body} · <Time iso={event.created_at} />
+      </span>
+    </div>
+  )
+}
+
+/** More than two events in a row fold into one line saying who and when; it expands in place. */
+export function EventBurst({ slug, events }: { slug: string; events: IssueEvent[] }) {
+  const [open, setOpen] = useState(false)
+  const names = [...new Set(events.map((e) => actorName(e.actor)))]
+  const last = events[events.length - 1]!
+  return (
+    <div className="burst" data-open={open || undefined}>
+      <button type="button" className="burst-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <span className="burst-icons" aria-hidden="true">
+          {events.slice(0, 3).map((e) => {
+            const { icon, tone } = eventContent(slug, e)
+            return (
+              <span key={e.id} className="event-icon" data-tone={tone}>
+                {icon}
+              </span>
+            )
+          })}
+        </span>
+        <span className="burst-text">
+          {events.length} updates by {names.join(", ")} · <Time iso={last.created_at} />
+        </span>
+        <ChevronDownIcon size={12} />
+      </button>
+      {open && events.map((e) => <EventLine key={e.id} slug={slug} event={e} />)}
+    </div>
+  )
+}
+
+/** The agent (or a member) at work, as the last line of the thread. */
+export function TypingLine({ activity }: { activity: Activity | null }) {
   const live = useUntil(activity?.expires_at)
   if (!activity || !live) return null
   return (
-    <div className="msg typing" data-agent={activity.actor.type === "agent" || undefined} aria-live="polite">
-      <span className="msg-avatar">
-        <ActorAvatar actor={activity.actor} size={28} />
-      </span>
-      <div className="msg-main">
-        <div className="msg-head">
-          <ActorName actor={activity.actor} />
-          <Dots />
-          {activity.text && <span className="typing-text">{activity.text}</span>}
-        </div>
-      </div>
+    <div className="group typing" aria-live="polite">
+      <header className="group-head">
+        <span className="group-avatar">
+          <ActorAvatar actor={activity.actor} size={20} />
+        </span>
+        <ActorName actor={activity.actor} />
+        <Dots />
+        {activity.text && <span className="typing-text">{activity.text}</span>}
+      </header>
     </div>
   )
 }
