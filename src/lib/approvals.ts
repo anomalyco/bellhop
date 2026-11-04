@@ -20,6 +20,9 @@ export async function detailsHash(details: Approval["details"]) {
 const invisible = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}\u00A0\u1680\u2000-\u200A\u202F\u205F\u3000\u180E\uFEFF]/gu
 const escape = (s: string) => s.replace(invisible, (c) => `\\u{${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}`)
 
+/** Free text (the agent's summary) with bidi controls and invisible characters spelled out, so none can reorder it. */
+export const visibleText = (s: string) => escape(s)
+
 /** A details value exactly as sent: strings quoted (so spaces and type show), numbers and booleans as written, invisibles spelled out. */
 export const detailValue = (v: string | number | boolean) => escape(JSON.stringify(v))
 
@@ -33,4 +36,27 @@ export const detailEntries = (details: Approval["details"]) => Object.keys(detai
 export function decision(a: Approval): "approved" | "rejected" | null {
   if (a.state === "rejected") return "rejected"
   return a.decided_by ? "approved" : null
+}
+
+/** The letters in a key outside ASCII, each spelled as \u{…} (a key like "аmount" may not be what it looks like). */
+export function foreignLetters(key: string) {
+  return [...new Set([...key].filter((c) => c.codePointAt(0)! > 0x7f && /\p{L}|\p{M}/u.test(c)))].map((c) => `\\u{${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}}`)
+}
+
+// Common Cyrillic and Greek letters that look like Latin ones
+const confusables: Record<string, string> = {
+  а: "a", в: "b", е: "e", к: "k", м: "m", н: "h", о: "o", р: "p", с: "c", т: "t", у: "y", х: "x", і: "i", ј: "j", ѕ: "s", ԁ: "d", ӏ: "l", ԛ: "q", ԝ: "w", ь: "b",
+  А: "A", В: "B", Е: "E", К: "K", М: "M", Н: "H", О: "O", Р: "P", С: "C", Т: "T", У: "Y", Х: "X", І: "I", Ј: "J", Ѕ: "S", Ԁ: "D", Ԛ: "Q", Ԝ: "W",
+  α: "a", ο: "o", ρ: "p", ν: "v", ι: "i", κ: "k", τ: "t", υ: "u", χ: "x", ϲ: "c", ε: "e",
+  Α: "A", Β: "B", Ε: "E", Ζ: "Z", Η: "H", Ι: "I", Κ: "K", Μ: "M", Ν: "N", Ο: "O", Ρ: "P", Τ: "T", Υ: "Y", Χ: "X",
+}
+/** What a key looks like: NFKC, combining marks dropped, look-alike letters mapped to Latin. */
+const skeleton = (key: string) =>
+  [...key.normalize("NFKC").normalize("NFD").replace(/\p{M}/gu, "")].map((c) => confusables[c] ?? c).join("")
+
+/** Keys that are different but read the same (after NFKC, or by look-alike letters), in groups. */
+export function lookalikeKeys(details: Approval["details"]) {
+  const groups = new Map<string, string[]>()
+  for (const k of Object.keys(details).sort()) groups.set(skeleton(k), [...(groups.get(skeleton(k)) ?? []), k])
+  return [...groups.values()].filter((g) => g.length > 1)
 }

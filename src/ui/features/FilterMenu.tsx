@@ -10,7 +10,14 @@ import { tKey, useT, type PlainKey } from "../../i18n/core"
 import { useT as useDeskT } from "../../i18n/helpdesk"
 
 /** The help desk review queue's counts (null: not a help desk team). */
-type Review = { heldCount: number | null; approvalCount: number | null } | null
+type Review = {
+  heldCount: number | null
+  approvalCount: number | null
+  /** Human handoff: counts, and the workspace's group names for group: filters. */
+  withPersonCount?: number | null
+  waitingCount?: number | null
+  groups?: string[]
+} | null
 
 // The search box's qualifiers, edited as text: each control adds, swaps or removes one `key:value` token and leaves
 // the rest of the query (is:open, label:, free text) alone.
@@ -79,7 +86,8 @@ function managed(t: Token, scope: Scope) {
   if (t.key === null) return false
   if (["status", "reason", "assignee", "author", "has"].includes(t.key)) return true
   if (t.key === "no") return t.value === "label" || t.value === "assignee"
-  if (t.key === "is") return ["private", "locked", "pinned", "held", "awaiting-approval"].includes(t.value)
+  if (t.key === "is") return ["private", "locked", "pinned", "held", "awaiting-approval", "with-person", "escalated", "waiting-for-person"].includes(t.value)
+  if (t.key === "group") return true
   if (t.key === "sort") return scope === "feed"
   return false
 }
@@ -207,6 +215,23 @@ function Groups({
             {td("queue.approvals")}
             {review.approvalCount !== null && <span className="filter-chip-count">{review.approvalCount}</span>}
           </Chip>
+        </Group>
+      )}
+      {review && (
+        <Group title={td("queue.handoff")}>
+          <Chip on={hasQualifier(query, "is", "with-person") || hasQualifier(query, "is", "escalated")} onClick={() => onChange(hasQualifier(query, "is", "escalated") ? editQuery(query, (t) => t.key === "is" && t.value === "escalated") : toggle(query, "is", "with-person"))}>
+            {td("queue.withPerson")}
+            {review.withPersonCount != null && <span className="filter-chip-count">{review.withPersonCount}</span>}
+          </Chip>
+          <Chip on={hasQualifier(query, "is", "waiting-for-person")} onClick={() => onChange(toggle(query, "is", "waiting-for-person"))}>
+            {td("queue.waitingForPerson")}
+            {review.waitingCount != null && <span className="filter-chip-count">{review.waitingCount}</span>}
+          </Chip>
+          {review.groups?.map((name) => (
+            <Chip key={name} on={valueOf(query, "group")?.toLowerCase() === name.toLowerCase()} onClick={() => onChange(setOne(query, "group", valueOf(query, "group")?.toLowerCase() === name.toLowerCase() ? null : name))} radio>
+              {name}
+            </Chip>
+          ))}
         </Group>
       )}
       <Group title={t("filter.status")}>
@@ -355,6 +380,18 @@ function Help({ scope, desk, onBack }: { scope: Scope; desk: boolean; onBack: ()
           <div className="filter-help-row">
             <code>is:awaiting-approval</code>
             <span>{td("queue.helpApproval")}</span>
+          </div>
+          <div className="filter-help-row">
+            <code>is:with-person</code>
+            <span>{td("queue.helpWithPerson")}</span>
+          </div>
+          <div className="filter-help-row">
+            <code>is:waiting-for-person</code>
+            <span>{td("queue.helpWaiting")}</span>
+          </div>
+          <div className="filter-help-row">
+            <code>group:"Billing team"</code>
+            <span>{td("queue.helpGroup")}</span>
           </div>
         </>
       )}

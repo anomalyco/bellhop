@@ -23,6 +23,7 @@ import { isDesk } from "../../lib/helpdesk"
 import { isContactActor } from "../../ui/Actor"
 import { deskOutsider } from "../../lib/helpdesk"
 import { RequestTypeSection } from "../../ui/helpdesk/RequestDetails"
+import { AvailabilitySwitch, HandoffSection } from "../../ui/helpdesk/Handoff"
 
 
 /** The desktop sidebar: the editable properties, then who reported it, when, who's involved, files, system info and a link. */
@@ -35,6 +36,7 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
       {model.member && isDesk(model.app) && <RequesterSection app={model.app} issue={model.issue} />}
       <StatusSection model={model} />
       {model.member && isDesk(model.app) && <RequestTypeSection app={model.app} issue={model.issue} place="side" />}
+      {model.member && isDesk(model.app) && <HandoffSection app={model.app} issue={model.issue} />}
       {/* A requester sees where their request stands, not the team's triage fields */}
       {!deskOutsider(model.app) && (
         <>
@@ -45,6 +47,11 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
       )}
       <NotificationsSection model={model} />
       {model.member && !isDesk(model.app) && <RequesterSection app={model.app} issue={model.issue} />}
+      {model.member && isDesk(model.app) && (
+        <section className="side-section">
+          <AvailabilitySwitch app={model.app} compact />
+        </section>
+      )}
       <InfoSections model={model} />
     </aside>
   )
@@ -87,7 +94,9 @@ export function MobileProps({ model }: { model: IssueModel }) {
           )}
         />
       ) : (
-        issue.assignee && (
+        // A help desk's requesters aren't told who has their request (the server sends no assignee either)
+        issue.assignee &&
+        !deskOutsider(app) && (
           <span className="prop" data-static title={t("side.assignee")}>
             <AssigneeValue issue={issue} />
           </span>
@@ -138,7 +147,13 @@ export function MobileDetails({ model }: { model: IssueModel }) {
         <div className="mobile-details-body">
           {model.member && <RequesterSection app={model.app} issue={model.issue} />}
           {model.member && isDesk(model.app) && <RequestTypeSection app={model.app} issue={model.issue} place="mobile" />}
+          {model.member && isDesk(model.app) && <HandoffSection app={model.app} issue={model.issue} />}
           <NotificationsSection model={model} />
+          {model.member && isDesk(model.app) && (
+            <section className="side-section">
+              <AvailabilitySwitch app={model.app} compact />
+            </section>
+          )}
           <RelationsSection model={model} />
           <InfoSections model={model} />
         </div>

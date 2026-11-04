@@ -35,6 +35,7 @@ import { CheckIcon } from "../../ui/icons"
 import { useRoutedSentence } from "../../ui/helpdesk/RequestDetails"
 import { SentBy } from "../../ui/helpdesk/Review"
 import { decision } from "../../lib/approvals"
+import { handoffSentence } from "../../ui/helpdesk/Handoff"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
 export function MessageGroup({
@@ -295,6 +296,15 @@ export function eventContent(
       icon = <CheckIcon size={14} />
       tone = verdict === "approved" ? "closed" : undefined
       if (a && verdict) say = (actor) => trd(verdict === "approved" ? "event.approvalApproved" : "event.approvalRejected", { actor, action: <code className="approval-action">{a.action}</code> })
+      break
+    }
+    case "escalated":
+    case "handed_back":
+    case "reassigned": {
+      icon = <PersonIcon size={14} />
+      tone = event.type === "escalated" ? "in_progress" : undefined
+      const sentence = handoffSentence(event)
+      if (sentence) say = sentence
       break
     }
     case "routed":

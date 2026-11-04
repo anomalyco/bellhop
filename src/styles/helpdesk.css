@@ -1426,3 +1426,356 @@
   color: var(--fg-faint);
   font-variant-numeric: tabular-nums;
 }
+
+/* Human handoff: availability, the request's handoff panel, "Talk to a person", Settings → Groups */
+.availability {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.availability-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+}
+.availability-text {
+  display: grid;
+  min-width: 0;
+}
+.availability-title {
+  font-weight: var(--weight-medium);
+}
+.availability[data-compact] .availability-title {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
+.availability-state {
+  color: var(--closed);
+  font-size: var(--text-ui);
+}
+.availability-state[data-away] {
+  color: var(--fg-muted);
+}
+.groups-availability {
+  margin-bottom: 16px;
+}
+.handoff-panel,
+.handoff-form {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.handoff-state {
+  margin: 0;
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+.handoff-state[data-agents] {
+  color: var(--fg-muted);
+  font-weight: var(--weight-regular);
+}
+.handoff-source,
+.handoff-waiting {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.handoff-source strong {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.handoff-waiting {
+  color: var(--waiting);
+}
+.handoff-reason {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  overflow-wrap: anywhere;
+}
+.handoff-facts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.handoff-facts > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+.handoff-facts dt {
+  color: var(--fg-muted);
+}
+.handoff-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.handoff-assignee {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.handoff-due {
+  font-size: var(--text-ui);
+  color: var(--fg-muted);
+}
+.handoff-due[data-overdue] {
+  color: var(--danger);
+}
+.handoff-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.handoff-confirm {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.handoff-confirm p {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.talk {
+  margin: 4px 0 12px;
+}
+.talk-prompt,
+.talk-done {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.talk-form {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-large);
+  box-shadow: var(--hairline);
+}
+.talk-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.review-flag[data-kind="escalated"] {
+  color: color-mix(in oklab, var(--progress) 80%, var(--fg));
+}
+.group-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+.group-row .settings-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.group-row-name {
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.group-available {
+  color: var(--closed);
+}
+.group-available[data-none] {
+  color: var(--fg-muted);
+}
+.group-row-actions {
+  flex: none;
+  gap: 6px;
+}
+.group-row-editing {
+  display: block;
+}
+.groups-settings > .type-editor {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+}
+.group-confirm {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.group-confirm-title {
+  margin: 0;
+  font-weight: var(--weight-medium);
+}
+.group-members {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 6px 16px;
+}
+.group-member {
+  min-width: 0;
+}
+.group-member-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-member-email {
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.group-hours {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+.group-days {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.group-day {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.group-day[data-on] {
+  color: var(--fg);
+  background: var(--layer-1);
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.group-day input {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.group-day:has(input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.group-times {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 160px));
+  gap: 12px;
+}
+.group-window {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.group-chip {
+  min-width: 44px;
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: var(--text-ui);
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  cursor: pointer;
+}
+.group-chip:hover {
+  color: var(--fg);
+}
+.group-chip[aria-checked="true"] {
+  color: var(--fg);
+  background: var(--layer-1);
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.group-chip:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+.group-window-custom {
+  max-width: 160px;
+}
+.desk-default-group {
+  display: grid;
+  gap: 8px;
+}
+@media (max-width: 640px) {
+  .group-row {
+    flex-wrap: wrap;
+  }
+  .group-row .settings-row-main {
+    flex-basis: 100%;
+  }
+  .group-members {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (pointer: coarse) {
+  .group-day,
+  .group-chip {
+    height: 40px;
+  }
+  .group-member,
+  .availability-row {
+    min-height: 40px;
+  }
+}
+.groups-availability .availability,
+.side-section > .availability {
+  flex: 1;
+}
+.approval-summary p {
+  unicode-bidi: isolate;
+}
+.approval-lookalike {
+  margin: 0 0 6px;
+  padding: 8px 10px;
+  color: var(--fg);
+  font-size: var(--text-ui);
+  line-height: 20px;
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--danger) 12%, transparent);
+  overflow-wrap: anywhere;
+}
+.approval-key-flag {
+  color: var(--danger);
+}
+.approval-key-spelling {
+  display: block;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 16px;
+}
+@media (pointer: coarse) {
+  .talk-button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+}

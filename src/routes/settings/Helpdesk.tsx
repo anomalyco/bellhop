@@ -9,6 +9,7 @@ import { CheckIcon } from "../../ui/icons"
 import { Button } from "../../ui/primitives"
 import "../../styles/helpdesk.css"
 import { AutonomyChoice } from "../../ui/helpdesk/Autonomy"
+import { useGroups } from "../../ui/helpdesk/Handoff"
 
 /**
  * Settings → Help desk (admins): the workspace's mode, switched only after an inline confirm that spells out what
@@ -21,6 +22,7 @@ export function HelpdeskSettings({ app }: { app: AppDetail }) {
   const desk = isDesk(app)
   const [confirming, setConfirming] = useState<AppMode | null>(null)
   const [busy, setBusy] = useState(false)
+  const { data: groups } = useGroups(app)
   const [error, setError] = useState<string | null>(null)
 
   const patch = async (input: Parameters<typeof api.patchApp>[1]) => {
@@ -133,6 +135,30 @@ export function HelpdeskSettings({ app }: { app: AppDetail }) {
               <span className="visibility-hint">{t("settings.anonymousText")}</span>
             </span>
           </label>
+          <div className="field desk-default-group">
+            <label className="field-label" htmlFor="desk-default-group">
+              {t("settings.escalationsTo")}
+            </label>
+            <p className="desk-trust-note">{t("settings.escalationsToText")}</p>
+            <select
+              id="desk-default-group"
+              className="select"
+              value={app.helpdesk.default_group_id ?? ""}
+              disabled={!admin || busy}
+              onChange={(e) => void patch({ helpdesk: { default_group_id: e.target.value || null } })}
+            >
+              <option value="">{t("settings.escalationsNobody")}</option>
+              {(groups ?? []).map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.name}
+                </option>
+              ))}
+              {/* A group the list doesn't have (yet) stays selectable rather than showing as nobody */}
+              {app.helpdesk.default_group_id && groups && !groups.some((g) => g.id === app.helpdesk.default_group_id) && (
+                <option value={app.helpdesk.default_group_id}>{t("types.group")}</option>
+              )}
+            </select>
+          </div>
           <div className="field desk-default-autonomy">
             <span className="field-label">{t("settings.defaultAutonomy")}</span>
             <p className="desk-trust-note">{t("settings.defaultAutonomyText")}</p>

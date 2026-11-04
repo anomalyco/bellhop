@@ -85,6 +85,8 @@ export type Entry = MessageEntry | EventEntry | HiddenEntry | HeldEntry | Approv
 /** The conversation after the report: the timeline, then comments still on their way. */
 export function entries(model: IssueModel): Entry[] {
   const { issue, pending, viewer, member } = model
+  // A help desk's requesters see no assignment events: who has the request stays with the team
+  const deskRequester = model.app.mode === "helpdesk" && !member
   const list: Entry[] = []
   // Every approval event carries the approval's current state; the last one seen for an id is the newest
   const approvals = new Map<string, Approval>()
@@ -116,6 +118,8 @@ export function entries(model: IssueModel): Entry[] {
           comment: c,
           internal: !!c.internal,
         })
+    } else if (deskRequester && (item.event.type === "assigned" || item.event.type === "claimed")) {
+      continue
     } else if (item.event.type === "approval.requested") {
       const a = approvals.get((item.event.data.approval as Approval | undefined)?.id ?? "")
       if (member && a) list.push({ kind: "approval", key: item.event.id, approval: a })

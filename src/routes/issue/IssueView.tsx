@@ -30,6 +30,7 @@ import { ContactNamesProvider } from "../../ui/Actor"
 import { contactLabel } from "../../lib/helpdesk"
 import { RequestAnswers, RequestProvider, RequestTypeLabel } from "../../ui/helpdesk/RequestDetails"
 import { ApprovalCard, HeldReply, ReviewNotice } from "../../ui/helpdesk/Review"
+import { TalkToPerson } from "../../ui/helpdesk/Handoff"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -72,6 +73,7 @@ export function IssueView({ model }: { model: IssueModel }) {
             <VerificationThread app={app} issue={issue} member={model.member} />
             <TypingLine activity={issue.activity} />
           </div>
+          {deskOutsider(app) && <TalkToPerson app={app} issue={issue} />}
           </RequestProvider>
           </VerificationsProvider>
           <ReviewNotice slug={app.slug} number={issue.number} />

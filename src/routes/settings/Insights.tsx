@@ -7,6 +7,8 @@ import { Label } from "../../ui/primitives"
 import { t, tr, tKey, useT } from "../../i18n/settings"
 import { formatNumber, getLocale } from "../../i18n"
 import "../../styles/insights.css"
+import { isDesk } from "../../lib/helpdesk"
+import { useT as useDeskT } from "../../i18n/helpdesk"
 
 type Days = 7 | 30 | 90
 const windows: Days[] = [7, 30, 90]
@@ -67,6 +69,7 @@ export function Insights({ app }: { app: AppDetail }) {
       ) : (
         <div className="insights-body" data-pending={pending || undefined} aria-busy={pending || undefined}>
           <Headline data={shown} days={days} />
+          {isDesk(app) && <Handoff data={shown} />}
           <Chart data={shown} />
           <Breakdowns app={app} data={shown} />
         </div>
@@ -146,6 +149,17 @@ function Headline({ data, days }: { data: Analytics | null; days: Days }) {
           sub={t("insights.inDays", { count: days })}
         />
       </div>
+    </section>
+  )
+}
+
+/** Help desks: how often requests went to a person, and how fast a person replied once they did. */
+function Handoff({ data }: { data: Analytics }) {
+  const td = useDeskT()
+  return (
+    <section className="stats stats-pair" aria-label={td("queue.handoff")}>
+      <Stat ready label={td("insights.escalationRate")} value={percent(data.escalation_rate)} hint={td("insights.noHandoffs")} sub={td("insights.escalationRateSub")} />
+      <Stat ready label={td("insights.humanReply")} value={duration(data.time_to_human_reply_median)} hint={td("insights.noHandoffs")} sub={td("insights.humanReplySub")} />
     </section>
   )
 }

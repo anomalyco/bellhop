@@ -25,6 +25,7 @@ import { sorts } from "../ui/features/FilterMenu"
 import { DeskHome } from "./helpdesk/Home"
 import { deskOutsider } from "../lib/helpdesk"
 import { ReviewFlags, useReviewQueue } from "../ui/helpdesk/Review"
+import { useGroups, useHandoffQueue } from "../ui/helpdesk/Handoff"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -155,8 +156,10 @@ function IssuesList({ app }: { app: AppDetail }) {
   // Help desk team: which requests wait on a review (held agent drafts, pending approvals). Rows wait for it the
   // first time, so their flags never arrive late and move the list.
   const review = useReviewQueue(app, filter.state)
+  const handoff = useHandoffQueue(app, filter.state)
+  const { data: groups } = useGroups(app)
   const revealed = useRef(false)
-  const reviewWait = !!review && !review.ready && !revealed.current
+  const reviewWait = ((!!review && !review.ready) || (!!handoff && !handoff.ready)) && !revealed.current
   const shown = reviewWait ? undefined : (data ?? (error ? undefined : lastList.current?.list))
   if (shown) revealed.current = true
   const pending = !data && !error && !!shown
@@ -255,7 +258,13 @@ function IssuesList({ app }: { app: AppDetail }) {
         />
         <div className="list-label">
           <MineFilter filter={filter} onChange={go} />
-          <FilterMenu query={q} slug={slug} member={!!app.role} review={review} onChange={(next) => go(parseQuery(next))} />
+          <FilterMenu
+            query={q}
+            slug={slug}
+            member={!!app.role}
+            review={review && { ...review, withPersonCount: handoff?.withPersonCount, waitingCount: handoff?.waitingCount, groups: groups?.map((g) => g.name) }}
+            onChange={(next) => go(parseQuery(next))}
+          />
           <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
@@ -287,7 +296,15 @@ function IssuesList({ app }: { app: AppDetail }) {
           )
         )}
         {shown?.issues.map((issue) => (
-          <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={onLabel} held={!!review?.held.has(issue.id)} approval={!!review?.approvals.has(issue.id)} />
+          <IssueRow
+            key={issue.id}
+            slug={slug}
+            issue={issue}
+            onLabel={onLabel}
+            held={!!review?.held.has(issue.id)}
+            approval={!!review?.approvals.has(issue.id)}
+            escalated={!!handoff?.escalated.has(issue.id)}
+          />
         ))}
         {shown?.next_cursor && (
           <div className="list-footer">
@@ -390,6 +407,7 @@ export const IssueRow = memo(function IssueRow({
   workspace,
   held = false,
   approval = false,
+  escalated = false,
 }: {
   slug: string
   issue: IssueSummary
@@ -398,6 +416,8 @@ export const IssueRow = memo(function IssueRow({
   /** Help desk team: an agent's draft or an approval waits for review on this request. */
   held?: boolean
   approval?: boolean
+  /** Help desk team: a person has this request. */
+  escalated?: boolean
 }) {
   const t = useT()
   const active = useUntil(issue.activity?.expires_at)
@@ -456,7 +476,7 @@ export const IssueRow = memo(function IssueRow({
               {t("row.hidden")}
             </span>
           )}
-          {(held || approval) && <ReviewFlags held={held} approval={approval} />}
+          {(held || approval || escalated) && <ReviewFlags held={held} approval={approval} escalated={escalated} />}
         </div>
       </div>
       <div className="issue-row-side">

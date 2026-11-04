@@ -74,6 +74,14 @@
   gap: 0.5px;
   background: var(--border-muted);
 }
+/* Help desks: the handoff pair, a card of its own under the headline */
+.stats-pair {
+  --cell: color-mix(in srgb, var(--bg), white 3%);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
+  overflow: clip;
+}
 .stat {
   display: grid;
   align-content: start;

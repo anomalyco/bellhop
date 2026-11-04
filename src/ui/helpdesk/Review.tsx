@@ -3,7 +3,7 @@ import type { AppDetail, Approval, Comment, Issue, IssueList } from "../../../sh
 import { t as tc } from "../../i18n/core"
 import { useLocale } from "../../i18n"
 import { tr, useT } from "../../i18n/helpdesk"
-import { decision, detailEntries, detailKey, detailValue, detailsHash } from "../../lib/approvals"
+import { decision, detailEntries, detailKey, detailValue, detailsHash, foreignLetters, lookalikeKeys, visibleText } from "../../lib/approvals"
 import { ApiFailure, api, errorMessage, keys } from "../../lib/api"
 import { load, useResource } from "../../lib/cache"
 import { isDesk } from "../../lib/helpdesk"
@@ -164,18 +164,39 @@ function DetailsTable({ details }: { details: Approval["details"] }) {
   const t = useT()
   const rows = detailEntries(details)
   if (!rows.length) return <p className="approval-empty">{t("approval.noDetails")}</p>
+  // Keys that read the same (amount / Cyrillic аmount, or the same after NFKC) get a warning above the table, and
+  // any key with letters outside ASCII is marked with their spelling
+  const alike = lookalikeKeys(details)
   return (
-    <table className="approval-details">
-      <caption className="sr-only">{t("approval.details")}</caption>
-      <tbody>
-        {rows.map(([k, v]) => (
-          <tr key={k}>
-            <th scope="row">{detailKey(k)}</th>
-            <td>{detailValue(v)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <>
+      {alike.length > 0 && (
+        <p className="approval-lookalike" role="alert">
+          <span aria-hidden="true">⚠</span> {t("approval.lookalike", { keys: alike.map((g) => g.map(detailKey).join(" / ")).join("; ") })}
+        </p>
+      )}
+      <table className="approval-details">
+        <caption className="sr-only">{t("approval.details")}</caption>
+        <tbody>
+          {rows.map(([k, v]) => {
+            const foreign = foreignLetters(k)
+            return (
+              <tr key={k} data-foreign={foreign.length ? "" : undefined}>
+                <th scope="row">
+                  {foreign.length > 0 && (
+                    <span className="approval-key-flag" title={t("approval.nonAscii", { chars: foreign.join(" ") })}>
+                      ⚠{" "}
+                    </span>
+                  )}
+                  {detailKey(k)}
+                  {foreign.length > 0 && <span className="approval-key-spelling">{t("approval.nonAscii", { chars: foreign.join(" ") })}</span>}
+                </th>
+                <td>{detailValue(v)}</td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </>
   )
 }
 
@@ -282,7 +303,7 @@ export function ApprovalCard({ app, issue, approval }: { app: AppDetail; issue: 
       </header>
       <div className="approval-summary">
         <span className="approval-label">{t("approval.summaryLabel")}</span>
-        <p>{approval.summary}</p>
+        <p dir="auto">{visibleText(approval.summary)}</p>
       </div>
       <div className="approval-signed">
         <span className="approval-label">{t("approval.details")}</span>
@@ -362,10 +383,15 @@ export function useReviewQueue(app: AppDetail, state: "open" | "closed") {
 }
 
 /** A list row's review flags (team only): a held reply, a pending approval. */
-export function ReviewFlags({ held, approval }: { held: boolean; approval: boolean }) {
+export function ReviewFlags({ held, approval, escalated = false }: { held: boolean; approval: boolean; escalated?: boolean }) {
   const t = useT()
   return (
     <>
+      {escalated && (
+        <span className="row-flag review-flag" data-kind="escalated" title={t("queue.escalatedTitle")}>
+          {t("queue.escalatedFlag")}
+        </span>
+      )}
       {held && (
         <span className="row-flag review-flag" data-kind="held" title={t("queue.heldTitle")}>
           {t("queue.heldFlag")}

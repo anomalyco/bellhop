@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react"
-import type { AppAgent, AppDetail, AppSettings, Autonomy, RequestField, RequestType, RequestTypeInput, RouteTarget } from "../../../shared/api"
+import type { Group, AppAgent, AppDetail, AppSettings, Autonomy, RequestField, RequestType, RequestTypeInput, RouteTarget } from "../../../shared/api"
 import { t as tc } from "../../i18n/core"
 import { useT } from "../../i18n/helpdesk"
 import { ApiFailure, api, errorMessage, keys } from "../../lib/api"
@@ -10,6 +10,7 @@ import { AutonomyChoice } from "../../ui/helpdesk/Autonomy"
 import "../../styles/agents.css"
 import "../../styles/features.css"
 import "../../styles/helpdesk.css"
+import { useGroups } from "../../ui/helpdesk/Handoff"
 
 const kinds: RequestField["kind"][] = ["text", "textarea", "email", "url", "number", "select"]
 const keyShape = /^[a-z0-9_]{1,40}$/
@@ -49,11 +50,11 @@ const fieldOf = (d: Draft): RequestField => {
   }
 }
 
-/** Who a route goes to, by name, from the workspace's agents and members (groups aren't listed yet: "A group"). */
-function routeName(route: RouteTarget | null, agents: AppAgent[] | undefined, settings: AppSettings | undefined, group: string) {
+/** Who a route goes to, by name, from the workspace's agents, members and groups ("A group" if it isn't listed). */
+function routeName(route: RouteTarget | null, agents: AppAgent[] | undefined, settings: AppSettings | undefined, group: string, groups?: Group[]) {
   if (!route) return null
   if ("agent" in route) return agents?.find((a) => a.id === route.agent)?.client_name ?? null
-  if ("group" in route) return group
+  if ("group" in route) return groups?.find((g) => g.id === route.group)?.name ?? group
   const m = settings?.members.find((x) => x.email.toLowerCase() === route.member.toLowerCase())
   return m ? (m.name ?? m.email) : route.member
 }
@@ -78,8 +79,9 @@ export function RequestTypes({ app }: { app: AppDetail }) {
   const { data: list, error } = useResource<RequestType[]>(key, () => api.requestTypes(app.slug), 5_000)
   const { data: agents, error: agentsError } = useResource<AppAgent[]>(keys.appAgents(app.slug), () => api.appAgents(app.slug), 30_000)
   const { data: settings, error: settingsError } = useResource<AppSettings>(keys.settings(app.slug), () => api.settings(app.slug), 30_000)
-  // Rows name where each type goes, so they wait for the agents and members too
-  const ready = !!list && (!!agents || !!agentsError) && (!!settings || !!settingsError)
+  const { data: groups, error: groupsError } = useGroups(app)
+  // Rows name where each type goes, so they wait for the agents, members and groups too
+  const ready = !!list && (!!agents || !!agentsError) && (!!settings || !!settingsError) && (!!groups || !!groupsError)
   const [editing, setEditing] = useState<string | null>(null)
   const [showArchived, setShowArchived] = useState(false)
   const [moving, setMoving] = useState(false)
@@ -166,7 +168,7 @@ export function RequestTypes({ app }: { app: AppDetail }) {
               <TypeRow
                 key={type.id}
                 type={type}
-                route={routeName(type.route, agents, settings, t("types.group"))}
+                route={routeName(type.route, agents, settings, t("types.group"), groups)}
                 first={i === 0}
                 last={i === active.length - 1}
                 busy={moving}
@@ -290,8 +292,9 @@ function TypeEditor({
   const [verify, setVerify] = useState(type?.require_verification ?? false)
   const [fields, setFields] = useState<Draft[]>(() => (type?.fields ?? []).map(draftOf))
   const [route, setRoute] = useState(() => routeValue(type?.route))
-  // A type routed to a group (set elsewhere; groups can't be picked here yet) keeps that route unless changed
-  const savedGroup = type?.route && "group" in type.route ? routeValue(type.route) : null
+  const { data: groups } = useGroups(app)
+  // A type routed to a group that isn't listed (deleted meanwhile) keeps that route unless changed
+  const savedGroup = type?.route && "group" in type.route && groups && !groups.some((g) => g.id === (type.route as { group: string }).group) ? routeValue(type.route) : null
   const [autonomy, setAutonomy] = useState<Autonomy>(type?.autonomy ?? app.helpdesk.default_autonomy ?? "suggest")
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -403,6 +406,15 @@ function TypeEditor({
         <select id={`type-route-${id}`} className="select" value={route} onChange={(e) => setRoute(e.target.value)}>
           <option value="">{t("types.routeNobody")}</option>
           {savedGroup && <option value={savedGroup}>{t("types.group")}</option>}
+          {!!groups?.length && (
+            <optgroup label={t("types.groups")}>
+              {groups.map((g) => (
+                <option key={g.id} value={`group:${g.id}`}>
+                  {g.name}
+                </option>
+              ))}
+            </optgroup>
+          )}
           {eligible.length > 0 && (
             <optgroup label={t("types.agents")}>
               {eligible.map((a) => (
