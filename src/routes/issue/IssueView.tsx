@@ -1,5 +1,4 @@
 import { useState, type RefObject } from "react"
-import { Link } from "wouter"
 import { appPath } from "../../lib/site"
 import { Time } from "../../lib/time"
 import { ActorAvatar, ActorName } from "../../ui/Actor"
@@ -7,6 +6,7 @@ import { PersonIcon } from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Button } from "../../ui/primitives"
 import { Page } from "../../ui/Shell"
+import { AppLink } from "../../ui/SiteLink"
 import { Composer } from "./Composer"
 import { BodyForm, TitleForm } from "./Editing"
 import { blocks, entries, type IssueModel } from "./model"
@@ -71,9 +71,9 @@ function Report({ model }: { model: IssueModel }) {
                 Edit
               </Button>
             )}
-            <Link href={appPath(app.slug, "/new")} className="btn report-new" data-variant="default" data-size="small">
+            <AppLink slug={app.slug} href={appPath(app.slug, "/new")} className="btn report-new" data-variant="default" data-size="small">
               New issue
-            </Link>
+            </AppLink>
           </div>
         </div>
       )}

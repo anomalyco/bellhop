@@ -51,7 +51,54 @@ async function failure(res: Response) {
   return new ApiFailure(res.status, body?.error?.code ?? `http_${res.status}`, body?.error?.message ?? res.statusText)
 }
 
+const seenKey = "bh_seen"
+let guestReady = (() => {
+  try {
+    return localStorage.getItem(seenKey) === "1"
+  } catch {
+    return false
+  }
+})()
+let firstFlight: Promise<void> | null = null
+
+function markGuestReady() {
+  guestReady = true
+  try {
+    localStorage.setItem(seenKey, "1")
+  } catch {
+    // Storage disabled; this tab's in-memory flag still serializes only once.
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown, retried = false): Promise<T> {
+  if (!guestReady) {
+    if (firstFlight) await firstFlight
+    if (!guestReady) {
+      let release!: () => void
+      firstFlight = new Promise<void>((r) => (release = r))
+      try {
+        const res = await fetch(path, {
+          method,
+          credentials: "same-origin",
+          headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        })
+        markGuestReady()
+        release()
+        if (res.status === 428 && !retried) {
+          await runHumanCheck()
+          return request(method, path, body, true)
+        }
+        if (!res.ok) throw await failure(res)
+        return (await res.json()) as T
+      } catch (e) {
+        release()
+        throw e
+      } finally {
+        firstFlight = null
+      }
+    }
+  }
   const res = await fetch(path, {
     method,
     credentials: "same-origin",

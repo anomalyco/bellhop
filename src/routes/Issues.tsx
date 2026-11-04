@@ -1,20 +1,107 @@
-import { useEffect, useState, type FormEvent } from "react"
-import { Link, useLocation, useSearch } from "wouter"
+import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { useLocation, useSearch } from "wouter"
 import type { AppDetail, IssueList, IssueSummary, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, useResource } from "../lib/cache"
-import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, prefetchIssue, visibleState, type Filter } from "../lib/issues"
+import { applyActivity, applyActorUpdate, applySummary, formatQuery, listKey, parseQuery, visibleState, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { appPath } from "../lib/site"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
 import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
-import { AppLayout, Page } from "../ui/Shell"
 import { Button, Dots, Label, StateIcon } from "../ui/primitives"
-import { appPath } from "../lib/site"
+import { AppLayout, Page } from "../ui/Shell"
+import { AppLink } from "../ui/SiteLink"
 
 export function Issues({ slug }: { slug: string }) {
-  return <AppLayout slug={slug} tab="issues">{(app) => <IssuesBody app={app} />}</AppLayout>
+  return (
+    <AppLayout slug={slug} tab="issues" loading={<IssuesLoading slug={slug} />}>
+      {(app) => <IssuesBody app={app} />}
+    </AppLayout>
+  )
+}
+
+function IssuesLoading({ slug }: { slug: string }) {
+  const search = useSearch()
+  const q = new URLSearchParams(search).get("q") ?? "is:open"
+  const filter = parseQuery(q)
+  const stateHref = (state: Filter["state"]) => {
+    const next = formatQuery({ ...filter, state })
+    return appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`)
+  }
+  return (
+    <Page>
+      <div className="list-toolbar">
+        <nav className="segmented list-states" aria-label="Issue state">
+          <AppLink slug={slug} href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
+            <StateIcon state="open" size={14} />
+            Open
+          </AppLink>
+          <AppLink slug={slug} href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
+            <StateIcon state="closed" size={14} />
+            Closed
+          </AppLink>
+        </nav>
+        <div className="input list-search">
+          <SearchIcon size={14} />
+          <input aria-label="Search issues" defaultValue={q} placeholder="Search issues" spellCheck={false} readOnly />
+        </div>
+        <div className="list-label">
+          <button type="button" className="btn" data-variant="default" disabled>
+            <TagIcon size={14} />
+            <span className="filter-text">{filter.label || "Label"}</span>
+            <ChevronDownIcon size={14} />
+          </button>
+        </div>
+        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
+          <PlusIcon size={14} />
+          New issue
+        </AppLink>
+      </div>
+      <section className="issue-list" aria-label="Issues">
+        <SkeletonRows />
+      </section>
+    </Page>
+  )
+}
+
+function SearchBox({
+  query,
+  filtered,
+  onSubmit,
+  onClear,
+}: {
+  query: string
+  filtered: boolean
+  onSubmit: (draft: string) => void
+  onClear: () => void
+}) {
+  const [draft, setDraft] = useState(query)
+  useEffect(() => setDraft(query), [query])
+
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    onSubmit(draft)
+  }
+
+  return (
+    <form className="input list-search" onSubmit={submit} role="search">
+      <SearchIcon size={14} />
+      <input
+        aria-label="Search issues"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        placeholder="Search issues"
+        spellCheck={false}
+      />
+      {filtered && (
+        <button type="button" className="input-clear" aria-label="Clear filters" onClick={onClear}>
+          <XIcon size={14} />
+        </button>
+      )}
+    </form>
+  )
 }
 
 function IssuesBody({ app }: { app: AppDetail }) {
@@ -25,16 +112,27 @@ function IssuesBody({ app }: { app: AppDetail }) {
   const filter = parseQuery(q)
   const key = listKey(slug, filter)
   const { data, error } = useResource<IssueList>(key, () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text }))
-  const [draft, setDraft] = useState(q)
+  const lastList = useRef<{ slug: string; list: IssueList } | null>(null)
+  if (data) lastList.current = { slug, list: data }
+  else if (lastList.current?.slug !== slug) lastList.current = null
+  const shown = data ?? (error ? undefined : lastList.current?.list)
+  const pending = !data && !error && !!shown
+
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<string | null>(null)
 
-  useEffect(() => setDraft(q), [q])
+  const filterRef = useRef(filter)
+  filterRef.current = filter
 
-  const go = (f: Filter) => {
-    const next = formatQuery(f)
-    navigate(appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`))
-  }
+  const go = useCallback(
+    (f: Filter) => {
+      const next = formatQuery(f)
+      navigate(appPath(slug, next === "is:open" ? "" : `?q=${encodeURIComponent(next)}`))
+    },
+    [slug, navigate],
+  )
+
+  const onLabel = useCallback((label: string) => go({ ...filterRef.current, label }), [go])
 
   useLive(
     `/api/live/apps/${encodeURIComponent(slug)}`,
@@ -71,12 +169,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
     }
   }
 
-  const submitSearch = (e: FormEvent) => {
-    e.preventDefault()
-    go(parseQuery(draft))
-  }
-
-  const counts = data?.counts ?? (filter.label || filter.text ? null : app.counts)
+  const counts = data?.counts ?? (filter.label || filter.text ? shown?.counts ?? null : app.counts)
   const filtered = !!(filter.label || filter.text)
 
   const stateHref = (state: Filter["state"]) => {
@@ -88,45 +181,36 @@ function IssuesBody({ app }: { app: AppDetail }) {
     <Page>
       <div className="list-toolbar">
         <nav className="segmented list-states" aria-label="Issue state">
-          <Link href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
+          <AppLink slug={slug} href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
             <StateIcon state="open" size={14} />
             Open
             {counts && <span className="segmented-count">{counts.open}</span>}
-          </Link>
-          <Link href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
+          </AppLink>
+          <AppLink slug={slug} href={stateHref("closed")} aria-current={filter.state === "closed" ? "page" : undefined}>
             <StateIcon state="closed" size={14} />
             Closed
             {counts && <span className="segmented-count">{counts.closed}</span>}
-          </Link>
+          </AppLink>
         </nav>
-        <form className="input list-search" onSubmit={submitSearch} role="search">
-          <SearchIcon size={14} />
-          <input
-            aria-label="Search issues"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            placeholder="Search issues"
-            spellCheck={false}
-          />
-          {filtered && (
-            <button type="button" className="input-clear" aria-label="Clear filters" onClick={() => go({ ...filter, label: "", text: "" })}>
-              <XIcon size={14} />
-            </button>
-          )}
-        </form>
+        <SearchBox
+          query={q}
+          filtered={filtered}
+          onSubmit={(draft) => go(parseQuery(draft))}
+          onClear={() => go({ ...filter, label: "", text: "" })}
+        />
         <div className="list-label">
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
-        <Link href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
+        <AppLink slug={slug} href={appPath(slug, "/new")} className="btn list-new" data-variant="primary">
           <PlusIcon size={14} />
           New issue
-        </Link>
+        </AppLink>
       </div>
 
-      <section className="issue-list" aria-label="Issues">
-        {!!error && !data && <div className="list-empty">{errorMessage(error)}</div>}
-        {!data && !error && <SkeletonRows />}
-        {data && data.issues.length === 0 && (
+      <section className="issue-list" aria-label="Issues" data-pending={pending || undefined} aria-busy={pending || undefined}>
+        {!!error && !shown && <div className="list-empty">{errorMessage(error)}</div>}
+        {!shown && !error && <SkeletonRows />}
+        {shown && shown.issues.length === 0 && (
           <div className="list-empty">
             {filtered ? (
               <>
@@ -137,19 +221,19 @@ function IssuesBody({ app }: { app: AppDetail }) {
               </>
             ) : filter.state === "open" ? (
               <>
-                No open issues. <Link href={appPath(slug, "/new")}>Open one</Link>
+                No open issues. <AppLink slug={slug} href={appPath(slug, "/new")}>Open one</AppLink>
               </>
             ) : (
               "No closed issues."
             )}
           </div>
         )}
-        {data?.issues.map((issue) => (
-          <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={(label) => go({ ...filter, label })} />
+        {shown?.issues.map((issue) => (
+          <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={onLabel} />
         ))}
-        {data?.next_cursor && (
+        {shown?.next_cursor && (
           <div className="list-footer">
-            <Button onClick={loadMore} disabled={loadingMore}>
+            <Button onClick={loadMore} disabled={loadingMore || pending}>
               {loadingMore ? "Loading…" : "Load more"}
             </Button>
             {moreError && <span className="field-error">{moreError}</span>}
@@ -232,8 +316,15 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
   )
 }
 
-function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary; onLabel: (name: string) => void }) {
-  const warm = () => prefetchIssue(slug, issue.number)
+const IssueRow = memo(function IssueRow({
+  slug,
+  issue,
+  onLabel,
+}: {
+  slug: string
+  issue: IssueSummary
+  onLabel: (name: string) => void
+}) {
   const active = useUntil(issue.activity?.expires_at)
   const href = appPath(slug, `/issues/${issue.number}`)
   return (
@@ -241,9 +332,9 @@ function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary;
       <StateIcon state={visibleState(issue)} />
       <div className="issue-row-main">
         <div className="issue-row-title">
-          <Link href={href} className="issue-title" onPointerEnter={warm} onFocus={warm}>
+          <AppLink slug={slug} href={href} className="issue-title">
             {issue.title}
-          </Link>
+          </AppLink>
           {issue.labels.map((label) => (
             <button key={label.id} type="button" className="label-button" onClick={() => onLabel(label.name)} title={label.description}>
               <Label name={label.name} color={label.color} />
@@ -266,11 +357,17 @@ function IssueRow({ slug, issue, onLabel }: { slug: string; issue: IssueSummary;
             <ActorAvatar actor={issue.assignee} size={20} />
           </span>
         )}
-        <Link href={href} className="issue-row-comments" aria-label={`${issue.comment_count} comments`} data-zero={issue.comment_count === 0 || undefined}>
+        <AppLink
+          slug={slug}
+          href={href}
+          className="issue-row-comments"
+          aria-label={`${issue.comment_count} comments`}
+          data-zero={issue.comment_count === 0 || undefined}
+        >
           <CommentIcon size={14} />
           <span className="mono-num">{issue.comment_count}</span>
-        </Link>
+        </AppLink>
       </div>
     </div>
   )
-}
+})

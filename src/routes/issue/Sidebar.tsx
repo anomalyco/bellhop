@@ -1,5 +1,4 @@
 import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
-import { Link } from "wouter"
 import type { Actor, Issue } from "../../../shared/api"
 import { stateText, visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
@@ -8,6 +7,7 @@ import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
 import { ChevronDownIcon, LinkIcon, PersonIcon, PlusIcon, SettingsIcon, TagIcon } from "../../ui/icons"
 import { Menu } from "../../ui/Menu"
 import { AiBadge, Button, Label, StateIcon } from "../../ui/primitives"
+import { AppLink } from "../../ui/SiteLink"
 import { allAttachments, type IssueModel } from "./model"
 import { AssignMenu, LabelMenu, RelationForm, RelationList, StatusMenu, SystemInfoList, statusOptions } from "./Properties"
 import { AttachmentList } from "./Timeline"
@@ -221,9 +221,14 @@ function LabelsSection({ model }: { model: IssueModel }) {
       {issue.labels.length ? (
         <div className="side-labels">
           {issue.labels.map((l) => (
-            <Link key={l.id} href={appPath(app.slug, `?q=${encodeURIComponent(`is:open label:${/\s/.test(l.name) ? `"${l.name}"` : l.name}`)}`)} title={l.description}>
+            <AppLink
+              key={l.id}
+              slug={app.slug}
+              href={appPath(app.slug, `?q=${encodeURIComponent(`is:open label:${/\s/.test(l.name) ? `"${l.name}"` : l.name}`)}`)}
+              title={l.description}
+            >
               <Label name={l.name} color={l.color} />
-            </Link>
+            </AppLink>
           ))}
         </div>
       ) : (

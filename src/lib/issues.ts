@@ -98,13 +98,25 @@ export function applySummary(slug: string, summary: IssueSummary, created = fals
   setData<Issue>(keys.issue(slug, summary.number), (issue) => (issue ? { ...issue, ...summary } : issue))
 }
 
+const sameActivity = (a: Activity | null, b: Activity | null) =>
+  a === b ||
+  (!!a &&
+    !!b &&
+    a.actor.id === b.actor.id &&
+    a.actor.type === b.actor.type &&
+    a.text === b.text &&
+    a.expires_at === b.expires_at)
+
 export function applyActivity(slug: string, issueId: string, activity: Activity | null) {
-  updateAll<IssueList>(keys.lists(slug), (list) =>
-    list.issues.some((i) => i.id === issueId)
+  updateAll<IssueList>(keys.lists(slug), (list) => {
+    const hit = list.issues.find((i) => i.id === issueId)
+    return hit && !sameActivity(hit.activity, activity)
       ? { ...list, issues: list.issues.map((i) => (i.id === issueId ? { ...i, activity } : i)) }
-      : undefined,
+      : undefined
+  })
+  updateAll<Issue>(`issue:${slug}:`, (issue) =>
+    issue.id === issueId && !sameActivity(issue.activity, activity) ? { ...issue, activity } : undefined,
   )
-  updateAll<Issue>(`issue:${slug}:`, (issue) => (issue.id === issueId ? { ...issue, activity } : undefined))
 }
 
 const itemId = (item: TimelineItem) => (item.kind === "comment" ? item.comment.id : item.event.id)
@@ -142,6 +154,10 @@ export function findSummary(slug: string, number: number): IssueSummary | undefi
 
 export function prefetchIssue(slug: string, number: number) {
   prefetch(keys.issue(slug, number), () => api.issue(slug, number))
+}
+
+export function prefetchList(slug: string, filter: Filter) {
+  prefetch(listKey(slug, filter), () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text }))
 }
 
 const isActor = (v: unknown): v is Actor =>

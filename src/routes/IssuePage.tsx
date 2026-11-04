@@ -5,14 +5,18 @@ import { load, peek, setData, useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
 import { appendTimeline, applyActivity, applyActorUpdate, applySummary, findSummary, storeIssue } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { loadMarkdown } from "../ui/Markdown"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
 import { IssueView } from "./issue/IssueView"
 import type { IssueModel } from "./issue/model"
 import { relationRequest, type IssueActions, type RelationKind } from "./issue/Properties"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
+  useEffect(() => {
+    void loadMarkdown()
+  }, [])
   return (
-    <AppLayout slug={slug} tab="issues">
+    <AppLayout slug={slug} tab="issues" loading={<IssueLoading slug={slug} number={number} />}>
       {(app) => <IssueBody key={number} app={app} number={number} />}
     </AppLayout>
   )
@@ -83,7 +87,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
 
   if (!issue) {
     if (error) return <ErrorPage error={error} />
-    return <IssueLoading app={app} number={number} />
+    return <IssueLoading slug={slug} number={number} />
   }
 
   const current = () => peek<Issue>(key) ?? issue
@@ -225,8 +229,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   return <IssueView model={model} nameField={nameField} />
 }
 
-function IssueLoading({ app, number }: { app: AppDetail; number: number }) {
-  const summary = findSummary(app.slug, number)
+function IssueLoading({ slug, number }: { slug: string; number: number }) {
+  const summary = findSummary(slug, number)
   return (
     <Page>
       <div className="issue">

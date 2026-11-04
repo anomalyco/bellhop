@@ -1,21 +1,38 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
-import { Link, useLocation, useSearch } from "wouter"
+import { useLocation, useSearch } from "wouter"
 import type { AppDetail, Attachment, Me, SystemInfo, Template } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { setData } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
 import { storeIssue } from "../lib/issues"
+import { appPath, signInHref } from "../lib/site"
 import { collectSystemInfo } from "../lib/sysinfo"
 import { Editor } from "../ui/Editor"
 import { XIcon } from "../ui/icons"
-import { AppLayout, Page, useMe } from "../ui/Shell"
+import { loadMarkdown } from "../ui/Markdown"
 import { Button, Label } from "../ui/primitives"
-import { SiteLink } from "../ui/SiteLink"
-import { appPath, signInHref } from "../lib/site"
+import { AppLayout, Page, useMe } from "../ui/Shell"
+import { AppLink, SiteLink } from "../ui/SiteLink"
 import { validGuestName } from "./issue/Composer"
 
 export function NewIssue({ slug }: { slug: string }) {
-  return <AppLayout slug={slug} tab="issues">{(app) => <NewIssueBody app={app} />}</AppLayout>
+  useEffect(() => {
+    void loadMarkdown()
+  }, [])
+  return (
+    <AppLayout
+      slug={slug}
+      tab="issues"
+      loading={
+        <Page narrow>
+          <h1 className="page-title">New issue</h1>
+          <div className="skeleton" style={{ width: "100%", height: 180 }} />
+        </Page>
+      }
+    >
+      {(app) => <NewIssueBody app={app} />}
+    </AppLayout>
+  )
 }
 
 function NewIssueBody({ app }: { app: AppDetail }) {
@@ -39,14 +56,14 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
               <div className="template-row-name">{t.name}</div>
               {t.description && <div className="issue-meta">{t.description}</div>}
             </div>
-            <Link href={appPath(app.slug, `/new?template=${encodeURIComponent(t.id)}`)} className="btn" data-variant="primary" data-size="small">
+            <AppLink slug={app.slug} href={appPath(app.slug, `/new?template=${encodeURIComponent(t.id)}`)} className="btn" data-variant="primary" data-size="small">
               Get started
-            </Link>
+            </AppLink>
           </div>
         ))}
       </section>
       <p className="template-blank">
-        <Link href={appPath(app.slug, "/new?template=")}>Open a blank issue</Link>
+        <AppLink slug={app.slug} href={appPath(app.slug, "/new?template=")}>Open a blank issue</AppLink>
       </p>
     </Page>
   )
@@ -234,9 +251,9 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
 
         {error && <p className="flash" data-tone="danger">{error}</p>}
         <div className="form-actions">
-          <Link href={appPath(app.slug)} className="btn" data-variant="invisible">
+          <AppLink slug={app.slug} href={appPath(app.slug)} className="btn" data-variant="invisible">
             Cancel
-          </Link>
+          </AppLink>
           <Button type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>
             {submitting ? "Submitting…" : busy ? "Uploading…" : "Submit new issue"}
           </Button>

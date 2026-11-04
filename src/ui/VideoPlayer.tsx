@@ -50,28 +50,32 @@ export function VideoPlayer({ src }: { src: string }) {
 
   // Controls stay while paused; while playing they fade after a moment of no pointer movement.
   const wake = useCallback(() => {
-    setAwake(true)
+    setAwake((a) => (a ? a : true))
     clearTimeout(idle.current)
     idle.current = setTimeout(() => setAwake(false), 2200)
   }, [])
   useEffect(() => () => clearTimeout(idle.current), [])
 
-  // timeupdate only fires about four times a second, so while playing the bar is moved every frame directly.
+  const playedRatio = duration ? Math.min(Math.max(time / duration, 0), 1) : 0
+  const bufferedRatio = Math.min(Math.max(buffered / 100, 0), 1)
+  const showControls = !playing || awake || !!hover
+
+  // timeupdate only fires about four times a second; while playing and visible, move the bar via compositor transforms.
   useEffect(() => {
-    if (!playing) return
+    if (!playing || !showControls) return
     let frame = 0
     const tick = () => {
       const el = video.current
       if (el && el.duration) {
-        const pct = `${(el.currentTime / el.duration) * 100}%`
-        if (playedBar.current) playedBar.current.style.width = pct
-        if (thumb.current) thumb.current.style.left = pct
+        const ratio = Math.min(Math.max(el.currentTime / el.duration, 0), 1)
+        if (playedBar.current) playedBar.current.style.transform = `translateY(-50%) scaleX(${ratio})`
+        if (thumb.current) thumb.current.style.transform = `translateX(${ratio * 100}%)`
       }
       frame = requestAnimationFrame(tick)
     }
     frame = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(frame)
-  }, [playing])
+  }, [playing, showControls])
 
   useEffect(() => {
     const onFull = () => setFull(document.fullscreenElement === box.current)
@@ -140,8 +144,6 @@ export function VideoPlayer({ src }: { src: string }) {
     return { x, t: r.width ? (x / r.width) * duration : 0 }
   }
 
-  const played = duration ? (time / duration) * 100 : 0
-  const showControls = !playing || awake || !!hover
   const canPip = typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled
 
   if (failed)
@@ -235,9 +237,11 @@ export function VideoPlayer({ src }: { src: string }) {
             }
           }}
         >
-          <span className="video-buffered" style={{ width: `${buffered}%` }} />
-          <span ref={playedBar} className="video-played" style={{ width: `${played}%` }} />
-          <span ref={thumb} className="video-thumb" style={{ left: `${played}%` }} />
+          <span className="video-buffered" style={{ transform: `translateY(-50%) scaleX(${bufferedRatio})` }} />
+          <span ref={playedBar} className="video-played" style={{ transform: `translateY(-50%) scaleX(${playedRatio})` }} />
+          <span ref={thumb} className="video-thumb-pos" style={{ transform: `translateX(${playedRatio * 100}%)` }}>
+            <span className="video-thumb" />
+          </span>
           {hover && duration > 0 && (
             <span className="video-tip" style={{ left: hover.x }}>
               {clock(hover.t)}

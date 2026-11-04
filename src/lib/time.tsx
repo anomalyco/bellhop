@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from "react"
+import { memo, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
 // One shared minute ticker re-renders every relative time on the page.
 let minute = Date.now()
@@ -34,16 +34,17 @@ export function relative(iso: string, now = Date.now()) {
   return `on ${(date.getFullYear() === new Date(now).getFullYear() ? short : long).format(date)}`
 }
 
-export function Time({ iso }: { iso: string }) {
+export const Time = memo(function Time({ iso }: { iso: string }) {
   const now = useSyncExternalStore(subscribe, () => minute)
   // A freshly mounted time should not lag the shared minute tick.
   const [mountedAt] = useState(Date.now)
+  const title = useMemo(() => full.format(new Date(iso)), [iso])
   return (
-    <time className="time" dateTime={iso} title={full.format(new Date(iso))}>
+    <time className="time" dateTime={iso} title={title}>
       {relative(iso, Math.max(now, mountedAt))}
     </time>
   )
-}
+})
 
 /** Re-renders when `iso` passes, e.g. to hide an expired activity. Returns whether it is still in the future. */
 export function useUntil(iso: string | null | undefined) {

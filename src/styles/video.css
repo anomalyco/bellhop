@@ -125,23 +125,25 @@
 .video-played {
   position: absolute;
   top: 50%;
+  right: 0;
   left: 0;
   height: 3px;
   border-radius: var(--radius-full);
   transform: translateY(-50%);
+  transform-origin: left center;
   transition: height 120ms ease-out;
-  will-change: width;
 }
 .video-track::before {
   content: "";
-  right: 0;
   background: rgb(255 255 255 / 0.16);
 }
 .video-buffered {
   background: rgb(255 255 255 / 0.3);
+  will-change: transform;
 }
 .video-played {
   background: #fff;
+  will-change: transform;
 }
 .video-track:hover::before,
 .video-track:hover .video-buffered,
@@ -150,9 +152,19 @@
 .video-track:focus-visible .video-played {
   height: 5px;
 }
-.video-thumb {
+.video-thumb-pos {
   position: absolute;
   top: 50%;
+  right: 0;
+  left: 0;
+  height: 0;
+  will-change: transform;
+  pointer-events: none;
+}
+.video-thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 11px;
   height: 11px;
   background: #fff;

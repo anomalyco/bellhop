@@ -116,8 +116,8 @@
   cursor: pointer;
 }
 .header-user-placeholder {
-  width: 24px;
-  height: 24px;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* Page */
@@ -593,6 +593,10 @@ a.box-row:hover {
 .issue-list {
   display: grid;
   margin: 0 -12px;
+  transition: opacity 120ms ease-out;
+}
+.issue-list[data-pending] {
+  opacity: 0.6;
 }
 .issue-row {
   position: relative;
@@ -1086,6 +1090,9 @@ a.box-row:hover {
 .markdown-plain {
   white-space: pre-wrap;
 }
+.video-slot {
+  display: block;
+}
 
 /* Human check (Turnstile, only visible when it needs a click) */
 .human-check {
@@ -1167,9 +1174,16 @@ a.box-row:hover {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
   margin: 8px 0 0;
   color: var(--fg-muted);
   font-size: var(--text-ui);
+}
+.report-by > span {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .report-by .actor-name {
   color: var(--fg);
@@ -2188,7 +2202,7 @@ button.prop:hover,
   .app-nav .nav-label {
     display: none;
   }
-  .header[data-app] .spacer {
+  .header[data-app]:has(.app-nav) .spacer {
     display: none;
   }
   .page {

@@ -1,15 +1,15 @@
 import { useEffect, type ReactNode } from "react"
-import { Link, useLocation } from "wouter"
+import { useLocation } from "wouter"
 import type { AppDetail, Me } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { useResource } from "../lib/cache"
+import { setFavicon } from "../lib/favicon"
+import { appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
 import { UserAvatar } from "./Actor"
 import { IssueOpenIcon, SettingsIcon } from "./icons"
 import { Menu, MenuHeader, MenuItem } from "./Menu"
 import { AppIcon, Counter, Logo } from "./primitives"
-import { setFavicon } from "../lib/favicon"
-import { appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
-import { SiteLink } from "./SiteLink"
+import { AppLink, SiteLink } from "./SiteLink"
 
 export function useMe() {
   return useResource<Me>(keys.me, api.me, 30_000)
@@ -19,10 +19,45 @@ export function useApp(slug: string) {
   return useResource<AppDetail>(keys.app(slug), () => api.app(slug), 10_000)
 }
 
+interface CachedAppMeta {
+  slug: string
+  name: string
+  icon_url: string | null
+  open: number
+}
+
+const appMetaKey = (slug: string) => `bh_app:${slug}`
+
+function readCachedApp(slug: string): CachedAppMeta | null {
+  try {
+    const raw = localStorage.getItem(appMetaKey(slug))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<CachedAppMeta>
+    if (typeof parsed.name !== "string" || typeof parsed.open !== "number") return null
+    return { slug, name: parsed.name, icon_url: parsed.icon_url ?? null, open: parsed.open }
+  } catch {
+    return null
+  }
+}
+
+function writeCachedApp(app: AppDetail) {
+  try {
+    localStorage.setItem(appMetaKey(app.slug), JSON.stringify({ name: app.name, icon_url: app.icon_url, open: app.counts.open }))
+  } catch {
+    // Ignore storage quota or privacy mode errors.
+  }
+}
+
 function UserMenu() {
   const { data: me } = useMe()
   const [, navigate] = useLocation()
-  if (!me) return <span className="header-user-placeholder" />
+  if (!me) {
+    return (
+      <span className="btn header-user-placeholder" data-variant="default" aria-hidden="true">
+        Sign in
+      </span>
+    )
+  }
   if (!me.user) {
     return (
       <SiteLink href={signInHref()} className="btn" data-variant="default">
@@ -72,16 +107,27 @@ function UserMenu() {
   )
 }
 
-export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: string }; tab?: "issues" | "settings" }) {
+export function Header({
+  app,
+  tab,
+  pendingApp,
+}: {
+  app?: AppDetail | CachedAppMeta | { slug: string; name: string }
+  tab?: "issues" | "settings"
+  pendingApp?: boolean
+}) {
   const detail = app && "counts" in app ? app : null
+  const iconUrl = detail ? detail.icon_url : app && "icon_url" in app ? app.icon_url : null
+  const openCount = detail ? detail.counts.open : app && "open" in app ? app.open : null
+  const inApp = !!app || !!pendingApp
   return (
-    <header className="header" data-app={app ? "" : undefined}>
+    <header className="header" data-app={inApp ? "" : undefined}>
       <div className="header-inner">
         <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
-          {detail?.icon_url ? (
+          {iconUrl ? (
             // An app with its own icon leads with it; Bellhop stays as a quiet word beside it.
             <span className="logo" data-app-icon>
-              <AppIcon src={detail.icon_url} size={22} />
+              <AppIcon src={iconUrl} size={22} />
               <span className="logo-word">Bellhop</span>
             </span>
           ) : (
@@ -93,32 +139,28 @@ export function Header({ app, tab }: { app?: AppDetail | { slug: string; name: s
             <span className="header-sep" aria-hidden="true">
               /
             </span>
-            <Link href={appPath(app.slug)} className="header-app">
+            <AppLink slug={app.slug} href={appPath(app.slug)} className="header-app">
               {app.name}
-            </Link>
+            </AppLink>
           </>
         )}
         {app && (
           <nav className="app-nav" aria-label={app.name}>
             {/* The Issues tab renders before the app loads (its count held invisibly) so the header doesn't shift */}
-            <Link href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
+            <AppLink slug={app.slug} href={appPath(app.slug)} aria-current={tab === "issues" ? "page" : undefined}>
               <IssueOpenIcon size={14} />
-              Issues <Counter>{detail ? detail.counts.open : <span className="counter-pending">0</span>}</Counter>
-            </Link>
-            {detail && (
-              <>
-                {detail.role && (
-                  <Link
-                    href={appPath(app.slug, "/settings")}
-                    aria-current={tab === "settings" ? "page" : undefined}
-                    aria-label="Settings"
-                    onPointerEnter={() => void import("../routes/Settings")}
-                  >
-                    <SettingsIcon size={14} />
-                    <span className="nav-label">Settings</span>
-                  </Link>
-                )}
-              </>
+              Issues <Counter>{openCount !== null ? openCount : <span className="counter-pending">0</span>}</Counter>
+            </AppLink>
+            {detail?.role && (
+              <AppLink
+                slug={app.slug}
+                href={appPath(app.slug, "/settings")}
+                aria-current={tab === "settings" ? "page" : undefined}
+                aria-label="Settings"
+              >
+                <SettingsIcon size={14} />
+                <span className="nav-label">Settings</span>
+              </AppLink>
             )}
           </nav>
         )}
@@ -138,9 +180,23 @@ export function Page({ children, narrow }: { children: ReactNode; narrow?: boole
 }
 
 /** Header with the Issues/Settings nav for every page inside an application. */
-export function AppLayout({ slug, tab, children }: { slug: string; tab: "issues" | "settings"; children: (app: AppDetail) => ReactNode }) {
+export function AppLayout({
+  slug,
+  tab,
+  loading,
+  children,
+}: {
+  slug: string
+  tab: "issues" | "settings"
+  loading?: ReactNode
+  children: (app: AppDetail) => ReactNode
+}) {
   const { data: app, error } = useApp(slug)
-  const icon = app?.icon_url ?? null
+  const cached = app ? null : readCachedApp(slug)
+  const icon = app?.icon_url ?? cached?.icon_url ?? null
+  useEffect(() => {
+    if (app) writeCachedApp(app)
+  }, [app])
   useEffect(() => {
     setFavicon(icon)
     return () => setFavicon(null)
@@ -148,8 +204,8 @@ export function AppLayout({ slug, tab, children }: { slug: string; tab: "issues"
   if (!app) {
     return (
       <>
-        <Header app={{ slug, name: slug }} tab={tab} />
-        {error ? <ErrorPage error={error} /> : null}
+        <Header app={cached ?? undefined} pendingApp={!cached} tab={tab} />
+        {error ? <ErrorPage error={error} /> : (loading ?? null)}
       </>
     )
   }

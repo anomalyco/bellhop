@@ -1,7 +1,9 @@
 import { StrictMode, Suspense, lazy } from "react"
 import { createRoot } from "react-dom/client"
 import { Route, Switch } from "wouter"
-import { loadConfig, loadMe } from "./lib/api"
+import { api, keys, loadMe } from "./lib/api"
+import { load } from "./lib/cache"
+import { listKey, parseQuery } from "./lib/issues"
 import { appPath, hostSlug, onHome } from "./lib/site"
 import { Home } from "./routes/Home"
 import { IssuePage } from "./routes/IssuePage"
@@ -27,12 +29,32 @@ const moved = onHome && first && !homePages.has(first) ? appPath(first, `/${rest
 if (moved) window.location.replace(moved + window.location.search + window.location.hash)
 else start()
 
+function warmInitialRoute() {
+  const slug = hostSlug ?? (!onHome && first && !homePages.has(first) ? decodeURIComponent(first) : null)
+  if (!slug) return
+  const subpath = hostSlug ? window.location.pathname : `/${rest.join("/")}`
+  if (subpath === "/_design") return
+  load(keys.app(slug), () => api.app(slug)).catch(() => {})
+  if (subpath === "/" || subpath === "") {
+    const q = new URLSearchParams(window.location.search).get("q") ?? "is:open"
+    const filter = parseQuery(q)
+    load(listKey(slug, filter), () => api.issues(slug, { state: filter.state, label: filter.label, q: filter.text })).catch(() => {})
+    return
+  }
+  const issueMatch = /^\/issues\/([1-9]\d*)$/.exec(subpath)
+  if (issueMatch) {
+    const n = Number(issueMatch[1])
+    load(keys.issue(slug, n), () => api.issue(slug, n)).catch(() => {})
+    void loadMarkdown()
+    return
+  }
+  if (subpath === "/new") void loadMarkdown()
+}
+
 function start() {
+  // Fires first so a brand-new browser mints one bh_guest cookie before the remaining boot fetches go out.
   loadMe().catch(() => {})
-  loadConfig().catch(() => {})
-  // The parser chunk is small; fetch it once the first paint is done so issue pages render markdown at once.
-  const idle = window.requestIdleCallback ?? ((fn: () => void) => setTimeout(fn, 300))
-  idle(() => void loadMarkdown())
+  warmInitialRoute()
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
       <Suspense fallback={null}>{hostSlug ? <AppRoutes slug={hostSlug} /> : <PathRoutes />}</Suspense>

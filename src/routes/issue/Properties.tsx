@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from "react"
-import { Link } from "wouter"
 import type { Actor, AppDetail, AppSettings, Issue, IssueStatus, Relation, RelationType, SystemInfo } from "../../../shared/api"
 import { api, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
@@ -9,6 +8,7 @@ import { ActorAvatar, actorName } from "../../ui/Actor"
 import { StatusIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Button } from "../../ui/primitives"
+import { AppLink } from "../../ui/SiteLink"
 
 type Trigger = Parameters<typeof Menu>[0]["trigger"]
 
@@ -98,9 +98,9 @@ export function RelationList({ app, issue, onRemove }: { app: AppDetail; issue: 
                 <span className="state-icon" data-state={visibleState(r.issue)}>
                   <G size={14} />
                 </span>
-                <Link href={appPath(app.slug, `/issues/${r.issue.number}`)} className="relation-link">
+                <AppLink slug={app.slug} href={appPath(app.slug, `/issues/${r.issue.number}`)} className="relation-link">
                   {r.issue.title} <span className="mono relation-number">#{r.issue.number}</span>
-                </Link>
+                </AppLink>
                 {onRemove && (
                   <button type="button" className="relation-remove" aria-label={`Remove relation to #${r.issue.number}`} onClick={() => onRemove(r)}>
                     <XIcon size={12} />
@@ -200,7 +200,7 @@ export function LabelMenu({ app, selected, onToggle, trigger }: { app: AppDetail
             ))}
             {shown.length === 0 && (
               <div className="menu-empty">
-                No labels. {app.role && <Link href={appPath(app.slug, "/settings/labels")}>Manage labels</Link>}
+                No labels. {app.role && <AppLink slug={app.slug} href={appPath(app.slug, "/settings/labels")}>Manage labels</AppLink>}
               </div>
             )}
           </div>

@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react"
-import { Link } from "wouter"
 import type { Activity, Actor, Attachment, CloseReason, IssueEvent, IssueRef, IssueStatus, Label as LabelType, Relation } from "../../../shared/api"
 import { visibleState } from "../../lib/issues"
 import { appPath } from "../../lib/site"
@@ -9,6 +8,7 @@ import { ActorAvatar, ActorName, actorName } from "../../ui/Actor"
 import { ChevronDownIcon, ImageIcon, LinkIcon, PaperclipIcon, PersonIcon, StatusIcon, TagIcon, VideoIcon } from "../../ui/icons"
 import { Markdown } from "../../ui/Markdown"
 import { Dots, Label } from "../../ui/primitives"
+import { AppLink } from "../../ui/SiteLink"
 import type { MessageEntry } from "./model"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
@@ -56,7 +56,7 @@ export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
 
 function IssueLink({ slug, issue }: { slug: string; issue: IssueRef }) {
   return (
-    <Link href={appPath(slug, `/issues/${issue.number}`)} className="event-issue">
+    <AppLink slug={slug} href={appPath(slug, `/issues/${issue.number}`)} className="event-issue">
       <span className="state-icon" data-state={visibleState(issue)}>
         {(() => {
           const G = StatusIcon[visibleState(issue)]
@@ -64,7 +64,7 @@ function IssueLink({ slug, issue }: { slug: string; issue: IssueRef }) {
         })()}
       </span>
       <span className="event-issue-title">{issue.title}</span> <span className="mono">#{issue.number}</span>
-    </Link>
+    </AppLink>
   )
 }
 

@@ -32,7 +32,7 @@ function entry(key: string): Entry {
 }
 
 function emit(e: Entry) {
-  e.snapshot = { data: e.data, error: e.error, loading: !!e.promise }
+  e.snapshot = { data: e.data, error: e.error, loading: !!e.promise && e.data === undefined }
   for (const l of e.listeners) l()
 }
 
@@ -47,11 +47,15 @@ export function load<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
   const promise = fetcher().then(
     (data) => {
       if (e.promise === promise) {
-        e.data = data
-        e.error = undefined
+        const unchanged =
+          e.data !== undefined && e.error === undefined && !e.snapshot.loading && JSON.stringify(data) === JSON.stringify(e.data)
         e.at = Date.now()
         e.promise = undefined
-        emit(e)
+        if (!unchanged) {
+          e.data = data
+          e.error = undefined
+          emit(e)
+        }
       }
       return data
     },
@@ -65,7 +69,7 @@ export function load<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
     },
   )
   e.promise = promise
-  emit(e)
+  if (e.data === undefined) emit(e)
   return promise
 }
 
