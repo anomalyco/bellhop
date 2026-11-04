@@ -671,9 +671,9 @@ a.box-row:hover {
   text-overflow: ellipsis;
 }
 .issue-list {
+  position: relative;
   display: grid;
   margin: 0 -12px;
-  transition: opacity 120ms ease-out;
 }
 .issue-list[data-pending] {
   opacity: 0.6;
@@ -1235,6 +1235,7 @@ a.box-row:hover {
   opacity: 0;
   pointer-events: none;
   transform: translateX(-50%);
+  transform-origin: 50% 100%;
 }
 .human-check[data-visible] {
   opacity: 1;
@@ -1542,9 +1543,6 @@ button.prop:hover,
 .side-toggle:hover {
   color: var(--fg);
 }
-.side-toggle .icon {
-  transition: transform 120ms var(--ease);
-}
 .side-toggle[aria-expanded="true"] .icon {
   transform: rotate(180deg);
 }
@@ -1598,7 +1596,6 @@ button.prop:hover,
 }
 .mobile-details-toggle .icon {
   color: var(--icon-muted);
-  transition: transform 120ms var(--ease);
 }
 .mobile-details[data-open] .mobile-details-toggle .icon {
   transform: rotate(180deg);
@@ -1845,7 +1842,6 @@ button.prop:hover,
 }
 .burst-toggle > .icon {
   flex: none;
-  transition: transform 120ms var(--ease);
 }
 .burst[data-open] .burst-toggle > .icon {
   transform: rotate(180deg);
@@ -1949,7 +1945,6 @@ button.prop:hover,
   background: var(--layer-1);
   border-radius: var(--radius);
   box-shadow: var(--elevation-floating);
-  animation: name-prompt-in var(--spring-fast) var(--spring);
 }
 .name-prompt[data-sheet] {
   left: 8px;
@@ -1957,35 +1952,10 @@ button.prop:hover,
   padding: 20px 16px max(16px, env(safe-area-inset-bottom));
   border-radius: var(--radius-xl);
   box-shadow: var(--elevation-overlay);
-  animation-name: name-prompt-sheet-in;
 }
 .name-prompt[data-closing],
 .name-prompt-scrim[data-closing] {
   pointer-events: none;
-  opacity: 0;
-  transition: opacity 250ms var(--spring);
-}
-@keyframes name-prompt-in {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-}
-@keyframes name-prompt-sheet-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .name-prompt,
-  .name-prompt[data-sheet] {
-    animation: fade-in 150ms ease-out;
-  }
-  .name-prompt[data-closing],
-  .name-prompt-scrim[data-closing] {
-    transition-duration: 150ms;
-  }
 }
 .name-prompt-head {
   display: grid;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { useLocation } from "wouter"
 import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Me, Relation } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
@@ -20,6 +21,7 @@ import {
   storeIssue,
 } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { flip, ghost, markArrival } from "../lib/motion"
 import { appPath, isAbsolute } from "../lib/site"
 import { loadMarkdown } from "../ui/Markdown"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
@@ -73,7 +75,15 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const [gone, setGone] = useState(() => isDeleted(slug, number))
   // Moved to another workspace while open: offer the new place rather than pulling the page away.
   const [movedTo, setMovedTo] = useState<{ slug: string; number: number; url: string } | null>(null)
-  useEffect(() => onDeleted(() => setGone(isDeleted(slug, number))), [slug, number])
+  useEffect(
+    () =>
+      onDeleted(() => {
+        // The whole page gives way: the old one blurs out from where it was while the notice arrives
+        if (isDeleted(slug, number)) ghost(document.querySelector("main.page"), { blur: 4, into: document.body })
+        setGone(isDeleted(slug, number))
+      }),
+    [slug, number],
+  )
 
   useEffect(() => {
     if (issueId && helloActivity.current !== undefined) {
@@ -97,9 +107,16 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
         case "issue.updated":
           applySummary(slug, event.issue)
           break
-        case "timeline.added":
-          appendTimeline(slug, number, event.item)
+        case "timeline.added": {
+          // Someone else's new message or event rises into the thread; the viewer's own posts land instantly
+          const item = event.item
+          const by = item.kind === "comment" ? item.comment.author : item.event.actor
+          const own = !!by && !!me && by.id === (me.user ? me.user.id : me.guest.id)
+          const echo = item.kind === "comment" && pending.some((p) => p.body === item.comment.body)
+          if (!own && !echo) markArrival(item.kind === "comment" ? item.comment.id : item.event.id)
+          appendTimeline(slug, number, item)
           break
+        }
         case "activity":
           applyActivity(slug, event.issue_id, event.activity)
           break
@@ -113,12 +130,16 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
           replaceComment(slug, event.issue_id, event.comment)
           break
         case "comment.deleted":
-          removeComment(slug, event.issue_id, event.comment_id)
+          // It fades where it was while the messages below slide up into its place
+          flip(document.querySelector<HTMLElement>(".thread"), () => flushSync(() => removeComment(slug, event.issue_id, event.comment_id)), {
+            selector: ":scope > [data-key], .group-msg[data-key]",
+          })
           break
         case "issue.deleted":
           removeIssue(slug, event.issue_id, event.number)
           break
         case "issue.moved":
+          ghost(document.querySelector("main.page"), { blur: 4, into: document.body })
           dropIssue(slug, event.issue_id, number)
           setMovedTo(event.to)
           break
@@ -129,8 +150,18 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     },
   )
 
-  if (gone || (error instanceof ApiFailure && (error.status === 410 || error.code === "deleted"))) return <DeletedIssue slug={slug} number={number} />
-  if (movedTo) return <MovedIssue number={number} to={movedTo} />
+  if (gone || (error instanceof ApiFailure && (error.status === 410 || error.code === "deleted")))
+    return (
+      <div className={gone ? "motion-replace" : undefined}>
+        <DeletedIssue slug={slug} number={number} />
+      </div>
+    )
+  if (movedTo)
+    return (
+      <div className="motion-replace">
+        <MovedIssue number={number} to={movedTo} />
+      </div>
+    )
   if (error instanceof ApiFailure && error.code === "moved" && error.movedTo) return <MovedIssue number={number} to={error.movedTo} redirect />
   if (!issue) {
     if (error) return <ErrorPage error={error} />

@@ -25,6 +25,8 @@ import { Dots, Label } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
 import type { MessageEntry } from "./model"
 import { CommentBody, reasonText, type CommentContext } from "./Moderation"
+import { DiagnosticsChip } from "../../ui/features/Diagnostics"
+import { arrivalRef } from "../../lib/motion"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
 export function MessageGroup({
@@ -43,7 +45,7 @@ export function MessageGroup({
   internal?: boolean
 }) {
   return (
-    <section className="group" data-internal={internal || undefined}>
+    <section className="group" data-internal={internal || undefined} data-key={`group:${messages[0]!.key}`} ref={arrivalRef(messages[0]!.key)}>
       <header className="group-head">
         <span className="group-avatar" data-reporter={byAuthor || undefined} title={byAuthor ? `${actorName(author)} opened this issue` : undefined}>
           <ActorAvatar actor={author} size={20} />
@@ -52,22 +54,28 @@ export function MessageGroup({
         <span className="group-time">
           <Time iso={messages[0]!.createdAt} />
         </span>
+        {messages[0]!.comment?.via === "email" && <ViaEmail />}
         {internal && (
           <span className="note-label">
             Internal note<span className="note-label-more"> · only the team and agents see this</span>
           </span>
         )}
       </header>
-      {messages.map((m) => {
-        const loose = m.attachments.filter((a) => !m.body.includes(a.url))
+      {messages.map((m, i) => {
+        // Report metadata on this comment: a Diagnostics chip instead of its logs as loose files.
+        const diagnostics = m.comment ? ctx.issue.metadata?.find((d) => d.attached_to?.comment_id === m.comment!.id) : undefined
+        const logs = new Set(diagnostics?.logs.map((l) => l.id))
+        const loose = m.attachments.filter((a) => !m.body.includes(a.url) && !logs.has(a.id))
         const content = (
           <>
+            {i > 0 && m.comment?.via === "email" && <ViaEmail />}
             <Markdown source={m.body} slug={slug} mentions={m.comment?.mentions} />
             {loose.length > 0 && <AttachmentList attachments={loose} />}
+            {diagnostics && <DiagnosticsChip metadata={diagnostics} />}
           </>
         )
         return (
-          <div key={m.key} className="group-msg" data-pending={m.note ? "" : undefined}>
+          <div key={m.key} className="group-msg" data-pending={m.note ? "" : undefined} data-key={m.key} ref={i > 0 ? arrivalRef(m.key) : undefined}>
             {m.comment ? (
               <CommentBody ctx={ctx} comment={m.comment}>
                 {content}
@@ -80,6 +88,15 @@ export function MessageGroup({
         )
       })}
     </section>
+  )
+}
+
+/** Written by replying to a notification email. */
+function ViaEmail() {
+  return (
+    <span className="via-email" title="Posted by replying to an email">
+      via email
+    </span>
   )
 }
 
@@ -273,7 +290,7 @@ export function EventLine({ slug, event, authorTier }: { slug: string; event: Is
   // still matches, otherwise the badge stays neutral.
   const color = rule && authorTier?.id === rule.tier_id ? authorTier.color : "878d96"
   return (
-    <div className="event" data-tone={tone} data-rule={rule ? "" : undefined}>
+    <div className="event" data-tone={tone} data-rule={rule ? "" : undefined} data-key={event.id} ref={arrivalRef(event.id)}>
       <span className="event-icon">{icon}</span>
       <span className="event-text">
         {rule ? (

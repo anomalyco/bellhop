@@ -43,16 +43,9 @@
   border-radius: var(--radius-full);
   box-shadow: var(--elevation-floating);
   cursor: pointer;
-  animation: feed-newer-in 180ms var(--ease);
 }
 .feed-newer .icon {
   color: inherit;
-}
-@keyframes feed-newer-in {
-  from {
-    opacity: 0;
-    transform: translateY(-6px);
-  }
 }
 
 /* Rail */
@@ -175,8 +168,3 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .feed-newer {
-    animation: none;
-  }
-}

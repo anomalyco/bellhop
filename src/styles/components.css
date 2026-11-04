@@ -25,10 +25,6 @@
   cursor: pointer;
   user-select: none;
   text-decoration: none;
-  transition:
-    background-color 85ms ease-out,
-    color 85ms ease-out,
-    opacity 85ms ease-out;
 }
 a.btn:hover {
   color: var(--fg);
@@ -568,19 +564,35 @@ img.avatar[data-photo] {
   border: 0;
   border-radius: var(--radius);
   cursor: pointer;
-  transition: color 85ms ease-out;
 }
 .segmented > button:hover,
 .segmented > a:hover {
   color: var(--fg);
   text-decoration: none;
 }
+/* The selected option's backdrop is its ::before, so it can slide from one option to the next (motion.ts) */
+.segmented {
+  isolation: isolate;
+}
+.segmented > button,
+.segmented > a {
+  position: relative;
+}
 .segmented > [aria-pressed="true"],
 .segmented > [aria-current="page"] {
   color: var(--fg);
   font-weight: var(--weight-medium);
+}
+.segmented > [aria-pressed="true"]::before,
+.segmented > [aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
   background: var(--bg);
+  border-radius: inherit;
   box-shadow: var(--hairline-strong);
+  transform-origin: 0 50%;
 }
 .segmented > :not([aria-pressed="true"], [aria-current="page"]) .state-icon {
   color: var(--icon-muted);
@@ -654,7 +666,6 @@ img.avatar[data-photo] {
   background: var(--layer-1);
   border-radius: var(--radius);
   box-shadow: var(--elevation-floating);
-  animation: menu-in 120ms ease-out;
 }
 .menu[data-sheet] {
   left: 8px;
@@ -666,37 +677,12 @@ img.avatar[data-photo] {
   border-radius: var(--radius-xl);
   box-shadow: var(--elevation-overlay);
   font-size: var(--text-body);
-  animation: sheet-in 180ms var(--ease);
 }
 .menu-scrim {
   position: fixed;
   inset: 0;
   z-index: 99;
   background: var(--scrim);
-  animation: fade-in 120ms ease-out;
-}
-@keyframes menu-in {
-  from {
-    opacity: 0;
-    transform: scale(0.97);
-  }
-}
-@keyframes sheet-in {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-}
-@keyframes fade-in {
-  from {
-    opacity: 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .menu,
-  .menu-scrim {
-    animation: none;
-  }
 }
 .menu-item {
   display: flex;

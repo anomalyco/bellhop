@@ -1,10 +1,12 @@
 import { memo, useCallback, useEffect, useRef, useState, type FormEvent } from "react"
+import { flushSync } from "react-dom"
 import { useLocation, useSearch } from "wouter"
 import type { AppDetail, IssueList, IssueSort, IssueSummary, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, useResource } from "../lib/cache"
 import { applyActivity, applyActorUpdate, applySummary, dropIssue, fetchList, formatQuery, listKey, parseQuery, removeIssue, visibleState, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { flip } from "../lib/motion"
 import { appPath } from "../lib/site"
 import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, TierBadge, actorName } from "../ui/Actor"
@@ -15,6 +17,7 @@ import { AppLayout, Page } from "../ui/Shell"
 import { AppLink } from "../ui/SiteLink"
 import { NoClosed, NoIssues, NoResults } from "../ui/onboarding/EmptyStates"
 import { SetupChecklist, useSetupChecklistSettled } from "../ui/onboarding/SetupChecklist"
+import { MineFilter } from "../ui/features/QuickLinks"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -50,6 +53,7 @@ function IssuesLoading({ slug }: { slug: string }) {
           <input aria-label="Search issues" defaultValue={q} placeholder="Search issues" spellCheck={false} readOnly />
         </div>
         <div className="list-label">
+          <MineFilter filter={filter} disabled />
           <button type="button" className="btn list-sort" data-variant="default" disabled>
             <SortIcon size={14} />
             <span className="filter-text list-sort-text">{sortLabel[filter.sort ?? "newest"]}</span>
@@ -133,6 +137,10 @@ function IssuesList({ app }: { app: AppDetail }) {
   else if (lastList.current?.slug !== slug) lastList.current = null
   const shown = data ?? (error ? undefined : lastList.current?.list)
   const pending = !data && !error && !!shown
+  // Rows that replace the skeleton fade in; rows already cached at first paint are simply there.
+  const hadSkeleton = useRef(false)
+  if (!shown && !error) hadSkeleton.current = true
+  const listEl = useRef<HTMLElement>(null)
 
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<string | null>(null)
@@ -153,12 +161,17 @@ function IssuesList({ app }: { app: AppDetail }) {
   useLive(
     `/api/live/apps/${encodeURIComponent(slug)}`,
     (event: LiveEvent) => {
-      if (event.type === "issue.created") applySummary(slug, event.issue, true)
-      else if (event.type === "issue.updated") applySummary(slug, event.issue)
-      else if (event.type === "activity") applyActivity(slug, event.issue_id, event.activity)
-      else if (event.type === "actor.updated") applyActorUpdate(slug, event.previous_id, event.actor)
-      else if (event.type === "issue.deleted") removeIssue(slug, event.issue_id, event.number)
-      else if (event.type === "issue.moved") dropIssue(slug, event.issue_id)
+      if (event.type === "activity") return applyActivity(slug, event.issue_id, event.activity)
+      if (event.type === "actor.updated") return applyActorUpdate(slug, event.previous_id, event.actor)
+      // Someone else's change to the list: new rows rise in, rows that leave fade out, and the rest slide.
+      flip(listEl.current, () =>
+        flushSync(() => {
+          if (event.type === "issue.created") applySummary(slug, event.issue, true)
+          else if (event.type === "issue.updated") applySummary(slug, event.issue)
+          else if (event.type === "issue.deleted") removeIssue(slug, event.issue_id, event.number)
+          else if (event.type === "issue.moved") dropIssue(slug, event.issue_id)
+        }),
+      )
     },
     (reconnected) => {
       // Events sent while we were away are gone; refetch what's on screen.
@@ -218,6 +231,7 @@ function IssuesList({ app }: { app: AppDetail }) {
           onClear={() => go({ ...filter, label: "", text: "" })}
         />
         <div className="list-label">
+          <MineFilter filter={filter} onChange={go} />
           <SortMenu value={filter.sort ?? "newest"} onChange={(sort) => go({ ...filter, sort: sort === "newest" ? undefined : sort })} />
           <LabelFilter app={app} value={filter.label} onChange={(label) => go({ ...filter, label })} />
         </div>
@@ -227,7 +241,14 @@ function IssuesList({ app }: { app: AppDetail }) {
         </AppLink>
       </div>
 
-      <section className="issue-list" aria-label="Issues" data-pending={pending || undefined} aria-busy={pending || undefined}>
+      <section
+        ref={listEl}
+        className="issue-list"
+        aria-label="Issues"
+        data-pending={pending || undefined}
+        data-reveal={(hadSkeleton.current && !!shown) || undefined}
+        aria-busy={pending || undefined}
+      >
         {!!error && !shown && <div className="list-empty">{errorMessage(error)}</div>}
         {!shown && !error && <SkeletonRows />}
         {/* Inside the list, where the skeleton was, so it never pushes painted rows down */}
@@ -351,7 +372,7 @@ export const IssueRow = memo(function IssueRow({
   const active = useUntil(issue.activity?.expires_at)
   const href = appPath(slug, `/issues/${issue.number}`)
   return (
-    <div className="issue-row">
+    <div className="issue-row" data-key={issue.id}>
       <StateIcon state={visibleState(issue)} />
       <div className="issue-row-main">
         {workspace && (

@@ -10,6 +10,9 @@ import { IssueOpenIcon, SettingsIcon } from "./icons"
 import { Menu, MenuHeader, MenuItem } from "./Menu"
 import { AppIcon, Counter, Logo } from "./primitives"
 import { AppLink, SiteLink } from "./SiteLink"
+import { InvitationDot } from "./features/Invitations"
+import "../lib/motion"
+import "../styles/motion.css"
 
 export function useMe() {
   return useResource<Me>(keys.me, api.me, 30_000)
@@ -73,6 +76,7 @@ function UserMenu() {
       trigger={(props) => (
         <button type="button" className="header-avatar" aria-label="Account" {...props}>
           <UserAvatar user={user} size={24} />
+          <InvitationDot />
         </button>
       )}
     >
@@ -86,6 +90,8 @@ function UserMenu() {
             [
               ["Your workspaces", homeUrl("/workspaces")],
               ["Agents", homeUrl("/agents")],
+              ["Your reports", homeUrl("/reports")],
+              ["Notifications", homeUrl("/settings/notifications")],
             ] as const
           ).map(([label, href]) => (
             <MenuItem

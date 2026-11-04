@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { createPortal } from "react-dom"
+import { reduced, SPRING_25 } from "../lib/motion"
 
 /** Phones get a bottom sheet instead of an anchored popover. */
 const sheetQuery = "(max-width: 640px)"
@@ -9,7 +10,8 @@ const gap = 4
 /**
  * An anchored overlay rendered into document.body, so no scrolling or clipped ancestor can cut it off. It opens
  * below its trigger (above when there's more room there), stays inside the viewport, and closes on an outside
- * click, Escape, scroll or resize. Arrow keys move between items.
+ * click, Escape, scroll or resize. Arrow keys move between items. It appears on the next frame and fades only when
+ * it closes (a phone sheet slides up and drops back down); reopening mid-fade picks it straight back up.
  */
 export function Menu({
   trigger,
@@ -25,6 +27,8 @@ export function Menu({
   onOpenChange?: (open: boolean) => void
 }) {
   const [open, setOpen] = useState(false)
+  // On screen: from opening until its close fade has finished
+  const [mounted, setMounted] = useState(false)
   const [sheet, setSheet] = useState(false)
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" })
   const root = useRef<HTMLDivElement>(null)
@@ -35,6 +39,7 @@ export function Menu({
 
   const set = (next: boolean) => {
     setOpen(next)
+    if (next) setMounted(true)
     changed.current?.(next)
   }
 
@@ -68,11 +73,7 @@ export function Menu({
   }
 
   useLayoutEffect(() => {
-    if (!open) {
-      side.current = null
-      setStyle({ visibility: "hidden" })
-      return
-    }
+    if (!open) return
     place()
     const el = panel.current
     const observer = new ResizeObserver(() => place())
@@ -119,6 +120,26 @@ export function Menu({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, sheet])
 
+  // After closing: the panel stays (inert) until its fade (or the sheet's drop) ends, then goes
+  useEffect(() => {
+    if (open || !mounted) return
+    const el = panel.current
+    const done = () => {
+      setMounted(false)
+      side.current = null
+      setStyle({ visibility: "hidden" })
+    }
+    const onEnd = (e: TransitionEvent) => e.target === el && done()
+    el?.addEventListener("transitionend", onEnd)
+    // In case no transition runs (the first frames of a page, where motion is off)
+    const t = window.setTimeout(done, (reduced() ? 150 : sheet ? 200 : SPRING_25) + 400)
+    return () => {
+      el?.removeEventListener("transitionend", onEnd)
+      window.clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, mounted])
+
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return
     const items = [...(panel.current?.querySelectorAll<HTMLElement>("[role^=menuitem]:not([disabled])") ?? [])]
@@ -132,11 +153,19 @@ export function Menu({
   return (
     <div className="menu-root" ref={root} onKeyDown={onKeyDown}>
       {trigger({ onClick: () => set(!open), "aria-expanded": open, "aria-haspopup": "menu" })}
-      {open &&
+      {mounted &&
         createPortal(
           <>
-            {sheet && <div className="menu-scrim" aria-hidden="true" />}
-            <div className="menu" role="menu" ref={panel} data-sheet={sheet || undefined} style={sheet ? undefined : { width, ...style }}>
+            {sheet && <div className="menu-scrim" aria-hidden="true" data-closing={!open || undefined} />}
+            <div
+              className="menu"
+              role="menu"
+              ref={panel}
+              data-sheet={sheet || undefined}
+              data-closing={!open || undefined}
+              inert={!open || undefined}
+              style={sheet ? undefined : { width, ...style }}
+            >
               {children(() => close())}
             </div>
           </>,

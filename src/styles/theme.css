@@ -223,6 +223,11 @@
   --spring-fast: 296ms;
   --spring-medium: 355ms;
   --spring-slow: 473ms;
+  /* The same, named by spring duration: .25, .3 and .4 s with bounce 0 */
+  --spring-25: 296ms;
+  --spring-30: 355ms;
+  --spring-40: 473ms;
+  --fade: 150ms;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "OpenTUI Mono", "OpenTUI Mono Fallback", "OpenTUI Mono Fallback Consolas", ui-monospace, monospace;
@@ -241,6 +246,17 @@
   --weight-button: 530;
   --weight-semibold: 600;
   --weight-bold: 700;
+}
+/* Reduced motion: every spring becomes a short fade (motion.css drops the travel) */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --spring-fast: 150ms;
+    --spring-medium: 150ms;
+    --spring-slow: 150ms;
+    --spring-25: 150ms;
+    --spring-30: 150ms;
+    --spring-40: 150ms;
+  }
 }
 
 *,

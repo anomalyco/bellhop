@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import { useLocation, useSearch } from "wouter"
 import type { Activity, App, FeedApp, FeedIssue, FeedList, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, updateAll, useResource } from "../lib/cache"
 import { formatQuery, parseQuery, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { flip, SPRING_30 } from "../lib/motion"
+import { RailReports } from "../ui/features/QuickLinks"
 import { appPath } from "../lib/site"
 import { ArrowUpIcon, PlusIcon } from "../ui/icons"
 import { AppIcon, Button, StateIcon } from "../ui/primitives"
@@ -49,6 +52,9 @@ export function Feed() {
   if (data) last.current = data
   const shown = data ?? (error ? undefined : (last.current ?? undefined))
   const pending = !data && !error && !!shown
+  const hadSkeleton = useRef(false)
+  if (!shown && !error) hadSkeleton.current = true
+  const listEl = useRef<HTMLElement>(null)
 
   const [loadingMore, setLoadingMore] = useState(false)
   const [moreError, setMoreError] = useState<string | null>(null)
@@ -94,10 +100,18 @@ export function Feed() {
     },
   )
 
+  // The waiting issues join the top of the list: they drop in a few at a time and the rows below slide down.
   const showNewer = () => {
     const ids = new Set(newer.map((i) => i.id))
-    setData<FeedList>(key, (list) => (list ? { ...list, issues: [...[...newer].sort(byActivity), ...list.issues.filter((i) => !ids.has(i.id))] } : list))
-    setNewer([])
+    flip(
+      listEl.current,
+      () =>
+        flushSync(() => {
+          setData<FeedList>(key, (list) => (list ? { ...list, issues: [...[...newer].sort(byActivity), ...list.issues.filter((i) => !ids.has(i.id))] } : list))
+          setNewer([])
+        }),
+      { slide: SPRING_30, enterY: -4, stagger: 30 },
+    )
     window.scrollTo({ top: 0, behavior: "smooth" })
   }
 
@@ -166,7 +180,14 @@ export function Feed() {
               )}
             </div>
 
-            <section className="issue-list" aria-label="Public issues" data-pending={pending || undefined} aria-busy={pending || !shown || undefined}>
+            <section
+              ref={listEl}
+              className="issue-list"
+              aria-label="Public issues"
+              data-pending={pending || undefined}
+              data-reveal={(hadSkeleton.current && !!shown) || undefined}
+              aria-busy={pending || !shown || undefined}
+            >
               {!!error && !shown && <div className="list-empty">{errorMessage(error)}</div>}
               {!shown && !error && <SkeletonRows />}
               {shown &&
@@ -220,6 +241,7 @@ function Rail({ feedReady }: { feedReady: boolean }) {
   const publicApps = open ?? []
   return (
     <aside className="feed-rail" aria-label="Workspaces">
+      <RailReports />
       {signedIn && (
         <section className="rail-section">
           <div className="rail-head">

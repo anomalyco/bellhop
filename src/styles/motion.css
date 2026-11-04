@@ -1,0 +1,246 @@
+/* Motion, in one place. Springs are critically damped (bounce 0) and named by duration: --spring-25 / -30 / -40
+   (theme.css) with the --spring linear() curve. Only opacity, transform, scale and filter move, never layout.
+   - Hover: in instantly, out over 100 ms.
+   - Menus open on the next frame and fade only when they close; phone sheets slide up.
+   - Popovers grow from their trigger (scale .96 → 1).
+   - Removed items fade (scale .96, blur 3 px) while neighbours slide into the gap, and live arrivals rise 4 px;
+     both are WAAPI in src/lib/motion.ts.
+   - Whole-state replacements blur, scale and fade in.
+   - Nothing moves on the first paint (html[data-ready] is set two frames after load).
+   - Reduced motion keeps short fades only. */
+
+@supports not (transition-timing-function: linear(0, 1)) {
+  :root {
+    --spring: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+/* The first paint is already at rest */
+html:not([data-ready]) *,
+html:not([data-ready]) *::before,
+html:not([data-ready]) *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+/* Hover: the highlight lands the frame the pointer arrives and fades out over 100 ms */
+.btn,
+.menu-item,
+.rail-row,
+.prop,
+.settings-nav a,
+.app-nav a,
+.segmented > button,
+.segmented > a,
+a.box-row,
+.side-copy,
+.side-toggle,
+.burst-toggle,
+.guest-bar-link,
+.attachment,
+.tier-option,
+.mention-option,
+.issue-row-comments,
+.issue-row-app,
+.input-clear,
+.link-button {
+  transition:
+    background-color var(--dur-exit) ease-out,
+    color var(--dur-exit) ease-out,
+    box-shadow var(--dur-exit) ease-out,
+    opacity var(--dur-exit) ease-out;
+}
+:is(
+    .btn,
+    .menu-item,
+    .rail-row,
+    .prop,
+    .settings-nav a,
+    .app-nav a,
+    .segmented > button,
+    .segmented > a,
+    a.box-row,
+    .side-copy,
+    .side-toggle,
+    .burst-toggle,
+    .guest-bar-link,
+    .attachment,
+    .tier-option,
+    .mention-option,
+    .issue-row-comments,
+    .issue-row-app,
+    .input-clear,
+    .link-button
+  ):hover {
+  transition-duration: 0ms;
+}
+
+/* Status: the pill and icons crossfade their colours, no movement */
+.state,
+.state-icon {
+  transition:
+    color var(--fade) ease-out,
+    background-color var(--fade) ease-out,
+    box-shadow var(--fade) ease-out;
+}
+
+/* Menus: open instantly; close with a fade. Phone sheets slide up from the bottom edge and drop back down. */
+.menu[data-closing] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--spring-25) var(--spring);
+}
+.menu[data-sheet],
+.name-prompt[data-sheet] {
+  animation: motion-sheet-in var(--spring-30) var(--spring);
+}
+.menu[data-sheet][data-closing],
+.name-prompt[data-sheet][data-closing] {
+  animation: none;
+  opacity: 1;
+  transform: translateY(calc(100% + 16px));
+  transition: transform 200ms cubic-bezier(0.4, 0, 1, 1);
+}
+.menu-scrim,
+.name-prompt-scrim {
+  animation: motion-fade var(--fade) ease-out;
+}
+.menu-scrim[data-closing],
+.name-prompt-scrim[data-closing] {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--fade) ease-out;
+}
+
+/* Popovers grow from the side facing their trigger (transform-origin is set inline) and fade on close */
+.name-prompt {
+  animation: motion-pop var(--spring-25) var(--spring);
+}
+/* (A close during the opening drops the entrance and fades from full) */
+.name-prompt[data-closing] {
+  animation: none;
+  opacity: 0;
+  transition: opacity var(--spring-25) var(--spring);
+}
+/* The human check rises out of the bottom edge it sits on */
+.human-check {
+  scale: 0.96;
+  transition:
+    opacity var(--fade) ease-out,
+    scale var(--spring-25) var(--spring);
+}
+.human-check[data-visible] {
+  scale: 1;
+}
+
+/* "N newer issues" drops in from just above where it floats */
+.feed-newer {
+  animation: motion-drop var(--spring-25) var(--spring);
+}
+
+/* Disclosures: the chevron turns on a spring and the opened body fades in (its height snaps, by design: it was
+   asked for, and animating height would move layout) */
+.side-toggle .icon,
+.mobile-details-toggle .icon,
+.burst-toggle > .icon {
+  transition: transform var(--spring-25) var(--spring);
+}
+.burst[data-open] > :not(.burst-toggle),
+.mobile-details-body,
+.side-sysinfo > :not(.side-toggle) {
+  animation: motion-fade var(--spring-30) var(--spring);
+}
+
+/* Lists: a filter that takes a moment dims after 150 ms, so fast answers never flicker; rows that replace the
+   skeleton fade in */
+.issue-list {
+  transition: opacity 120ms ease-out;
+}
+.issue-list[data-pending] {
+  transition-delay: 150ms;
+}
+.issue-list[data-reveal] > :is(.issue-row, .pin-strip, .list-footer):not(.skeleton-row) {
+  animation: motion-fade var(--fade) ease-out;
+}
+
+/* Someone typing: the line fades in */
+.typing {
+  animation: motion-fade var(--fade) ease-out;
+}
+
+/* A whole state replaced (the issue was deleted or moved while open): the new one arrives softly while a copy of
+   the old one blurs away (motion.ts ghost) */
+.motion-replace {
+  animation: motion-replace var(--spring-30) var(--spring);
+}
+
+@keyframes motion-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes motion-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes motion-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+@keyframes motion-sheet-in {
+  from {
+    transform: translateY(calc(100% + 16px));
+  }
+}
+@keyframes motion-replace {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+    filter: blur(4px);
+  }
+}
+
+/* Reduced motion: the same moments as short fades; no travel, scale, blur or turning */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes motion-pop {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes motion-drop {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes motion-sheet-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes motion-replace {
+    from {
+      opacity: 0;
+    }
+  }
+  .menu[data-sheet][data-closing],
+  .name-prompt[data-sheet][data-closing] {
+    opacity: 0;
+    transform: none;
+    transition: opacity var(--fade) ease-out;
+  }
+  .human-check,
+  .human-check[data-visible] {
+    scale: 1;
+  }
+  .side-toggle .icon,
+  .mobile-details-toggle .icon,
+  .burst-toggle > .icon {
+    transition: none;
+  }
+}

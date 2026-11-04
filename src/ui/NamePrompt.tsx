@@ -5,6 +5,7 @@ import { api, errorMessage, keys } from "../lib/api"
 import { peek, setData } from "../lib/cache"
 import { rememberMe, validGuestName } from "../lib/guest"
 import { cancelHostedCheck, runHumanCheck } from "../lib/human"
+import { reduced, SPRING_25 } from "../lib/motion"
 import { signInHref } from "../lib/site"
 import { Button } from "./primitives"
 import { SiteLink } from "./SiteLink"
@@ -141,11 +142,11 @@ function NamePrompt({ ask, onRemove }: { ask: Open; onRemove: () => void }) {
     },
     [ask, closing],
   )
-  // Only the close fades; focus goes back to the control that asked.
+  // It grows from the trigger on open (motion.css); only the close fades. Focus goes back to the control that asked.
   useEffect(() => {
     if (!closing) return
     if (refocus.current) ask.anchor?.focus({ preventScroll: true })
-    const t = window.setTimeout(onRemove, 250)
+    const t = window.setTimeout(onRemove, reduced() ? 150 : sheet ? 200 : SPRING_25)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [closing])
