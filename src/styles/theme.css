@@ -55,6 +55,10 @@
   --bg-neutral: rgb(255 255 255 / 0.05);
   --bg-field: rgb(255 255 255 / 0.03);
 
+  /* Brand: the jacket mark's blue (on the white tile), and a lighter tint for marks on dark */
+  --brand: #3b5cf6;
+  --brand-on-dark: #7698fd;
+
   /* Primary action: flat white with dark text */
   --primary-bg: #f2f2f2;
   --primary-hover: #dfdfdf;

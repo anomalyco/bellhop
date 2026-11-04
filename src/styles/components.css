@@ -381,7 +381,7 @@ img.avatar[data-photo] {
   box-shadow: 0 0 0 0.5px var(--border-strong);
 }
 .avatar[data-agent] {
-  color: var(--fg-contrast);
+  color: var(--brand-on-dark);
   background: var(--layer-3);
   box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
 }
@@ -389,9 +389,9 @@ img.avatar[data-photo] {
   width: 100%;
   height: 100%;
 }
-/* The brand mark is the jacket in off-black on the primary white */
+/* The brand mark is the jacket in brand blue on the primary white */
 .logo .avatar[data-agent] {
-  color: var(--primary-fg);
+  color: var(--brand);
   background: var(--primary-bg);
   box-shadow: none;
 }
