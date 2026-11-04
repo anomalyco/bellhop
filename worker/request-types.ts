@@ -53,6 +53,8 @@ export function routeTarget(v: unknown): RouteTarget {
 }
 export function lookupRoute(app: string, target: RouteTarget) {
   if (!target) return { query: "SELECT NULL", args: [] as string[] }
+  // Group routes arrive with human handoff (H5); until then they resolve to nobody (unassigned).
+  if ("group" in target) return { query: "SELECT NULL", args: [] as string[] }
   return "member" in target
     ? {
         query: `SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?`,

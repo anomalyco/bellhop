@@ -32,6 +32,7 @@ import { formatList } from "../../i18n"
 import { useVerifiedSentence } from "../../ui/helpdesk/Requester"
 import { useT as useDeskT } from "../../i18n/helpdesk"
 import { CheckIcon } from "../../ui/icons"
+import { useRoutedSentence } from "../../ui/helpdesk/RequestDetails"
 
 /** Consecutive messages from one person under one name. The reporter's avatar gets a thin ring instead of a badge. */
 export function MessageGroup({
@@ -193,7 +194,12 @@ function relationKey(rel: Relation, removed: boolean) {
 }
 
 /** What an event says, as a sentence around its actor (word order is the language's), its icon and its tone. */
-export function eventContent(slug: string, event: IssueEvent, verified?: (id: unknown) => Sentence): { icon: ReactNode; tone?: string; say: Sentence } {
+export function eventContent(
+  slug: string,
+  event: IssueEvent,
+  verified?: (id: unknown) => Sentence,
+  routed?: (event: IssueEvent) => Sentence,
+): { icon: ReactNode; tone?: string; say: Sentence } {
   const d = event.data
   let icon: ReactNode = <LinkIcon size={14} />
   let tone: string | undefined
@@ -280,6 +286,10 @@ export function eventContent(slug: string, event: IssueEvent, verified?: (id: un
       tone = "closed"
       if (verified) say = verified(d.verification_id)
       break
+    case "routed":
+      icon = <TagIcon size={14} />
+      if (routed) say = routed(event)
+      break
     case "transferred": {
       const from = d.from as { slug?: string; number?: number } | undefined
       icon = <ArrowUpIcon size={14} style={{ transform: "rotate(90deg)" }} />
@@ -314,7 +324,7 @@ const ruleOf = (event: IssueEvent) => (event.data.rule as { tier_id: string; tie
 export function EventLine({ slug, event, authorTier }: { slug: string; event: IssueEvent; authorTier?: ActorTier | null }) {
   useT()
   useDeskT()
-  const { icon, tone, say } = eventContent(slug, event, useVerifiedSentence())
+  const { icon, tone, say } = eventContent(slug, event, useVerifiedSentence(), useRoutedSentence())
   const rule = ruleOf(event)
   // The rule's tier is the reporter's (it fired when they opened the issue); its colour comes from there when it
   // still matches, otherwise the badge stays neutral.

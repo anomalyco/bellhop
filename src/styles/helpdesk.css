@@ -826,3 +826,325 @@
     flex-basis: 100%;
   }
 }
+
+/* Agent mode: three options, each with its meaning (Settings → Request types, Help desk) */
+.autonomy {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.autonomy-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  cursor: pointer;
+}
+.autonomy-option[data-current] {
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.autonomy-option input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--primary-bg);
+}
+.autonomy-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.autonomy-title {
+  font-weight: var(--weight-medium);
+}
+.autonomy-hint {
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.autonomy-soon {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.desk-default-autonomy {
+  display: grid;
+  gap: 8px;
+}
+
+/* Settings → Request types */
+.type-row {
+  align-items: flex-start;
+  gap: 12px;
+}
+.type-row .settings-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.type-row-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: var(--weight-medium);
+  overflow-wrap: anywhere;
+}
+.type-order {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 2px;
+}
+.type-row-actions {
+  flex: none;
+  gap: 6px;
+}
+.type-row-editing {
+  display: block;
+}
+.type-archived {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-top: 16px;
+}
+.type-archived > .box {
+  justify-self: stretch;
+}
+.type-editor {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.request-types > .type-editor {
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+}
+.type-fields {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.type-fields > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+}
+.type-fields > legend + * {
+  clear: both;
+}
+.field-editor {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.field-editor-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px auto;
+  align-items: end;
+  gap: 8px;
+}
+.field-editor-tools {
+  display: flex;
+  gap: 2px;
+}
+.field-editor-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.field-editor-key input {
+  font-size: 13px;
+}
+
+/* New request: the type picker and the type's fields */
+.type-picker {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.type-picker > legend {
+  float: left;
+  width: 100%;
+  margin-bottom: 4px;
+  padding: 0;
+}
+.type-picker > legend + * {
+  clear: both;
+}
+.type-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+  cursor: pointer;
+}
+.type-option[data-current] {
+  box-shadow: 0 0 0 1px var(--fg-muted);
+}
+.type-option input {
+  flex: none;
+  margin-top: 3px;
+  accent-color: var(--primary-bg);
+}
+.type-option-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.type-option-name {
+  font-weight: var(--weight-medium);
+}
+.type-option-description {
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.request-field .field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.request-field-optional {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-regular);
+}
+
+/* Request page: the type, the answers, the team's agent mode */
+.request-type-label {
+  display: block;
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+}
+.request-answers {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  box-shadow: var(--hairline);
+}
+.request-answers-title {
+  margin: 0 0 8px;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+  line-height: 16px;
+}
+.request-answers dl {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.request-answer {
+  display: grid;
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  gap: 12px;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.request-answer dt {
+  overflow: hidden;
+  color: var(--fg-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.request-answer dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.request-internal {
+  margin-left: 8px;
+  padding: 0 6px;
+  color: var(--fg-muted);
+  border-radius: var(--radius-small);
+  box-shadow: var(--hairline);
+  font-size: var(--text-small);
+  line-height: 18px;
+  white-space: nowrap;
+}
+.request-mode {
+  margin: 6px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+
+@media (max-width: 640px) {
+  .field-editor-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .field-editor-head > .field:first-child {
+    grid-column: 1 / -1;
+  }
+  .request-answer {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  /* Phones: the reorder buttons in their own column, the actions under the name */
+  .type-row:not([data-archived]) {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 12px;
+    row-gap: 10px;
+  }
+  .type-row:not([data-archived]) .type-order {
+    grid-row: span 2;
+  }
+  .type-row:not([data-archived]) .type-row-actions {
+    grid-column: 2;
+    justify-self: start;
+  }
+}
+@media (pointer: coarse) {
+  .field-editor-key input {
+    font-size: 16px;
+  }
+  :is(.type-editor, .request-field, .request-type-ask) .select {
+    height: 40px;
+  }
+  .type-archived .link-button {
+    min-height: 40px;
+  }
+  /* Touch: the stacked reorder and field tools are real 40 px buttons, and the flags full-height rows */
+  .type-order {
+    gap: 0;
+  }
+  :is(.type-order, .field-editor-tools) .btn {
+    width: 40px;
+    height: 40px;
+  }
+  .field-editor-flags .checkbox {
+    min-height: 40px;
+  }
+}
+.request-type-ask {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+.request-type-ask-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.request-field-hint > span {
+  display: block;
+}

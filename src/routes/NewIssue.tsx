@@ -24,6 +24,9 @@ import { tr, useT as useDeskT } from "../i18n/helpdesk"
 import { deskOutsider } from "../lib/helpdesk"
 import { EmailCode } from "../ui/helpdesk/EmailCode"
 import { CheckIcon } from "../ui/icons"
+import type { RequestType } from "../../shared/api"
+import { isDesk } from "../lib/helpdesk"
+import { TypeFields, TypePicker, answersFor, formFields, serverFieldError, validate, type Answers, type FieldErrors } from "../ui/helpdesk/RequestForm"
 
 export function NewIssue({ slug }: { slug: string }) {
   const t = useT()
@@ -79,6 +82,13 @@ function Form({ app, metadata }: { app: AppDetail; metadata?: ReportMetadata }) 
   const search = useSearch()
   const chosen = new URLSearchParams(search).get("template")
   const templates = [...app.templates].sort((a, b) => a.position - b.position)
+  // A help desk's request types (the form waits for them, so the picker never pushes the form down). Where there
+  // are types, they take the place of templates.
+  const desk = isDesk(app)
+  const { data: allTypes, error: typesError } = useResource<RequestType[]>(desk ? keys.requestTypes(app.slug) : null, () => api.requestTypes(app.slug), 30_000)
+  const types = (allTypes ?? []).filter((x) => !x.archived).sort((a, b) => a.position - b.position)
+  if (desk && !allTypes && !typesError) return <FormLoading />
+  if (types.length) return <IssueForm app={app} metadata={metadata} types={types} />
 
   // From an app's crash report, skip the picker: the bug-report kind of template (one that asks for system info).
   const fallback = (metadata && templates.find((t) => t.ask_system_info)) || (templates.length === 1 ? templates[0] : undefined)
@@ -113,7 +123,7 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
   )
 }
 
-function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetail; template?: Template; metadata?: ReportMetadata }) {
+function IssueForm({ app, template, metadata: initialMetadata, types = [] }: { app: AppDetail; template?: Template; metadata?: ReportMetadata; types?: RequestType[] }) {
   const t = useT()
   const td = useDeskT()
   const [, navigate] = useLocation()
@@ -123,7 +133,14 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
   // right here, under their draft, before it's sent. The server's contact_required brings the step back too.
   const desk = deskOutsider(app)
   const [contactRequired, setContactRequired] = useState(false)
-  const needsContact = desk && !me?.contact && (app.helpdesk?.require_verified_email || contactRequired)
+  // The request's type (undefined until chosen; null: Something else) and the answers to its fields, kept by key so
+  // switching types keeps what still applies
+  const [typeId, setTypeId] = useState<string | null | undefined>(undefined)
+  const type = types.find((x) => x.id === typeId) ?? null
+  const [answers, setAnswers] = useState<Answers>({})
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const verifiesEmail = formFields(type).some((f) => f.kind === "email" && f.verify && (answers[f.key] ?? "").trim())
+  const needsContact = desk && !me?.contact && (app.helpdesk?.require_verified_email || contactRequired || !!type?.require_verification || verifiesEmail)
   const verifyPanel = useRef<HTMLDivElement>(null)
   const guest = me && !me.user && !me.contact ? me.guest : null
   const who = useWho(me)
@@ -157,6 +174,12 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
   const submit = async (e?: FormEvent, askedName?: string, asContact = false) => {
     e?.preventDefault()
     if (!title.trim() || busy || submitting) return
+    const problems = validate(type, answers)
+    setFieldErrors(problems)
+    if (Object.keys(problems).length) {
+      document.getElementById(`request-field-${Object.keys(problems)[0]}`)?.focus()
+      return
+    }
     if (needsContact && !asContact) {
       setError(td("new.confirmFirst"))
       verifyPanel.current?.querySelector("input")?.focus()
@@ -182,13 +205,18 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
         guest_name: guestName,
         private: canChoose && !desk ? isPrivate : undefined,
         metadata_id: metadata?.id,
+        ...(type && { request_type_id: type.id, fields: answersFor(type, answers) }),
       })
       if (guestName) setGuestNameLocally(guestName)
       storeIssue(app.slug, issue)
       navigate(appPath(app.slug, `/issues/${issue.number}`))
     } catch (err) {
       setSubmitting(false)
-      if (err instanceof ApiFailure && err.code === "contact_required") {
+      const fieldError = serverFieldError(type, err)
+      if (fieldError) {
+        setFieldErrors(fieldError)
+        document.getElementById(`request-field-${Object.keys(fieldError)[0]}`)?.focus()
+      } else if (err instanceof ApiFailure && err.code === "contact_required") {
         setContactRequired(true)
         setError(td("new.confirmFirst"))
       } else if (err instanceof ApiFailure && err.code === "name_required" && !askedName) {
@@ -207,7 +235,8 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
       {metadata && metadata.matches.length > 0 && <MetadataMatches app={app} metadata={metadata} />}
-      <form className="issue-form" onSubmit={submit}>
+      <form className="issue-form" onSubmit={submit} noValidate>
+        {types.length > 0 && <TypePicker types={types} value={typeId} onChange={setTypeId} />}
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
             {desk ? td("new.subject") : t("field.title")}
@@ -243,6 +272,16 @@ function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetai
             label={desk ? td("new.details") : t("field.description")}
           />
         </div>
+
+        <TypeFields
+          type={type}
+          answers={answers}
+          errors={fieldErrors}
+          onChange={(key, value) => {
+            setAnswers((a) => ({ ...a, [key]: value }))
+            setFieldErrors(({ [key]: _, ...rest }) => rest)
+          }}
+        />
 
         {labels.length > 0 && (
           <div className="form-labels">

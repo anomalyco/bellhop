@@ -38,6 +38,7 @@ import { HelpdeskSettings } from "./settings/Helpdesk"
 import { IdentityKeys } from "./settings/IdentityKeys"
 import { ApiKeys } from "./settings/ApiKeys"
 import { WidgetSettings } from "./settings/Widget"
+import { RequestTypes } from "./settings/RequestTypes"
 
 type Section =
   | "general"
@@ -57,6 +58,7 @@ type Section =
   | "identity-keys"
   | "api-keys"
   | "widget"
+  | "request-types"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 // `desk`: only for workspaces in help desk mode.
@@ -71,6 +73,7 @@ const sections: { id: Section; min: Role; desk?: boolean }[] = [
   { id: "webhook", min: "admin" },
   { id: "report-keys", min: "admin" },
   { id: "helpdesk", min: "admin" },
+  { id: "request-types", min: "admin", desk: true },
   { id: "identity-keys", min: "admin", desk: true },
   { id: "api-keys", min: "admin", desk: true },
   { id: "widget", min: "admin", desk: true },
@@ -80,7 +83,7 @@ const sections: { id: Section; min: Role; desk?: boolean }[] = [
   { id: "audit", min: "admin" },
 ]
 // The help desk's sections are named in its own namespace, with the rest of their copy
-const deskLabels = { helpdesk: "settings.title", "identity-keys": "keys.title", "api-keys": "apiKeys.title", widget: "widget.title" } as const
+const deskLabels = { helpdesk: "settings.title", "request-types": "types.title", "identity-keys": "keys.title", "api-keys": "apiKeys.title", widget: "widget.title" } as const
 type DeskSection = keyof typeof deskLabels
 const sectionLabel = (id: Section) => (id in deskLabels ? td(deskLabels[id as DeskSection]) : tKey(`section.${id as Exclude<Section, DeskSection>}`))
 
@@ -160,6 +163,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "report-keys" && <ReportKeys app={app} />}
           {active === "helpdesk" && <HelpdeskSettings app={app} />}
           {active === "identity-keys" && <IdentityKeys app={app} />}
+          {active === "request-types" && <RequestTypes app={app} />}
           {active === "api-keys" && <ApiKeys app={app} />}
           {active === "widget" && <WidgetSettings app={app} />}
           {active === "members" && <Members app={app} />}

@@ -1805,6 +1805,7 @@ button.prop:hover,
 /* More than two events in a row: one line that expands */
 .burst {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
 }
 .burst-toggle {
   display: flex;
@@ -2499,6 +2500,7 @@ button.prop:hover,
 @media (pointer: coarse) {
   .input input,
   .textarea,
+  .select,
   .editor-area {
     font-size: 16px;
   }

@@ -28,6 +28,7 @@ import { deskOutsider } from "../../lib/helpdesk"
 import { isDesk } from "../../lib/helpdesk"
 import { ContactNamesProvider } from "../../ui/Actor"
 import { contactLabel } from "../../lib/helpdesk"
+import { RequestAnswers, RequestProvider, RequestTypeLabel } from "../../ui/helpdesk/RequestDetails"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -48,6 +49,7 @@ export function IssueView({ model }: { model: IssueModel }) {
           <Report model={model} />
           <MobileDetails model={model} />
           <VerificationsProvider issue={issue} member={model.member}>
+          <RequestProvider app={app} issue={issue}>
           <div className="thread">
             {blocks(entries(model)).map((b) =>
               b.kind === "hidden" ? (
@@ -65,6 +67,7 @@ export function IssueView({ model }: { model: IssueModel }) {
             <VerificationThread app={app} issue={issue} member={model.member} />
             <TypingLine activity={issue.activity} />
           </div>
+          </RequestProvider>
           </VerificationsProvider>
           {actionError && (
             <p className="flash" data-tone="danger">
@@ -99,6 +102,7 @@ function Report({ model }: { model: IssueModel }) {
 
   return (
     <header className="report">
+      <RequestTypeLabel issue={issue} />
       {editingTitle ? (
         <TitleForm app={app} issue={issue} onDone={() => setEditingTitle(false)} />
       ) : (
@@ -189,6 +193,7 @@ function Report({ model }: { model: IssueModel }) {
                 {t("issue.editDescription")}
               </button>
             )}
+            <RequestAnswers app={app} issue={issue} />
             <DiagnosticsBlock metadata={diagnostics} />
           </>
         )}

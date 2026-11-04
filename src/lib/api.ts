@@ -19,6 +19,8 @@ import type {
   IdentityKey,
   NewIdentityKey,
   Verification,
+  RequestType,
+  RequestTypeInput,
   FeedApp,
   FeedList,
   ImportJob,
@@ -331,6 +333,13 @@ export const api = {
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications`, { email }),
   confirmVerification: (slug: string, number: number, id: string, code: string) =>
     request<Verification>("POST", `${app(slug)}/issues/${number}/verifications/${enc(id)}/confirm`, { code }),
+  // Help desk request types
+  requestTypes: (slug: string) => get<RequestType[]>(`${app(slug)}/request-types`),
+  createRequestType: (slug: string, input: RequestTypeInput) => request<RequestType>("POST", `${app(slug)}/request-types`, input),
+  patchRequestType: (slug: string, id: string, input: Partial<RequestTypeInput> & { archived?: boolean; position?: number }) =>
+    request<RequestType>("PATCH", `${app(slug)}/request-types/${enc(id)}`, input),
+  setRequestType: (slug: string, number: number, requestTypeId: string | null, fields?: Record<string, string>) =>
+    request<Issue>("PUT", `${app(slug)}/issues/${number}/request-type`, { request_type_id: requestTypeId, fields }),
   // Public API v1 keys (Settings → API keys)
   apiKeys: (slug: string) => get<ApiKey[]>(`${app(slug)}/api-keys`),
   createApiKey: (slug: string, input: { name: string; kind: ApiKey["kind"]; allowed_origins?: string[] }) =>
@@ -383,6 +392,7 @@ export const keys = {
   contact: (slug: string, id: string) => `contact:${slug}:${id}`,
   identityKeys: (slug: string) => `identity-keys:${slug}`,
   apiKeys: (slug: string) => `api-keys:${slug}`,
+  requestTypes: (slug: string) => `request-types:${slug}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)
