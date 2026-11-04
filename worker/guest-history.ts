@@ -1,9 +1,7 @@
 import type { Actor, App } from "../shared/api"
-import { fail, memberActor, now, rows, sha256, sql } from "./core"
+import { fail, memberActor, now, rows, scopedGuestId, sha256, sql } from "./core"
 import type { Ctx, User } from "./core"
 import { actorUpdated } from "./events"
-
-export const scopedGuestId = async (id: string, scope: string) => (await sha256(`${id}:${scope}`)).slice(0, 32)
 
 // Raw browser IDs and cross-app identifiers are never written to posts. Derive the scoped IDs
 // a page at a time. Claims include even empty apps: they can own pending, unattached uploads.

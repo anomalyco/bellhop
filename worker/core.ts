@@ -14,6 +14,7 @@ export const hex = (value: ArrayBuffer | Uint8Array) =>
 export const secret = () => hex(crypto.getRandomValues(new Uint8Array(32)))
 export const sha256 = async (value: string) =>
   hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value)))
+export const scopedGuestId = async (id: string, scope: string) => (await sha256(`${id}:${scope}`)).slice(0, 32)
 export const sql = (env: Env, statement: string, ...values: unknown[]) => env.DB.prepare(statement).bind(...values)
 /** With APP_DOMAIN (production) each app lives on its own subdomain; without it (dev) under /<slug>. */
 export function appUrl(env: Env, origin: string, slug: string, path = "/") {

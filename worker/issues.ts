@@ -12,7 +12,10 @@ import type {
   Relation,
   TimelineItem
 } from "../shared/api"
-import { bad, choice, missing, now, rows, sql, str } from "./core"
+import { bad, choice, missing, now, rows, scopedGuestId, sql, str } from "./core"
+import { appIdSQL, appKey, readBatch } from "./read-scope"
+import type { ReadScope } from "./read-scope"
+import { can } from "./permissions"
 
 const fields = `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,
   (SELECT count(*) FROM comments WHERE issue_id=i.id) AS comment_count,
@@ -24,11 +27,12 @@ type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "la
   activity: string | null
   labels: string
 }
+type TeamRow = { user_id: string; role: Member["role"] }
+const teamQuery = (env: Env, scope: ReadScope) =>
+  sql(env, `SELECT user_id,role FROM members WHERE app_id=${appIdSQL(scope)} AND user_id IS NOT NULL`, appKey(scope))
+const roleMap = (team: TeamRow[]) => new Map(team.map(({ user_id, role }) => [user_id, role]))
 export async function appRoles(env: Env, appId: string) {
-  const team = await rows<{ user_id: string; role: Member["role"] }>(
-    sql(env, "SELECT user_id,role FROM members WHERE app_id=? AND user_id IS NOT NULL", appId)
-  )
-  return new Map(team.map(({ user_id, role }) => [user_id, role]))
+  return roleMap(await rows<TeamRow>(teamQuery(env, appId)))
 }
 type Roles = Awaited<ReturnType<typeof appRoles>>
 function normalizeActor(actor: Actor, roles: Roles): Actor {
@@ -42,10 +46,13 @@ function currentActivity(json: string | null, roles: Roles): Activity | null {
   return activity && activity.expires_at > now() ? { ...activity, actor: normalizeActor(activity.actor, roles) } : null
 }
 export async function readActivity(env: Env, issueId: string, appId?: string) {
-  const row = await sql(env, `SELECT i.activity,m.user_id,m.role FROM issues i LEFT JOIN members m
+  const row = await sql(
+    env,
+    `SELECT i.activity,m.user_id,m.role FROM issues i LEFT JOIN members m
     ON m.app_id=i.app_id AND m.user_id=json_extract(i.activity,'$.actor.id') WHERE i.id=? ${appId ? "AND i.app_id=?" : ""}`,
-    issueId, ...(appId ? [appId] : []))
-    .first<{ activity: string | null; user_id: string | null; role: Member["role"] | null }>()
+    issueId,
+    ...(appId ? [appId] : [])
+  ).first<{ activity: string | null; user_id: string | null; role: Member["role"] | null }>()
   return row ? currentActivity(row.activity, new Map(row.user_id && row.role ? [[row.user_id, row.role]] : [])) : null
 }
 function summary(r: StoredSummary, roles: Roles): IssueSummary {
@@ -70,12 +77,10 @@ export function ref(i: IssueRef): IssueRef {
   return { id, number, title, status, close_reason }
 }
 export async function issueSummary(env: Env, appId: string, number: number, team = appRoles(env, appId)) {
-  const [r, roles] = await Promise.all([sql(
-    env,
-    `SELECT ${fields} FROM issues i WHERE i.app_id=? AND i.number=?`,
-    appId,
-    number
-  ).first<StoredSummary>(), team])
+  const [r, roles] = await Promise.all([
+    sql(env, `SELECT ${fields} FROM issues i WHERE i.app_id=? AND i.number=?`, appId, number).first<StoredSummary>(),
+    team
+  ])
   return r ? summary(r, roles) : missing()
 }
 export function issueNumber(n: unknown) {
@@ -89,11 +94,11 @@ export function issueNumber(n: unknown) {
 }
 export async function listIssues(
   env: Env,
-  appId: string,
+  scope: ReadScope,
   options: { state?: unknown; label?: unknown; query?: unknown; cursor?: unknown; limit?: number; allStates?: boolean }
 ): Promise<IssueList> {
-  const where = ["i.app_id=?"],
-    values: unknown[] = [appId]
+  const where = [`i.app_id=${appIdSQL(scope)}`],
+    values: unknown[] = [appKey(scope)]
   if (options.label) {
     where.push(
       "EXISTS (SELECT 1 FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id AND l.name=?)"
@@ -127,10 +132,13 @@ export async function listIssues(
     ...(cursor ? [cursor] : []),
     limit + 1
   )
-  const [items, counts, roles] = await Promise.all([rows<StoredSummary>(list), totals.first<IssueList["counts"]>(), appRoles(env, appId)])
+  const {
+    data: [items, counts, team]
+  } = await readBatch<[StoredSummary, IssueList["counts"], TeamRow]>(env, scope, [list, totals, teamQuery(env, scope)])
+  const roles = roleMap(team)
   return {
     issues: items.slice(0, limit).map((r) => summary(r, roles)),
-    counts: counts!,
+    counts: counts[0]!,
     next_cursor: items.length > limit ? String(items[limit - 1]!.number) : null
   }
 }
@@ -141,54 +149,66 @@ export function attachment(a: AttachmentRow): Attachment {
 }
 export async function getIssue(
   env: Env,
-  appId: string,
+  scope: ReadScope,
   number: number,
-  viewer: Actor,
-  privileged: boolean,
-  team = appRoles(env, appId)
+  viewer?: Pick<Actor, "id" | "type">,
+  privileged = false
 ): Promise<Issue> {
-  const [r, roles] = await Promise.all([sql(
-    env,
-    `SELECT ${fields},i.body,i.template_id,i.system_info FROM issues i WHERE i.app_id=? AND i.number=?`,
-    appId,
-    number
-  ).first<StoredSummary & { body: string; template_id: string | null; system_info: string | null }>(), team])
-  if (!r) missing()
-  const [files, comments, events, relations] = await Promise.all([
-    rows<AttachmentRow & { comment_id: string | null }>(
-      sql(
-        env,
-        `SELECT a.id,a.name,a.mime,a.size,a.kind,l.comment_id FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id WHERE l.issue_id=? ORDER BY l.rowid`,
-        r.id
-      )
+  const where = `app_id=${appIdSQL(scope)} AND number=?`,
+    target = `SELECT id FROM issues WHERE ${where}`,
+    key = appKey(scope)
+  const {
+    app,
+    data: [items, team, files, comments, events, relations]
+  } = await readBatch<
+    [
+      StoredSummary & { body: string; template_id: string | null; system_info: string | null },
+      TeamRow,
+      AttachmentRow & { comment_id: string | null },
+      Pick<Comment, "id" | "body" | "created_at" | "updated_at"> & { author: string },
+      Omit<IssueEvent, "actor" | "data"> & { actor: string; data: string },
+      IssueRef & { relation_id: string; type: Relation["type"]; direction: Relation["direction"] }
+    ]
+  >(env, scope, [
+    sql(env, `SELECT ${fields},i.body,i.template_id,i.system_info FROM issues i WHERE ${where}`, key, number),
+    teamQuery(env, scope),
+    sql(
+      env,
+      `SELECT a.id,a.name,a.mime,a.size,a.kind,l.comment_id FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id
+      WHERE l.issue_id=(${target}) ORDER BY l.rowid`,
+      key,
+      number
     ),
-    rows<Pick<Comment, "id" | "body" | "created_at" | "updated_at"> & { author: string }>(
-      sql(
-        env,
-        "SELECT id,body,created_at,updated_at,author FROM comments WHERE issue_id=? ORDER BY created_at,rowid",
-        r.id
-      )
+    sql(
+      env,
+      `SELECT id,body,created_at,updated_at,author FROM comments WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
+      key,
+      number
     ),
-    rows<Omit<IssueEvent, "actor" | "data"> & { actor: string; data: string }>(
-      sql(
-        env,
-        "SELECT id,type,actor,data,created_at FROM issue_events WHERE issue_id=? ORDER BY created_at,rowid",
-        r.id
-      )
+    sql(
+      env,
+      `SELECT id,type,actor,data,created_at FROM issue_events WHERE issue_id=(${target}) ORDER BY created_at,rowid`,
+      key,
+      number
     ),
-    rows<IssueRef & { relation_id: string; type: Relation["type"]; direction: Relation["direction"] }>(
-      sql(
-        env,
-        `SELECT rel.id relation_id,rel.type,CASE WHEN rel.source_id=? THEN 'outgoing' ELSE 'incoming' END direction,
-      i.id,i.number,i.title,i.status,i.close_reason FROM relations rel JOIN issues i ON i.id=CASE WHEN rel.source_id=? THEN rel.target_id ELSE rel.source_id END
-      WHERE rel.source_id=? OR rel.target_id=? ORDER BY rel.rowid`,
-        r.id,
-        r.id,
-        r.id,
-        r.id
-      )
+    sql(
+      env,
+      `WITH target AS (${target}) SELECT rel.id relation_id,rel.type,CASE WHEN rel.source_id=t.id THEN 'outgoing' ELSE 'incoming' END direction,
+      i.id,i.number,i.title,i.status,i.close_reason FROM target t JOIN relations rel ON rel.source_id=t.id OR rel.target_id=t.id
+      JOIN issues i ON i.id=CASE WHEN rel.source_id=t.id THEN rel.target_id ELSE rel.source_id END ORDER BY rel.rowid`,
+      key,
+      number
     )
   ])
+  const r = items[0],
+    roles = roleMap(team)
+  if (!r) missing()
+  if (typeof scope !== "string") {
+    privileged = can(app!.role, "read")
+    viewer = scope.user
+      ? { type: "member", id: scope.user }
+      : { type: "guest", id: await scopedGuestId(scope.guest, app!.id) }
+  }
   const byParent = new Map<string | null, Attachment[]>()
   for (const a of files) {
     const group = byParent.get(a.comment_id) ?? []
@@ -216,7 +236,7 @@ export async function getIssue(
     body: r.body,
     template_id: r.template_id,
     system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
-    viewer_is_author: viewer.type === s.author.type && viewer.id === s.author.id,
+    viewer_is_author: viewer?.type === s.author.type && viewer.id === s.author.id,
     attachments: byParent.get(null) ?? [],
     timeline,
     relations: relations.map(({ relation_id: id, direction, type, ...issue }) => ({ id, direction, type, issue }))

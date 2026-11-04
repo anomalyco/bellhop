@@ -125,16 +125,30 @@ media.get("/media/:id/:name", async (c) => {
     "SELECT id,name,mime,size,kind,object_key FROM attachments WHERE id=?",
     c.req.param("id")
   ).first<AttachmentRow & { object_key: string }>()
+  // Visibility gate: today this UUID/name pair is a public, immutable capability. Check any
+  // future private-media policy here, before conditional or range responses, and change caching.
   if (!a || a.name !== c.req.param("name")) missing()
-  const requested = c.req.header("range"),
-    slice = requested ? range(requested, a.size) : null
-  if (requested && !slice) {
-    c.header("Content-Range", `bytes */${a.size}`)
+  const size = a.size,
+    requested = c.req.header("range"),
+    slice = requested ? range(requested, a.size) : null,
+    validator = c.req.header("If-None-Match")
+  function unsatisfiable() {
+    c.header("Content-Range", `bytes */${size}`)
     c.header("Accept-Ranges", "bytes")
     return c.json({ error: { code: "invalid_range", message: "Range not satisfiable" } }, 416)
   }
-  const obj = await c.env.MEDIA.get(a.object_key, slice ? { range: slice } : {})
+  if (requested && !slice && !validator) return unsatisfiable()
+  const obj = await c.env.MEDIA.get(a.object_key, {
+    ...(slice && { range: slice }),
+    ...(validator && { onlyIf: new Headers({ "If-None-Match": validator }) })
+  })
   if (!obj) missing()
+  const cache = { "Cache-Control": "public, max-age=31536000, immutable", ETag: obj.httpEtag }
+  if (!("body" in obj)) return new Response(null, { status: 304, headers: cache })
+  if (requested && !slice) {
+    await obj.body.cancel()
+    return unsatisfiable()
+  }
   const inline = a.kind === "video" || (a.kind === "image" && !/svg/i.test(a.mime)),
     safe = encodeURIComponent(a.name).replace(/['()*]/g, (s) => "%" + s.charCodeAt(0).toString(16))
   const headers = new Headers({
@@ -143,9 +157,8 @@ media.get("/media/:id/:name", async (c) => {
     "Content-Disposition": `${inline ? "inline" : "attachment"}; filename*=UTF-8''${safe}`,
     "X-Content-Type-Options": "nosniff",
     "Accept-Ranges": "bytes",
-    "Cache-Control": "private, max-age=31536000, immutable",
-    "Content-Security-Policy": "sandbox; default-src 'none'",
-    ETag: obj.httpEtag
+    ...cache,
+    "Content-Security-Policy": "sandbox; default-src 'none'"
   })
   if (slice) headers.set("Content-Range", `bytes ${slice.offset}-${slice.offset + slice.length - 1}/${a.size}`)
   return new Response(obj.body, { headers, status: slice ? 206 : 200 })

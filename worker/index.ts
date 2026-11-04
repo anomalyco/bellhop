@@ -1,12 +1,13 @@
 import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
-import { apps, loadApp } from "./apps"
+import { apps, detail, loadApp } from "./apps"
 import { auth, currentUser, firstContact } from "./auth"
 import { ApiFailure, dbError, denied, missing, sql } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, issueRoom } from "./events"
 import { icons } from "./icons"
-import { issueNumber } from "./issues"
+import { getIssue, issueNumber, listIssues } from "./issues"
+import { bySlug } from "./read-scope"
 import { issues } from "./mutations"
 import { media } from "./media"
 import { mcp } from "./mcp"
@@ -30,16 +31,27 @@ api.use("*", async (c, next) => {
     c.header("Access-Control-Allow-Headers", "Content-Type, Accept")
     if (c.req.method === "OPTIONS") return c.body(null, 204)
   }
-  if (!publicOAuth && c.req.path !== "/mcp" && !c.req.path.startsWith("/icon/")) firstContact(c)
+  if (!publicOAuth && c.req.path !== "/mcp" && !/^\/(icon|media)\//.test(c.req.path)) firstContact(c)
   const origin = c.req.header("origin")
   // Behind a TLS-terminating proxy the request URL is http while the browser's Origin is PUBLIC_ORIGIN.
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
   if (!publicOAuth && origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
-  if (c.req.path.startsWith("/api/") || c.req.path === "/oauth/authorize") await currentUser(c)
+  if ((c.req.path.startsWith("/api/") && !c.req.path.startsWith("/api/live/")) || c.req.path === "/oauth/authorize")
+    await currentUser(c)
   if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
     return limit(c, next)
   await next()
 })
+// These readers include their app/role lookup in their own batch; other routes still load the
+// complete actor and app context before handling writes or checking workspace permissions.
+api.get("/api/apps/:slug", async (c) => c.json(await detail(c, bySlug(c))))
+api.get("/api/apps/:slug/issues", async (c) => {
+  const { state, label, cursor, q } = c.req.query()
+  return c.json(await listIssues(c.env, bySlug(c), { state, label, cursor, query: q }))
+})
+api.get("/api/apps/:slug/issues/:number", async (c) =>
+  c.json(await getIssue(c.env, bySlug(c), issueNumber(c.req.param("number"))))
+)
 api.use("/api/apps/:slug/*", async (c, next) => {
   await loadApp(c)
   await next()
@@ -52,20 +64,13 @@ api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
 async function live(c: Ctx, number?: string) {
-  const app = await sql(c.env, "SELECT id FROM apps WHERE slug=?", c.req.param("slug")).first<string>("id")
-  if (!app) missing()
-  let room = appRoom(c.env, app)
-  if (number !== undefined) {
-    const id = await sql(
-      c.env,
-      "SELECT id FROM issues WHERE app_id=? AND number=?",
-      app,
-      issueNumber(number)
-    ).first<string>("id")
-    if (!id) missing()
-    room = issueRoom(c.env, id)
-  }
-  return room.fetch(c.req.raw)
+  const slug = c.req.param("slug")
+  const query = number === undefined
+    ? sql(c.env, "SELECT id FROM apps WHERE slug=?", slug)
+    : sql(c.env, "SELECT i.id FROM apps a JOIN issues i ON i.app_id=a.id WHERE a.slug=? AND i.number=?", slug, issueNumber(number))
+  const id = await query.first<string>("id")
+  if (!id) missing()
+  return (number === undefined ? appRoom(c.env, id) : issueRoom(c.env, id)).fetch(c.req.raw)
 }
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))

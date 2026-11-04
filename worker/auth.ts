@@ -1,9 +1,9 @@
 import { Hono } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
 import type { Actor, Config, Me } from "../shared/api"
-import { bad, body, denied, email, fail, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
+import { bad, body, denied, email, fail, hex, missing, now, scopedGuestId, secret, sha256, sql, str, uid } from "./core"
 import type { Bindings, Ctx, User } from "./core"
-import { claimGuest, renameGuest, scopedGuestId } from "./guest-history"
+import { claimGuest, renameGuest } from "./guest-history"
 
 const month = 30 * 86400
 /** Shared cookies cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
@@ -36,8 +36,8 @@ async function guestName(c: Ctx) {
   c.set("guestHash", hash)
   return sql(c.env, "SELECT name FROM guest_names WHERE guest_hash=?", hash).first<string>("name")
 }
-export async function guestActor(c: Ctx, scope: string): Promise<Extract<Actor, { type: "guest" }>> {
-  const [id, name] = await Promise.all([scopedGuestId(c.var.guestId, scope), guestName(c)])
+export async function guestActor(c: Ctx, scope: string, withName = true): Promise<Extract<Actor, { type: "guest" }>> {
+  const [id, name] = await Promise.all([scopedGuestId(c.var.guestId, scope), withName ? guestName(c) : null])
   return { type: "guest", id, handle: "guest-" + id.slice(0, 4), name }
 }
 async function saveGuestName(c: Ctx, value: unknown, previous: string | null) {

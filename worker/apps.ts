@@ -6,56 +6,62 @@ import { guestActor } from "./auth"
 import { can, requireTeam, teamRole } from "./permissions"
 import { changeMember, invite, roster } from "./members"
 import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
+import { appCols, appIdSQL, appKey, appStatement, bySlug, readBatch } from "./read-scope"
+import type { ReadScope } from "./read-scope"
+export { appCols } from "./read-scope"
 
-export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
 export async function loadApp(c: Ctx) {
-  const app = await sql(
-    c.env,
-    `SELECT ${appCols},m.role FROM apps a
-    LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
-    c.var.user?.id ?? null,
-    c.req.param("slug")
-  ).first<App>()
+  const app = await appStatement(c.env, bySlug(c)).first<App>()
   if (!app) missing()
   c.set("app", app)
-  c.set("actor", c.var.user ? memberActor(c.var.user, app.role) : await guestActor(c, app.id))
+  c.set(
+    "actor",
+    c.var.user
+      ? memberActor(c.var.user, app.role)
+      : await guestActor(c, app.id, !["GET", "HEAD"].includes(c.req.method))
+  )
 }
 export const labelCols = "id,name,color,description"
-export function labels(env: Env, appId: string) {
-  return rows<Label>(sql(env, `SELECT ${labelCols} FROM labels WHERE app_id=? ORDER BY name`, appId))
-}
+const labelQuery = (env: Env, scope: ReadScope) =>
+  sql(env, `SELECT ${labelCols} FROM labels WHERE app_id=${appIdSQL(scope)} ORDER BY name`, appKey(scope))
+export const labels = (env: Env, appId: string) => rows<Label>(labelQuery(env, appId))
 export async function selectedLabels(env: Env, appId: string, value: unknown) {
   const requested = ids(value, "label_ids"),
     all = await labels(env, appId)
   return requested.map((id) => all.find((l) => l.id === id) ?? bad("Unknown label"))
 }
-export async function templates(env: Env, appId: string): Promise<Template[]> {
-  const list = await rows<
-    Omit<Template, "label_ids" | "ask_system_info"> & { labels: string; ask_system_info: number }
-  >(
-    sql(
-      env,
-      `SELECT t.id,t.name,t.description,t.title,t.body,t.ask_system_info,t.position,
-    (SELECT json_group_array(label_id) FROM template_labels WHERE template_id=t.id) AS labels FROM templates t WHERE app_id=? ORDER BY position,t.rowid`,
-      appId
-    )
-  )
-  return list.map(({ labels, ask_system_info, ...t }) => ({
-    ...t,
-    ask_system_info: !!ask_system_info,
-    label_ids: JSON.parse(labels)
-  }))
-}
-export async function counts(env: Env, appId: string) {
-  return (await sql(
+type StoredTemplate = Omit<Template, "label_ids" | "ask_system_info"> & { labels: string; ask_system_info: number }
+const templateQuery = (env: Env, scope: ReadScope) =>
+  sql(
     env,
-    `SELECT count(*) FILTER (WHERE status!='closed') AS open,count(*) FILTER (WHERE status='closed') AS closed FROM issues WHERE app_id=?`,
-    appId
-  ).first<AppDetail["counts"]>())!
+    `SELECT t.id,t.name,t.description,t.title,t.body,t.ask_system_info,t.position,
+  (SELECT json_group_array(label_id) FROM template_labels WHERE template_id=t.id) AS labels FROM templates t WHERE app_id=${appIdSQL(scope)} ORDER BY position,t.rowid`,
+    appKey(scope)
+  )
+const template = ({ labels, ask_system_info, ...t }: StoredTemplate): Template => ({
+  ...t,
+  ask_system_info: !!ask_system_info,
+  label_ids: JSON.parse(labels)
+})
+export async function templates(env: Env, appId: string) {
+  return (await rows<StoredTemplate>(templateQuery(env, appId))).map(template)
 }
-export async function detail(c: Ctx, app = c.var.app): Promise<AppDetail> {
-  const [ls, ts, totals] = await Promise.all([labels(c.env, app.id), templates(c.env, app.id), counts(c.env, app.id)])
-  return { ...app, labels: ls, templates: ts, counts: totals }
+export async function detail(c: Ctx, target: App | ReturnType<typeof bySlug> = c.var.app): Promise<AppDetail> {
+  const scope = "id" in target ? target.id : target
+  const {
+    app,
+    data: [ls, ts, totals]
+  } = await readBatch<[Label, StoredTemplate, AppDetail["counts"]]>(c.env, scope, [
+    labelQuery(c.env, scope),
+    templateQuery(c.env, scope),
+    sql(
+      c.env,
+      `SELECT count(*) FILTER (WHERE status!='closed') AS open,
+      count(*) FILTER (WHERE status='closed') AS closed FROM issues WHERE app_id=${appIdSQL(scope)}`,
+      appKey(scope)
+    )
+  ])
+  return { ...("id" in target ? target : app!), labels: ls, templates: ts.map(template), counts: totals[0]! }
 }
 export function webhookDeliveries(env: Env, id: string) {
   return rows<WebhookDelivery>(
@@ -195,7 +201,6 @@ export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unk
   await c.env.DB.batch(q)
   return detail(c, grant ? { ...app, role: "admin" } : app)
 }
-apps.get("/api/apps/:slug", async (c) => c.json(await detail(c)))
 export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
   const name = str(b.name === undefined ? app.name : b.name, "name", 120).trim(),
     description = str(b.description === undefined ? app.description : b.description, "description", 4000, true)

@@ -20,7 +20,7 @@ import type { Bindings, Ctx } from "./core"
 import { emit, setActivity } from "./events"
 import type { Change, Work } from "./events"
 import { guestWrite } from "./guest-history"
-import { appRoles, attachment, getIssue, issueNumber, issueSummary, listIssues, ref, summaryOf } from "./issues"
+import { appRoles, attachment, getIssue, issueNumber, issueSummary, ref, summaryOf } from "./issues"
 import type { AttachmentRow } from "./issues"
 
 export interface Access {
@@ -45,7 +45,7 @@ function access(c: Ctx): Access {
   }
 }
 const roles = (a: Access) => a.roles ??= appRoles(a.env, a.app.id)
-const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, can(a.role, "read"), roles(a))
+const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, can(a.role, "read"))
 const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a))
 // A rename can commit between loading the request actor and writing its JSON snapshot. Usually this
 // matches no rows; a stale guest would violate NOT NULL and roll back the entire post or event.
@@ -343,15 +343,10 @@ export async function removeLabel(a: Access, id: string) {
 const base = "/api/apps/:slug/issues",
   path = `${base}/:number`
 export const issues = new Hono<Bindings>()
-issues.get(base, async (c) => {
-  const { state, label, cursor, q } = c.req.query()
-  return c.json(await listIssues(c.env, c.var.app.id, { state, label, cursor, query: q }))
-})
 issues.post(base, async (c) => {
   const b = await postBody(c)
   return c.json(await createIssue(access(c), b), 201)
 })
-issues.get(path, async (c) => c.json(await full(access(c), issueNumber(c.req.param("number")))))
 issues.patch(path, async (c) => {
   await allowWrite(c)
   return c.json(await updateIssue(access(c), issueNumber(c.req.param("number")), await body(c)))

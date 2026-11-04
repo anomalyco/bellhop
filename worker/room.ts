@@ -38,12 +38,15 @@ export class Room extends DurableObject<Env> {
     server.serializeAttachment({ at: Date.now() })
     const viewers = this.viewers()
     server.send(JSON.stringify({ type: "hello", viewers, activity } satisfies LiveEvent))
-    if (issueId) this.publish([{ type: "viewers", count: viewers }])
+    if (issueId) this.broadcast([{ type: "viewers", count: viewers }], server)
     return new Response(null, { status: 101, webSocket: client })
   }
   publish(events: LiveEvent[]) {
+    this.broadcast(events)
+  }
+  private broadcast(events: LiveEvent[], except?: WebSocket) {
     const messages = events.map((e) => JSON.stringify(e))
-    for (const ws of this.sockets()) {
+    for (const ws of this.sockets(except)) {
       try {
         for (const message of messages) ws.send(message)
       } catch {

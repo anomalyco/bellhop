@@ -103,6 +103,7 @@ export async function expireActivity(env: Env, appId: string, issueId: string, p
     const event: LiveEvent = { type: "activity", issue_id: issueId, activity: null }
     publish(event)
     await appRoom(env, appId).publish([event])
+    return null // The guarded write cleared this presence; a later refresh schedules its own alarm.
   }
   const next = await sql(
     env,

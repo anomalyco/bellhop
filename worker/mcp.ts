@@ -12,7 +12,7 @@ import {
   writeLabel,
   writeTemplate
 } from "./apps"
-import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, rows, sha256, sql, str } from "./core"
+import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, sha256, sql, str } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { agentAccessSQL, can, teamRole } from "./permissions"
 import type { Action } from "./permissions"
@@ -403,20 +403,36 @@ async function authenticate(c: Ctx): Promise<Caller | null> {
   const credential = token.startsWith("bh_a_")
     ? "kind='oauth' AND id IN (SELECT grant_id FROM oauth_tokens WHERE hash=? AND kind='access' AND expires_at>unixepoch())"
     : "kind='token' AND token_hash=?"
-  const agent = await sql(
-    c.env,
-    `UPDATE agents SET last_used_at=unixepoch() WHERE revoked_at IS NULL AND ${credential} RETURNING id,user_id,name,create_workspaces`,
-    hash
-  ).first<{ id: string; user_id: string; name: string; create_workspaces: number }>()
-  if (!agent) return null
-  const apps = await rows<Workspace>(
+  const active = `FROM agents WHERE revoked_at IS NULL AND ${credential}`
+  const [identity, scopes] = await c.env.DB.batch<unknown>([
+    sql(
+      c.env,
+      `SELECT id,user_id,name,create_workspaces,last_used_at IS NULL OR last_used_at<unixepoch()-300 stale ${active}`,
+      hash
+    ),
     sql(
       c.env,
       `SELECT ${appCols},acl.role FROM (${agentAccessSQL}) acl JOIN apps a ON a.id=acl.app_id
-    WHERE acl.agent_id=? AND acl.role IS NOT NULL ORDER BY a.slug`,
-      agent.id
+      WHERE acl.agent_id=(SELECT id ${active}) AND acl.role IS NOT NULL ORDER BY a.slug`,
+      hash
     )
-  )
+  ])
+  const agent = identity!.results[0] as
+    | { id: string; user_id: string; name: string; create_workspaces: number; stale: number }
+    | undefined
+  if (!agent) return null
+  // One activity timestamp covers both bearer types. The second check avoids redundant writes
+  // if several calls authenticated before the first background update committed.
+  if (agent.stale)
+    c.executionCtx.waitUntil(
+      sql(
+        c.env,
+        `UPDATE agents SET last_used_at=unixepoch() WHERE id=?
+    AND revoked_at IS NULL AND (last_used_at IS NULL OR last_used_at<unixepoch()-300)`,
+        agent.id
+      ).run()
+    )
+  const apps = scopes!.results as Workspace[]
   return {
     apps,
     user: agent.user_id,
