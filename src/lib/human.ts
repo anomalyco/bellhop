@@ -123,6 +123,7 @@ export function cancelHostedCheck() {
 export async function ensureHuman(member: boolean) {
   if (member) return
   const me = peek<Me>("me")
-  if (me?.human) return
+  // Signed-in help desk contacts write without the check, like accounts
+  if (me?.human || me?.contact) return
   await runHumanCheck()
 }

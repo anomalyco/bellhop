@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "自分の報告",
   "menu.notifications": "通知",
   "menu.signOut": "サインアウト",
+  "menu.docs": "開発者向けドキュメント",
   "menu.language": "言語",
   "language.automatic": "自動（ブラウザー）",
   "language.label": "言語: {language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "問題が発生しました",
   "error.goHome": "ホームへ",
   "error.unavailable": "この機能はまだ利用できません。",
-  "error.offline": "Bellhop に接続できません。接続を確認してください。",
+  "error.offline": "接続できません。接続を確認して、もう一度お試しください。",
   "error.unknown": "問題が発生しました。",
 
   // Issue states
@@ -107,6 +108,7 @@ const messages: Translation<typeof en> = {
   "rail.create": "ワークスペースを作成",
   "rail.all": { other: "すべてのワークスペース（{count}）" },
   "rail.public": "公開ワークスペース",
+  "rail.docs": "開発者向けドキュメント",
   "rail.openCount": { other: "{count}件オープン" },
   // Mine
   "mine.label": "自分",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": "、",
   // Agents
   "agents.title": "エージェント",
+  "agents.docs": "ドキュメント",
   "agents.newToken": "新しいトークンエージェント",
   "agents.intro": "エージェントはあなたのアカウントの代わりに動作します。選んだワークスペースでのみ、あなた自身のロールを超えない範囲で操作します。",
   "agents.none": "まだエージェントはありません。MCP で接続するか、スクリプトや CI 用にトークンエージェントを作成してください。",

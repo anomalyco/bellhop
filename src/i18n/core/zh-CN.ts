@@ -34,6 +34,7 @@ const messages: Translation<typeof en> = {
   "menu.reports": "你的报告",
   "menu.notifications": "通知",
   "menu.signOut": "退出登录",
+  "menu.docs": "开发者文档",
   "menu.language": "语言",
   "language.automatic": "自动（跟随浏览器）",
   "language.label": "语言：{language}",
@@ -45,7 +46,7 @@ const messages: Translation<typeof en> = {
   "error.generic": "出错了",
   "error.goHome": "返回首页",
   "error.unavailable": "此功能暂不可用。",
-  "error.offline": "无法连接 Bellhop，请检查网络连接。",
+  "error.offline": "无法连接，请检查网络后重试。",
   "error.unknown": "出错了。",
 
   // Issue states
@@ -107,6 +108,7 @@ const messages: Translation<typeof en> = {
   "rail.create": "创建你的工作区",
   "rail.all": { other: "全部 {count} 个工作区" },
   "rail.public": "公开工作区",
+  "rail.docs": "开发者文档",
   "rail.openCount": { other: "{count} 个开放" },
   // Mine
   "mine.label": "我的",
@@ -646,6 +648,7 @@ const messages: Translation<typeof en> = {
   "list.separator": "、",
   // Agents
   "agents.title": "智能体",
+  "agents.docs": "文档",
   "agents.newToken": "新建令牌智能体",
   "agents.intro": "智能体代表你的账户行事，只在你选择的工作区中工作，且权限永远不会超过你在那里的角色。",
   "agents.none": "还没有智能体。通过 MCP 连接一个，或为脚本和 CI 创建令牌智能体。",

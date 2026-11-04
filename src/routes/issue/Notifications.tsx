@@ -7,6 +7,7 @@ import { Button } from "../../ui/primitives"
 import type { IssueModel } from "./model"
 import "../../styles/features.css"
 import { tKey, tr, useT, type PlainKey } from "../../i18n/core"
+import { tr as trDesk, useT as useDeskT } from "../../i18n/helpdesk"
 
 const reasonText: Record<NonNullable<IssueSubscription["reason"]>, PlainKey> = {
   opened: "notify.opened",
@@ -23,6 +24,7 @@ const reasonText: Record<NonNullable<IssueSubscription["reason"]>, PlainKey> = {
  */
 export function NotificationsSection({ model }: { model: IssueModel }) {
   const t = useT()
+  useDeskT()
   const { app, issue, me } = model
   const slug = app.slug
   const key = keys.subscription(slug, issue.number)
@@ -88,6 +90,25 @@ export function NotificationsSection({ model }: { model: IssueModel }) {
       <>
         <span className="skeleton notify-skeleton-button" />
         <span className="skeleton notify-skeleton-line" />
+      </>
+    )
+  } else if (me?.contact?.email) {
+    // A help desk contact follows at their verified email, like an account: no address to give, nothing to confirm.
+    // Their own requests are followed from the start.
+    const address = <span className="notify-address">{me.contact.email}</span>
+    body = sub.subscribed ? (
+      <>
+        <Button size="small" className="btn notify-button" onClick={() => void put(false)} disabled={busy}>
+          {t("notify.stop")}
+        </Button>
+        <p className="notify-text">{tr("notify.repliesTo", { email: address })}</p>
+      </>
+    ) : (
+      <>
+        <Button size="small" className="btn notify-button" onClick={() => void put(true)} disabled={busy}>
+          {t("notify.byEmail")}
+        </Button>
+        <p className="notify-text">{trDesk("notify.contactOff", { email: address })}</p>
       </>
     )
   } else if (account) {

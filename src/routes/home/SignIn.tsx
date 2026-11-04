@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react"
 import { useLocation, useSearch } from "wouter"
-import type { Config } from "../../../shared/api"
+import type { Config, Me } from "../../../shared/api"
 import { api, errorMessage, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
 import { isAbsolute } from "../../lib/site"
@@ -8,6 +8,10 @@ import { AgentAvatar, Button } from "../../ui/primitives"
 import { useMe } from "../../ui/Shell"
 import "../../styles/onboarding.css"
 import { useT } from "../../i18n/core"
+import { tr, useT as useDeskT } from "../../i18n/helpdesk"
+import { EmailCode } from "../../ui/helpdesk/EmailCode"
+import { MailIcon } from "../../ui/icons"
+import { ApiFailure } from "../../lib/api"
 
 /** Where ?next= may send you after signing in: a path here, or an absolute URL (an app subdomain) the Worker vets. */
 function safeNext(raw: string | null) {
@@ -55,8 +59,34 @@ export function SignIn({ back }: { back?: string }) {
 /** Continue with Google (and the development sign-in when it's on), returning to `next`. */
 export function SignInActions({ next }: { next: string }) {
   const t = useT()
+  const td = useDeskT()
   const { data: config } = useResource<Config>(keys.config, api.config, 60_000)
   const [email, setEmail] = useState("")
+  const [byEmail, setByEmail] = useState(false)
+
+  if (byEmail)
+    return (
+      <div className="signin-actions">
+        <EmailCode<Me>
+          id="account-email"
+          autoFocus
+          start={(address) => api.emailStart(address)}
+          // Both steps always answer ok (nothing reveals how an address signs in): the session tells
+          verify={async (address, code) => {
+            await api.emailVerify(address, code)
+            const me = await api.me()
+            if (!me.user) throw new ApiFailure(400, "invalid_code", "")
+            return me
+          }}
+          sentTo={(address) => tr("account.sentTo", { email: address })}
+          invalidMessage={td("account.invalid")}
+          onVerified={() => window.location.assign(next)}
+        />
+        <button type="button" className="link-button signin-back" onClick={() => setByEmail(false)}>
+          {td("account.otherWays")}
+        </button>
+      </div>
+    )
 
   const devLogin = (e: FormEvent) => {
     e.preventDefault()
@@ -71,6 +101,11 @@ export function SignInActions({ next }: { next: string }) {
           <GoogleMark />
           {t("signin.google")}
         </a>
+      )}
+      {config?.email_sign_in && (
+        <Button size="large" className="btn signin-email" onClick={() => setByEmail(true)} icon={<MailIcon size={16} />}>
+          {td("account.continueEmail")}
+        </Button>
       )}
       {config?.dev_login && (
         <form className="signin-dev" onSubmit={devLogin}>

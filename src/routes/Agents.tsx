@@ -14,6 +14,7 @@ import { AgentSetup } from "../ui/onboarding/AgentSetup"
 import { SignIn } from "./home/SignIn"
 import "../styles/agents.css"
 import { tr, useT } from "../i18n/core"
+import { homeUrl } from "../lib/site"
 
 /** The account's agents (/agents on the home domain): OAuth connections and token agents, their access, secrets. */
 export function AgentsPage() {
@@ -45,6 +46,10 @@ function Agents() {
     <div className="agents-page">
       <div className="agents-head">
         <h1 className="page-title agents-title">{t("agents.title")}</h1>
+        <span className="spacer" />
+        <a href={homeUrl("/docs/mcp")} className="btn agents-docs" data-variant="invisible">
+          {t("agents.docs")} ↗
+        </a>
         {!creating && (
           <Button variant="primary" icon={<PlusIcon size={14} />} onClick={() => setCreating(true)}>
             {t("agents.newToken")}

@@ -32,6 +32,10 @@ import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
 import "../styles/moderation.css"
+import { t as td, useT as useDeskT } from "../i18n/helpdesk"
+import { isDesk } from "../lib/helpdesk"
+import { HelpdeskSettings } from "./settings/Helpdesk"
+import { IdentityKeys } from "./settings/IdentityKeys"
 
 type Section =
   | "general"
@@ -47,9 +51,12 @@ type Section =
   | "blocked"
   | "data"
   | "audit"
+  | "helpdesk"
+  | "identity-keys"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
-const sections: { id: Section; min: Role }[] = [
+// `desk`: only for workspaces in help desk mode.
+const sections: { id: Section; min: Role; desk?: boolean }[] = [
   { id: "general", min: "viewer" },
   { id: "insights", min: "member" },
   { id: "labels", min: "viewer" },
@@ -59,12 +66,16 @@ const sections: { id: Section; min: Role }[] = [
   { id: "agents", min: "admin" },
   { id: "webhook", min: "admin" },
   { id: "report-keys", min: "admin" },
+  { id: "helpdesk", min: "admin" },
+  { id: "identity-keys", min: "admin", desk: true },
   { id: "tiers", min: "member" },
   { id: "blocked", min: "member" },
   { id: "data", min: "admin" },
   { id: "audit", min: "admin" },
 ]
-const sectionLabel = (id: Section) => tKey(`section.${id}`)
+// The help desk's sections are named in its own namespace, with the rest of their copy
+const sectionLabel = (id: Section) =>
+  id === "helpdesk" ? td("settings.title") : id === "identity-keys" ? td("keys.title") : tKey(`section.${id as Exclude<Section, "helpdesk" | "identity-keys">}`)
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
   return (
@@ -93,7 +104,8 @@ function SettingsBody({ app, section }: { app: AppDetail; section: Section }) {
 }
 
 function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) {
-  const visible = sections.filter((s) => atLeast(app.role, s.min))
+  useDeskT()
+  const visible = sections.filter((s) => atLeast(app.role, s.min) && (!s.desk || isDesk(app)))
   const active = visible.some((s) => s.id === section) ? section : "general"
   const nav = useRef<HTMLElement>(null)
   // On phones the section list scrolls sideways: center the current one, and mark which edges have more (settings.css
@@ -139,6 +151,8 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "agents" && <Agents app={app} />}
           {active === "webhook" && <Webhook app={app} />}
           {active === "report-keys" && <ReportKeys app={app} />}
+          {active === "helpdesk" && <HelpdeskSettings app={app} />}
+          {active === "identity-keys" && <IdentityKeys app={app} />}
           {active === "members" && <Members app={app} />}
           {active === "tiers" && <Tiers app={app} />}
           {active === "blocked" && <Blocked app={app} />}

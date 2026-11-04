@@ -2,6 +2,7 @@ import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react"
 import { jacketPath, jacketTransform } from "./mark"
 import { StatusIcon } from "./icons"
 import { t, useT } from "../i18n/core"
+import { initialOf } from "../lib/helpdesk"
 
 /** primary: OpenCode's "submit" button, flat. default: "neutral". invisible: ghost. ghost-muted: a quieter ghost for
  *  toolbars and row actions. */
@@ -165,7 +166,14 @@ export function AgentAvatar({ size = 20 }: { size?: number }) {
 }
 
 /** An application's icon, rounded like the mark; the Bellhop mark when it has none. */
-export function AppIcon({ src, size = 20 }: { src: string | null; size?: number }) {
+/** A workspace's icon. Without one: Bellhop's mark, or (help desks pass `name`, so it stays theirs) its initial. */
+export function AppIcon({ src, size = 20, name }: { src: string | null; size?: number; name?: string }) {
+  if (!src && name)
+    return (
+      <span className="desk-mark" style={{ width: size, height: size, borderRadius: Math.round(size * 0.26), fontSize: Math.round(size * 0.5) }} aria-hidden="true">
+        {initialOf(name)}
+      </span>
+    )
   if (!src) return <span className="logo-mark"><AgentAvatar size={size} /></span>
   return <img className="app-icon" src={src} width={size} height={size} alt="" style={{ borderRadius: Math.round(size * 0.26) }} />
 }

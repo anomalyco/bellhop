@@ -211,6 +211,25 @@ export const SettingsIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const BookIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M2.75 3.25c1.9-.5 3.6-.25 5.25.9v8.6c-1.65-1.15-3.35-1.4-5.25-.9zM13.25 3.25c-1.9-.5-3.6-.25-5.25.9v8.6c1.65-1.15 3.35-1.4 5.25-.9z" />
+  </Icon>
+)
+
+export const CheckIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M3.25 8.5l3 3 6.5-7" />
+  </Icon>
+)
+
+export const MailIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <rect x="1.75" y="3.25" width="12.5" height="9.5" rx="1.5" />
+    <path d="M2.25 4.25L8 8.75l5.75-4.5" />
+  </Icon>
+)
+
 export const GlobeIcon = (p: IconProps) => (
   <Icon {...p}>
     <circle cx="8" cy="8" r="6.25" />

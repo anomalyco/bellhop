@@ -1,8 +1,9 @@
 import type { Filter } from "../../lib/issues"
-import { PersonIcon } from "../icons"
+import { BookIcon, PersonIcon } from "../icons"
 import { SiteLink } from "../SiteLink"
 import "../../styles/features.css"
 import { useT } from "../../i18n/core"
+import { homeUrl } from "../../lib/site"
 
 /** For the home feed's rail, for everyone (guests too): the way back to the issues you opened. */
 export function RailReports() {
@@ -15,6 +16,13 @@ export function RailReports() {
             <PersonIcon size={16} />
             <span className="rail-name">{t("menu.reports")}</span>
           </SiteLink>
+        </li>
+        <li>
+          {/* The docs are server-rendered pages: a full page load */}
+          <a href={homeUrl("/docs")} className="rail-row">
+            <BookIcon size={16} />
+            <span className="rail-name">{t("rail.docs")}</span>
+          </a>
         </li>
       </ul>
     </section>

@@ -20,6 +20,7 @@ import { AppLayout, NotFound } from "./ui/Shell"
 import "./styles/theme.css"
 import "./styles/components.css"
 import "./styles/app.css"
+import { DeskSignIn } from "./routes/helpdesk/SignIn"
 
 const DesignSystem = lazy(() => import("./routes/DesignSystem").then((m) => ({ default: m.DesignSystem })))
 const Settings = lazy(() => import("./routes/Settings"))
@@ -27,6 +28,8 @@ const Consent = lazy(() => import("./routes/OAuth").then((m) => ({ default: m.Co
 const Device = lazy(() => import("./routes/OAuth").then((m) => ({ default: m.Device })))
 const Agents = lazy(() => import("./routes/Agents").then((m) => ({ default: m.AgentsPage })))
 const Reports = lazy(() => import("./routes/Reports").then((m) => ({ default: m.ReportsPage })))
+const ContactsPage = lazy(() => import("./routes/helpdesk/Contacts").then((m) => ({ default: m.ContactsPage })))
+const ContactPageView = lazy(() => import("./routes/helpdesk/Contacts").then((m) => ({ default: m.ContactPageView })))
 const NotificationSettings = lazy(() => import("./routes/NotificationSettings").then((m) => ({ default: m.NotificationSettingsPage })))
 
 const homePages = homeSegments
@@ -112,6 +115,9 @@ function AppRoutes({ slug }: { slug: string }) {
     <Switch>
       <Route path="/_design" component={DesignSystem} />
       <Route path="/new">{() => <NewIssue slug={slug} />}</Route>
+      <Route path="/signin">{() => <DeskSignIn slug={slug} />}</Route>
+      <Route path="/contacts">{() => <ContactsPage slug={slug} />}</Route>
+      <Route path="/contacts/:id">{(p) => <ContactPageView slug={slug} id={p.id} />}</Route>
       <Route path="/issues/:number">
         {(p) => (/^[1-9]\d*$/.test(p.number) ? <IssuePage slug={slug} number={Number(p.number)} /> : <NotFound />)}
       </Route>
@@ -143,6 +149,9 @@ function PathRoutes() {
       <Route path="/reports" component={Reports} />
       <Route path="/settings/notifications" component={NotificationSettings} />
       <Route path="/:slug/new">{(p) => <NewIssue slug={p.slug} />}</Route>
+      <Route path="/:slug/signin">{(p) => <DeskSignIn slug={p.slug} />}</Route>
+      <Route path="/:slug/contacts">{(p) => <ContactsPage slug={p.slug} />}</Route>
+      <Route path="/:slug/contacts/:id">{(p) => <ContactPageView slug={p.slug} id={p.id} />}</Route>
       <Route path="/:slug/issues/:number">
         {(p) => (/^[1-9]\d*$/.test(p.number) ? <IssuePage slug={p.slug} number={Number(p.number)} /> : <NotFound />)}
       </Route>
@@ -154,6 +163,7 @@ function PathRoutes() {
         )}
       </Route>
       <Route path="/:slug">{(p) => <Issues slug={p.slug} />}</Route>
+      <Route path="/:slug/*">{(p) => <NotFound slug={p.slug} />}</Route>
       <Route>{() => <NotFound />}</Route>
     </Switch>
   )

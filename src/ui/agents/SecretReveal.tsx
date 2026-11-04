@@ -9,7 +9,15 @@ import { tr, useT } from "../../i18n/core"
 export function SecretReveal({ agent, rotated, onDone }: { agent: NewAgentToken; rotated?: boolean; onDone: () => void }) {
   const t = useT()
   const url = mcpUrl()
-  const config = JSON.stringify({ mcp: { bellhop: { type: "remote", url, headers: { Authorization: `Bearer ${agent.token}` } } } }, null, 2)
+  // OpenCode V2: mcp.servers.<name>; a token agent turns OAuth off and sends its secret as a header instead
+  const config = JSON.stringify(
+    {
+      $schema: "https://opencode.ai/config.json",
+      mcp: { servers: { bellhop: { type: "remote", url, oauth: false, headers: { Authorization: `Bearer ${agent.token}` } } } },
+    },
+    null,
+    2,
+  )
   return (
     <section className="secret" aria-labelledby={`secret-${agent.id}`}>
       <div className="secret-head">
