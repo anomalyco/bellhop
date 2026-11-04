@@ -144,6 +144,7 @@
 //   POST   /api/apps/:slug/import/github { repo: "owner/name", token, state?: "open"|"all" } -> ImportJob   admin;
 //          copies issues, comments and labels in the background. The token is used for this job only and then
 //          deleted. Authors become guest actors named "@login"; issues carry `imported`.
+//   GET    /api/apps/:slug/import                        -> ImportJob | null   admin; the workspace's most recent import
 //   GET    /api/apps/:slug/import/:id                    -> ImportJob          admin
 //   GET    /oembed?url=<issue or workspace URL>&format=json -> oEmbed JSON     public issues and public workspaces only
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member

@@ -1,10 +1,9 @@
 import type { Ctx } from "./core"
 import { appUrl, bad, rows, sql } from "./core"
 import { pageContext, pagePayload } from "./page-payload"
-import type { PagePayload } from "../shared/api"
+import type { Actor, Issue, IssueStatus, PagePayload } from "../shared/api"
 import { visibleIssues, workspaceActivitySQL } from "./issues"
 import { preview, snippet, statuses } from "./previews"
-import type { Actor, IssueStatus } from "../shared/api"
 
 // Dev serves workspaces under /<slug>. The apex also understands these old page links;
 // the production sitemap always points to the canonical workspace subdomain instead.
@@ -112,6 +111,9 @@ const bootScript = (payload: PagePayload) =>
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029")}</script>`
+const hasVideo = (post: Pick<Issue, "attachments" | "body">) =>
+  post.attachments.some((a) => a.kind === "video") ||
+  /(?:^|[\s(<])\/media\/[^\s()<>]+\.(?:mp4|m4v|webm|mov|ogv)(?=[?#)>\s]|$)/i.test(post.body)
 export async function page(c: Ctx) {
   const url = new URL(c.req.url),
     target = location(c, url),
@@ -230,6 +232,25 @@ export async function page(c: Ctx) {
   }
   if (noindex) headers.set("X-Robots-Tag", "noindex")
   const rw = new HTMLRewriter()
+  const { route } = payload
+  const markdown = route.kind === "issue" || route.kind === "new"
+  const video =
+    route.kind === "issue" &&
+    (hasVideo(route.issue) || route.issue.timeline.some((item) => item.kind === "comment" && hasVideo(item.comment)))
+  rw.on("head link[data-bh-preload]", {
+    element(e) {
+      const kind = e.getAttribute("data-bh-preload")
+      const needed = kind === "markdown" ? markdown : video && (kind === "video" || kind === "video-style")
+      if (!needed) {
+        e.remove()
+        return
+      }
+      e.removeAttribute("data-bh-preload")
+      e.setAttribute("crossorigin", "")
+      e.setAttribute("rel", kind === "video-style" ? "preload" : "modulepreload")
+      if (kind === "video-style") e.setAttribute("as", "style")
+    }
+  })
   for (const selector of [
     "title",
     'meta[name="description"]',

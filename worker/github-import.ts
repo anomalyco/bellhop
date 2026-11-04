@@ -47,13 +47,16 @@ const project = (j: Job): ImportJob => ({
   created_at: j.created_at,
   finished_at: j.finished_at
 })
-const readJob = (env: Env, app: string, id: string) =>
-  sql(
+async function readJob(env: Env, app: string, id?: string): Promise<ImportJob | null> {
+  const row = await sql(
     env,
-    "SELECT id,repo,state,issues,comments,labels,error,created_at,finished_at FROM github_jobs WHERE app_id=? AND id=?",
+    `SELECT id,repo,state,issues,comments,labels,error,created_at,finished_at FROM github_jobs WHERE app_id=?
+     ${id === undefined ? "ORDER BY created_at DESC,rowid DESC LIMIT 1" : "AND id=?"}`,
     app,
-    id
+    ...(id === undefined ? [] : [id])
   ).first<Job>()
+  return row ? project(row) : null
+}
 const b64 = (data: Uint8Array) => btoa(String.fromCharCode(...data)),
   un64 = (s: string) => Uint8Array.from(atob(s), (x) => x.charCodeAt(0))
 async function key(env: Env) {
@@ -160,9 +163,13 @@ async function dispatch(env: Env, j: { id: string; version: number }, delay = 0)
 }
 const routes = "/api/apps/:slug/import"
 export const imports = new Hono<Bindings>()
+imports.get(routes, async (c) => {
+  requireTeam(c, "setup")
+  return c.json(await readJob(c.env, c.var.app.id))
+})
 imports.get(routes + "/:id", async (c) => {
   requireTeam(c, "setup")
-  return c.json(project((await readJob(c.env, c.var.app.id, c.req.param("id")!)) ?? missing()))
+  return c.json((await readJob(c.env, c.var.app.id, c.req.param("id")!)) ?? missing())
 })
 imports.post(routes + "/github", async (c) => {
   requireTeam(c, "setup")
@@ -215,7 +222,7 @@ imports.post(routes + "/github", async (c) => {
     throw e
   }
   await dispatch(env, { id: j.id, version: 0 }).catch(() => {})
-  return c.json(project((await readJob(env, app, j.id)) ?? missing()), 202)
+  return c.json((await readJob(env, app, j.id)) ?? missing(), 202)
 })
 
 async function actor(app: string, user: GHUser) {
