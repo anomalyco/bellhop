@@ -48,7 +48,7 @@ const fields = (
   team: boolean,
   personal = true,
   full = false
-) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,i.reporter_locale,
+) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,${team?'i.assignee':"CASE WHEN (SELECT mode FROM apps WHERE id=i.app_id)!='helpdesk' THEN i.assignee END"} assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,i.reporter_locale,
   ${team ? tierBag("i.app_id", ["i.author", "i.assignee", "json_extract(i.activity,'$.actor')", "json_extract(i.hidden,'$.by')"], full ? "i.mentions" : undefined) : "NULL"} tier_bag,
   ${voteCount(team ? "1" : "0", personal ? "(SELECT ids FROM viewer)" : "'[]'")} votes,
   ${personal ? "EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=(SELECT voter FROM viewer))" : "0"} viewer_voted,
@@ -263,13 +263,15 @@ function issueFilter(
         where.push(
           value === "label"
             ? "NOT EXISTS(SELECT 1 FROM issue_labels il WHERE il.issue_id=i.id)"
-            : "json_extract(i.assignee,'$.id') IS NULL"
+            : `(${v.team?'':"(SELECT mode FROM apps WHERE id=i.app_id)='helpdesk' OR "}json_extract(i.assignee,'$.id') IS NULL)`
         )
         break
       case "author":
       case "assignee":
+        // A requester must not be able to infer the hidden assignee through search results.
+        const ignoreAssignment = key === "assignee" && !v.team ? "(SELECT mode FROM apps WHERE id=i.app_id)='helpdesk' OR " : ""
         if (value === "@me") {
-          where.push(`json_extract(i.${key},'$.id') IN (SELECT value FROM json_each(?))`)
+          where.push(`(${ignoreAssignment}json_extract(i.${key},'$.id') IN (SELECT value FROM json_each(?)))`)
           values.push(JSON.stringify(actorIds(v)))
           if (key === "author" && !parsed.terms.some((t) => t.key === "is" && t.value === "hidden" && v.team))
             where.push("i.hidden IS NULL")
@@ -281,7 +283,7 @@ function issueFilter(
           const handle = value.replace(/^@/, "")
           values.push(handles.get(handle) ?? null, handle)
         } else {
-          where.push(`json_extract(i.${key},'$.id')=?`)
+          where.push(`(${ignoreAssignment}json_extract(i.${key},'$.id')=?)`)
           values.push(handles.get(value.replace(/^@/, "")) ?? null)
         }
         break
@@ -706,7 +708,7 @@ export async function getIssue(
          UNION ALL SELECT n.id,'nudged','{"type":"agent","id":"bellhop","name":"Bellhop"}','{}',n.created_at,NULL,NULL,NULL,NULL FROM nudge_events n WHERE n.issue_id=(${target})
          UNION ALL SELECT e.id,'routed',e.actor,e.data,e.created_at,NULL,NULL,NULL,NULL FROM request_route_events e JOIN apps a ON a.id=e.app_id AND a.mode='helpdesk' WHERE e.issue_id=(${target})
          UNION ALL SELECT id,type,actor,data,created_at,NULL,NULL,NULL,NULL FROM approval_events WHERE issue_id=(${target}) ORDER BY created_at`
-           : "ORDER BY e.created_at,e.rowid"
+           : "AND (e.type NOT IN ('assigned','claimed') OR (SELECT mode FROM apps WHERE id=(SELECT app_id FROM issues WHERE id=e.issue_id))!='helpdesk') ORDER BY e.created_at,e.rowid"
        }`,
         key,
         number,

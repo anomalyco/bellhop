@@ -13,22 +13,56 @@ export const guard = (env: Env, test: string, ...args: unknown[]) =>
 export const active = `SELECT h.doc FROM handoff_docs h WHERE h.issue_id=i.id AND h.app_id=i.app_id AND h.ended_at IS NULL`
 export const withPerson = `EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=i.id AND h.app_id=i.app_id AND h.ended_at IS NULL)`
 type Schedule = { id: string; hours: string | null; version: number }
-// Intl handles DST and offsets. A crossing-midnight shift belongs to the day it starts.
-export function onDuty(hours: Group["hours"], at: string) {
-  if (!hours) return true
-  const parts = new Intl.DateTimeFormat("en-US", {
+type Timing = { open: boolean; next: string | null }
+const alwaysOpen: Timing = { open: true, next: null }
+// Work in UTC minutes. Jump toward the next local start; if an offset changes along
+// the way, visit the transition itself (a spring gap or repeated hour may open a shift).
+function groupTiming(hours: Group["hours"], at: string, findOpening = true): Timing {
+  if (!hours) return alwaysOpen
+  const formatter = new Intl.DateTimeFormat("en-US", {
     timeZone: hours.timezone,
     weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23"
-  }).formatToParts(new Date(at))
-  const part = (type: string) => parts.find((p) => p.type === type)!.value,
-    day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(part("weekday")),
-    time = part("hour") + ":" + part("minute")
-  return hours.start < hours.end
-    ? hours.days.includes(day) && time >= hours.start && time < hours.end
-    : (hours.days.includes(day) && time >= hours.start) || (hours.days.includes((day + 6) % 7) && time < hours.end)
+  })
+  const week = 7 * 1440,
+    minute = (s: string) => Number(s.slice(0, 2)) * 60 + Number(s.slice(3)),
+    start = minute(hours.start),
+    duration = (minute(hours.end) - start + 1440) % 1440,
+    starts = hours.days.map((d) => d * 1440 + start),
+    local = (utc: number) => {
+      const parts = formatter.formatToParts(utc * 60000),
+        part = (k: string) => parts.find((p) => p.type === k)!.value
+      return (
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(part("weekday")) * 1440 +
+        Number(part("hour")) * 60 +
+        Number(part("minute"))
+      )
+    }
+  const first = Math.floor(Date.parse(at) / 60000)
+  for (let u = first; u <= first + 2 * week; ) {
+    const l = local(u)
+    if (starts.some((s) => (l - s + week) % week < duration))
+      return u === first ? alwaysOpen : { open: false, next: new Date(u * 60000).toISOString() }
+    if (!findOpening) return { open: false, next: null }
+    let step = Math.min(360, ...starts.map((s) => (s - l + week) % week || week))
+    if (local(u + step) !== (l + step) % week) {
+      let lo = 1,
+        hi = step
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1
+        if (local(u + mid) === (l + mid) % week) lo = mid + 1
+        else hi = mid
+      }
+      step = lo
+    }
+    u += step
+  }
+  throw Error("No opening for validated group hours")
+}
+export function onDuty(hours: Group["hours"], at: string) {
+  return groupTiming(hours, at, false).open
 }
 const routeGroup = `coalesce((SELECT json_extract(t.route,'$.group') FROM request_answers b JOIN request_types t ON t.id=b.type_id AND t.app_id=b.app_id WHERE b.issue_id=? AND b.app_id=a.id),a.default_group_id)`
 const groupVersion = (env: Env, g: Schedule, app: string) =>
@@ -38,8 +72,16 @@ const pick = `SELECT r.actor FROM handoff_roster r JOIN handoff_groups g ON g.id
  ORDER BY CASE WHEN g.strategy='least_busy' THEN (SELECT count(*) FROM issues i WHERE i.app_id=g.app_id AND i.status!='closed' AND json_extract(i.assignee,'$.id')=r.user_id) ELSE 0 END,
  r.position<=coalesce((SELECT p.position FROM handoff_roster p WHERE p.group_id=g.id AND p.user_id=g.last_user),-1),r.position LIMIT 1`
 const window = `(SELECT strftime('%Y-%m-%dT%H:%M:%fZ',?,'+'||g.response_minutes||' minutes') FROM handoff_groups g WHERE g.id=handoffs.group_id)`
-function assign(env: Env, id: string, g: Schedule | null, at: string, previous: Actor | null, passed: boolean) {
-  const open = g && onDuty(g.hours ? JSON.parse(g.hours) : null, at),
+function assign(
+  env: Env,
+  id: string,
+  g: Schedule | null,
+  at: string,
+  previous: Actor | null,
+  passed: boolean,
+  timing = groupTiming(g?.hours ? JSON.parse(g.hours) : null, at)
+) {
+  const open = g && timing.open,
     q = []
   if (open && !passed)
     q.push(
@@ -48,9 +90,10 @@ function assign(env: Env, id: string, g: Schedule | null, at: string, previous: 
   q.push(
     sql(
       env,
-      `UPDATE handoffs SET waiting=CASE WHEN assignee IS NULL THEN ? END,respond_by=CASE WHEN assignee IS NOT NULL THEN ${window} END,
+      `UPDATE handoffs SET waiting=CASE WHEN assignee IS NULL THEN ? END,respond_by=CASE WHEN assignee IS NULL THEN NULL WHEN json_extract(assignee,'$.id') IS ? THEN respond_by ELSE ${window} END,
     passed=max(passed,? AND assignee IS NOT NULL AND json_extract(assignee,'$.id') IS NOT ?),version=version+1 WHERE id=?`,
       g && !open ? "hours" : "nobody_available",
+      previous?.id ?? null,
       at,
       Number(!!previous),
       previous?.id ?? null,
@@ -58,8 +101,9 @@ function assign(env: Env, id: string, g: Schedule | null, at: string, previous: 
     ),
     sql(
       env,
-      `UPDATE handoffs SET next_check=CASE WHEN waiting IS NOT NULL AND group_id IS NOT NULL THEN strftime('%Y-%m-%dT%H:%M:%fZ',?,'+1 minute') ELSE respond_by END WHERE id=?`,
-      at,
+      `UPDATE handoffs SET next_check=CASE WHEN waiting='hours' THEN ? WHEN assignee IS NOT NULL AND json_extract(assignee,'$.id') IS NOT ? THEN respond_by END WHERE id=?`,
+      timing.next,
+      previous?.id ?? null,
       id
     ),
     sql(
@@ -87,12 +131,14 @@ function record(
   type: "escalated" | "tick" | "handed_back",
   actor: Actor,
   at: string,
-  previous: Actor | null = null
+  previous: Actor | null = null,
+  oldWaiting: string | null = null
 ) {
   return sql(
     env,
-    `INSERT INTO handoff_events SELECT ?,h.id,CASE WHEN ?='tick' THEN CASE WHEN json_extract(h.assignee,'$.id') IS ? THEN 'reminder' ELSE 'reassigned' END ELSE ? END,?,
-    json_set(h.doc,'$.assignee',json(h.assignee),'$.from',json(?),'$.to',json(h.assignee)),? FROM handoff_docs h WHERE h.id=? AND (?!='tick' OR h.assignee IS NOT NULL)`,
+    `INSERT INTO handoff_events SELECT ?,h.id,CASE WHEN ?='tick' THEN CASE WHEN h.assignee IS NULL THEN 'waiting' WHEN json_extract(h.assignee,'$.id') IS ? THEN 'reminder' ELSE 'reassigned' END ELSE ? END,?,
+    json_set(h.doc,'$.assignee',json(h.assignee),'$.from',json(?),'$.to',json(h.assignee)),? FROM handoff_docs h WHERE h.id=? AND (?!='tick' OR h.assignee IS NOT NULL OR (h.waiting='nobody_available' AND
+      (? IS NOT h.waiting OR NOT EXISTS(SELECT 1 FROM handoff_events e WHERE e.handoff_id=h.id AND json_extract(e.data,'$.waiting')='nobody_available'))))`,
     eid,
     type,
     previous?.id ?? null,
@@ -101,7 +147,8 @@ function record(
     JSON.stringify(previous),
     at,
     id,
-    type
+    type,
+    oldWaiting
   )
 }
 export async function startPlan(
@@ -207,6 +254,22 @@ export async function publishHandoff(env: Env, id: string, origin: string) {
     created_at: string
   }>()
   if (!r) return
+  if (r.type === "waiting") {
+    await issueRoom(env, r.issue_id).publishConversation(
+      [
+        {
+          type: "timeline.added",
+          issue_id: r.issue_id,
+          item: {
+            kind: "event",
+            event: { id, type: "waiting", actor: system, data: JSON.parse(r.data), created_at: r.created_at }
+          }
+        }
+      ],
+      { app: r.app_id, internalOnly: true }
+    )
+    return
+  }
   const issue = await issueSummary(env, r.app_id, r.number)
   if (issue.id !== r.issue_id) return
   const data = JSON.parse(r.data),
@@ -240,7 +303,7 @@ export async function sweepHandoffs(env: Env, ctx: Work, time: number) {
   const at = new Date(time).toISOString(),
     due = await sql(
       env,
-      `SELECT h.id,h.issue_id,h.app_id,h.version,h.assignee,h.passed,g.id gid,g.hours,g.version gv FROM handoffs h JOIN issues i ON i.id=h.issue_id JOIN apps a ON a.id=h.app_id AND a.mode='helpdesk' LEFT JOIN handoff_groups g ON g.id=h.group_id WHERE h.ended_at IS NULL AND h.next_check<=? AND i.status!='closed' ORDER BY h.next_check,h.id LIMIT 20`,
+      `SELECT h.id,h.issue_id,h.app_id,h.version,h.assignee,h.waiting,h.passed,g.id gid,g.hours,g.version gv FROM handoffs h JOIN issues i ON i.id=h.issue_id JOIN apps a ON a.id=h.app_id AND a.mode='helpdesk' LEFT JOIN handoff_groups g ON g.id=h.group_id WHERE h.ended_at IS NULL AND h.next_check<=? AND i.status!='closed' ORDER BY h.next_check,h.id LIMIT 112`,
       at
     ).all<{
       id: string
@@ -249,15 +312,23 @@ export async function sweepHandoffs(env: Env, ctx: Work, time: number) {
       version: number
       assignee: string | null
       passed: number
+      waiting: string | null
       gid: string | null
       hours: string | null
       gv: number
     }>()
-  for (const h of due.results) {
+  const timings = new Map<string, Timing>()
+  async function tick(h: (typeof due.results)[number]) {
     const event = uid(),
       g = h.gid ? { id: h.gid, hours: h.hours, version: h.gv } : null,
       old = h.assignee ? JSON.parse(h.assignee) : null
     try {
+      const hours = h.hours ?? ""
+      let timing = timings.get(hours)
+      if (!timing) {
+        timing = groupTiming(h.hours ? JSON.parse(h.hours) : null, at)
+        timings.set(hours, timing)
+      }
       const rs = await env.DB.batch([
         guard(
           env,
@@ -267,8 +338,8 @@ export async function sweepHandoffs(env: Env, ctx: Work, time: number) {
           at
         ),
         ...(g ? [groupVersion(env, g, h.app_id)] : []),
-        ...assign(env, h.id, g, at, old, !!h.passed),
-        record(env, event, h.id, "tick", system, at, old),
+        ...assign(env, h.id, g, at, old, !!h.passed, timing),
+        record(env, event, h.id, "tick", system, at, old, h.waiting),
         entry(
           env,
           h.app_id,
@@ -285,4 +356,5 @@ export async function sweepHandoffs(env: Env, ctx: Work, time: number) {
       if (!String(e).includes("handoff_changed") && !String((e as Error).cause).includes("handoff_changed")) throw e
     }
   }
+  for (let i = 0; i < due.results.length; i += 6) await Promise.all(due.results.slice(i, i + 6).map(tick))
 }

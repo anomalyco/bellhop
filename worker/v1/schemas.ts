@@ -227,7 +227,7 @@ export const schemas = {
       updated_at: date,
       last_item: nullable(ref("Item")),
       unread: integer,
-      assignee: nullable(ref("Participant")),
+      assignee: { ...nullable(ref("Participant")), description: "Workspace view only; always null for end users." },
       verifications: arr(ref("Verification"))
     },
     [

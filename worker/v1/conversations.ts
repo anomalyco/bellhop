@@ -53,6 +53,7 @@ function access(c: Ctx, s: Scope, id?: string): Access {
 
 const files = `(SELECT json_group_array(json_object('id',a.id,'name',a.name,'type',a.mime,'size',a.size)) FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id WHERE l.issue_id=t.issue_id AND coalesce(l.comment_id,l.issue_id)=t.id)`
 export const wire = `json_object('id',t.id,'created_at',t.created_at,'issue_id',t.issue_id,'actor',json(t.actor),'type',t.type,'body',t.body,'edited_at',t.edited_at,'data',json(t.data),'files',json(${files}))`
+export const staffWire = `json_set(${wire},'$.internal',t.internal,'$.hidden',t.hidden)`
 type ItemRow = {
   id: string
   issue_id: string
@@ -107,6 +108,8 @@ export async function project(raw: string, a: Audience, workspace = false): Prom
       event: { type: "workspace_event", action: r.type, data: r.data ?? {} }
     }
   if (r.type === "escalated") return { ...base, kind: "event", actor: null, event: { type: "escalated" } }
+  if (!workspace && (r.type === "assigned" || r.type === "claimed"))
+    return { ...base, kind: "event", actor: null, event: { type: "assigned", assignee: null } }
   const d = r.data!,
     event =
       r.type === "assigned" || r.type === "claimed"
@@ -157,13 +160,12 @@ function publicProof(row: ProofRow): Verification {
 }
 type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {
   request_info: string | null
-  assignee: string | null
   last_item: string
 }
 function conversationQuery(a: Audience, id?: string, status?: string, pos?: [string, string] | null) {
   return sql(
     a.env,
-    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,${withPerson} with_person,${requestJson(false)} request_info,
+    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,${withPerson} with_person,${requestJson(false)} request_info,
     (SELECT ${wire} FROM api_requester_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
     (SELECT max(t.created_at) FROM api_requester_items t WHERE t.issue_id=i.id) updated_at,
     (SELECT count(*) FROM api_requester_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
@@ -189,7 +191,7 @@ async function projectRow(a: Audience, r: Row, proofs: ProofRow[]): Promise<Conv
     ...rest,
     with_person: !!r.with_person,
     ...typeInfo(request_info),
-    assignee: r.assignee ? participant(JSON.parse(r.assignee)) : null,
+    assignee: null,
     last_item: r.last_item ? await project(r.last_item, a) : null,
     verifications: proofs.filter((v) => v.issue_id === r.id).map(publicProof)
   }
@@ -245,7 +247,7 @@ export async function items(c: Ctx, s: Scope, id: string, workspace = false): Pr
     if (!stamp) bad("Unknown visible item")
     pos = [stamp, anchor]
   }
-  const shape = workspace ? `json_set(${wire},'$.internal',t.internal,'$.hidden',t.hidden)` : wire,
+  const shape = workspace ? staffWire : wire,
     dir = back ? "DESC" : "ASC"
   const rows = (
     await sql(

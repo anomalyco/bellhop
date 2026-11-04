@@ -250,7 +250,8 @@
 //   type routes to a group. The group picks one available member (round-robin or least busy, within its working
 //   hours), assigns them and notifies them by email. While escalated, agents' public replies are held (whatever the
 //   autonomy) until a member hands the request back. If the assignee hasn't replied publicly within the group's
-//   response window, it passes once to the next available member and both are told.
+//   response window, it passes once to the next available member and both are told. Then one reminder; admins
+//   are told once. With no alternative, that reminder ends the window. Closed hours alone do not email admins.
 //   GET    /api/apps/:slug/groups                        -> Group[]            team
 //   POST   /api/apps/:slug/groups GroupInput             -> Group              admin
 //   PATCH  /api/apps/:slug/groups/:id Partial<GroupInput> -> Group             admin
@@ -1012,6 +1013,7 @@ export interface IssueSummary extends IssueRef {
   effective_autonomy?: Autonomy
   labels: Label[]
   author: Actor
+  /** Help desk assignees are team-only; non-team issue and list views always return null. */
   assignee: Actor | null
   comment_count: number
   created_at: string
@@ -1205,6 +1207,7 @@ export type IssueEventType =
   | "escalated" // team-only data: { source, reason, group, assignee }; the requester sees "A person will take it from here"
   | "handed_back" // team-only: a member handed the request back to agents
   | "reassigned" // team-only: the response window passed; data: { from, to, group }
+  | "waiting" // team-only: working hours started but no member is available
   | "approval.requested" // team only; data.approval never contains a token
   | "approval.decided"
   | "routed" // team-only: request_type, target, outcome and the assignee resolved at write time

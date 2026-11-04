@@ -71,6 +71,14 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
         bytes.subarray(12)
       )
     const [body, ticket, session, challenge, wsTicket] = JSON.parse(dec.decode(plain))
+    // Old encrypted create/escalate responses may predate the requester projection.
+    if (s.user && body && typeof body === "object" && "assignee" in body) {
+      body.assignee = null
+      if (body.last_item?.event?.type === "assigned") {
+        body.last_item.actor = null
+        body.last_item.event.assignee = null
+      }
+    }
     const seed = await deriveSeed(ticket)
     if (challenge) c.header("Challenge-Token", c.req.header("Challenge-Token") ?? seed)
     if (session) body.token = "bh_us_" + seed

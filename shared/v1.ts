@@ -173,6 +173,7 @@ export interface Conversation {
   last_item: ConversationItem | null
   /** Messages from others plus verification requests after the user's read mark; not status or assignment events. */
   unread: number
+  /** Workspace credential only. Always null in the end-user view, including assignment events. */
   assignee: Participant | null
   /** Pending and completed email verifications on this conversation. */
   verifications: Verification[]

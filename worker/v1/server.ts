@@ -13,7 +13,7 @@ import { agentAccessSQL } from "../permissions"
 import { requestVerification } from "../helpdesk"
 import { requestJson, typeInfo } from "../request-types"
 import { proofCols, verification, type ProofRow } from "../helpdesk-data"
-import { cursor, position, message, participant, project, wire } from "./conversations"
+import { cursor, position, message, participant, project, staffWire } from "./conversations"
 import { withPerson } from "../handoff"
 
 const contactCols =
@@ -96,7 +96,6 @@ export async function workspaceTarget(c: Ctx, s: Scope, id: string) {
   s.replayContact = row.actor
   return row.number
 }
-const staffWire = `json_set(${wire},'$.internal',t.internal,'$.hidden',t.hidden)`
 const audience = (c: Ctx, s: Scope) => ({ env: c.env, app: s.app, who: "", origin: apiOrigin(c) })
 export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Promise<Page<Conversation>> {
   let ids: string[],
