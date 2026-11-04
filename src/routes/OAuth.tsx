@@ -33,14 +33,14 @@ function ConsentLoader({ id }: { id: string }) {
   return <ConsentForm request={request} />
 }
 
-/** A request the server no longer knows, or one already answered. */
-const gone = (e: unknown) => e instanceof ApiFailure && (e.status === 404 || e.status === 409 || e.status === 410)
+/** The Worker answers 404 for a request that expired, was already answered, or was started in another browser. */
+const gone = (e: unknown) => e instanceof ApiFailure && e.status === 404
 
 function Expired() {
   return (
     <div className="oauth-card oauth-done">
       <h1 className="oauth-title">This request has expired</h1>
-      <p className="muted-text">It was already used or timed out. Start again from your agent.</p>
+      <p className="muted-text">It was already answered, timed out, or started in another browser. Start again from your agent.</p>
     </div>
   )
 }
@@ -62,6 +62,7 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
       setDone(approve ? "approved" : "denied")
     } catch (e) {
       if (gone(e)) setDone("expired")
+      else if (e instanceof ApiFailure && e.status === 403) setError("You can't grant access to one of those workspaces any more. Reload and choose again.")
       else setError(errorMessage(e))
     } finally {
       setBusy(null)
@@ -122,6 +123,9 @@ export function ConsentForm({ request }: { request: OAuthRequest }) {
   )
 }
 
+/** Codes use digits 2–9 and letters without I and O, shown as XXXX-XXXX. */
+const codeShape = /^[2-9A-HJ-NP-Z]{4}-[2-9A-HJ-NP-Z]{4}$/
+
 /** XXXX-XXXX: letters and digits only, upper case, the dash after four. */
 function formatCode(raw: string) {
   const chars = raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8)
@@ -139,22 +143,25 @@ function DeviceForm({ initial }: { initial: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [requestId, setRequestId] = useState<string | null>(null)
-  const complete = /^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)
+  const complete = code.length === 9
+  const invalid = "That isn't a valid code. Codes don't use 0, 1, I or O."
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
     if (!complete || busy) return
+    if (!codeShape.test(code)) return setError(invalid)
     setBusy(true)
     setError(null)
     try {
       setRequestId((await api.deviceLookup(code)).request_id)
     } catch (err) {
       const status = err instanceof ApiFailure ? err.status : 0
+      // Unknown and expired codes both come back as 404; the Worker doesn't tell them apart.
       setError(
         status === 404
-          ? "That code doesn't match any request. Check it on your agent and try again."
-          : status === 410 || (err instanceof ApiFailure && /expired/.test(err.code))
-            ? "That code has expired. Ask your agent for a new one."
+          ? "No waiting request has that code. It may have expired; check your agent or ask it for a new one."
+          : status === 400
+            ? invalid
             : errorMessage(err),
       )
     } finally {
