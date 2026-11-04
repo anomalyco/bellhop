@@ -122,7 +122,7 @@ async function filePart(c: Ctx) {
 export async function upload(c: Ctx, s: Scope) {
   const env = c.env,
     who = s.user!.id
-  await enforce(c, "RL_UPLOAD", "v1:upload:" + s.hash)
+  await enforce(c, "RL_UPLOAD", "v1:upload:" + s.family)
   if (await sql(env, "SELECT 1 FROM blocks WHERE app_id=? AND actor_id=?", s.app, who).first())
     fail(403, "blocked", "Blocked from writing")
   if (
@@ -166,7 +166,7 @@ export async function upload(c: Ctx, s: Scope) {
       )
     // Charge each admitted R2 part, including interrupted streams and retries. A
     // failed budget check rolls back both counters before those bytes reach storage.
-    await env.DB.batch([liveGuard(c, s), charge("workspace"), charge(s.hash)])
+    await env.DB.batch([liveGuard(c, s), charge("workspace"), charge(s.family)])
   }
   try {
     const size = await chunked(env.MEDIA, object, stream, spec.mime, spec.limit, digest.getWriter(), admit),

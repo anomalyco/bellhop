@@ -30,7 +30,7 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
     crypto.subtle.deriveKey(derive("response"), root, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]),
     crypto.subtle.deriveKey(derive("request"), root, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"])
   ])
-  const scope = s.user ? s.hash : s.key + ":" + (s.origin ?? ""),
+  const scope = s.user ? s.family : s.key + ":" + (s.origin ?? ""),
     ids = [s.key, scope, route, nonce],
     where = "key_id=? AND scope=? AND route=? AND nonce=?",
     digest = hex(
@@ -44,7 +44,7 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
       `INSERT INTO api_replays(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+86400,?) ON CONFLICT DO NOTHING`,
       ...ids,
       digest,
-      s.kind === "publishable" && !s.user ? await sha256(s.key + ":" + clientIP(c)) : scope
+      s.kind === "publishable" && !s.user ? await sha256(s.key + ":" + clientIP(c)) : s.user ? s.family : scope
     ),
     sql(c.env, `SELECT digest,status,cipher FROM api_replays WHERE ${where}`, ...ids)
   ])

@@ -3,7 +3,7 @@ import type { Locale } from "../../shared/api"
 import { denied, fail, missing, sha256, sql, type Ctx } from "../core"
 import { clientIP, enforce } from "../rate-limits"
 
-export type Auth = "public" | "key" | "publishable" | "session" | "server" | "shared"
+export type Auth = "public" | "key" | "publishable" | "session" | "server" | "shared" | "widget" | "email"
 type Workspace = {
   app: string
   slug: string
@@ -18,6 +18,7 @@ export type Scope = Workspace & {
   origin: string | null
   hash: string
   user: EndUser | null
+  family: string
   replayContact?: string
 }
 const workspace = "a.id app,a.slug,a.name,a.mode,a.allow_anonymous,a.require_verified_email,k.id key,k.kind"
@@ -63,14 +64,15 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
   if (!m) return rejected()
   const session = m[2] === "us"
   if ((auth === "server" && m[2] !== "sk") || (auth === "shared" && m[2] === "pk")) denied()
-  if (auth !== "shared" && auth !== "server" && (auth === "session") !== session) return rejected()
+  if ((auth === "widget" || auth === "email") && m[2] === "sk") denied()
+  if (!["shared", "server", "widget", "email"].includes(auth) && (auth === "session") !== session) return rejected()
   const hash = await sha256(m[1]!),
     origin = c.req.header("origin") ?? null,
     env = c.env
   const row = session
     ? await sql(
         env,
-        `SELECT ${workspace},s.origin bound,coalesce(t.id,s.anon_id) actor,coalesce(t.name,s.anon_name) display,t.email,t.external_id,t.verified_via,coalesce(t.locale,s.locale) locale,s.anon_id IS NOT NULL anonymous
+        `SELECT ${workspace},s.family,s.origin bound,coalesce(t.id,s.anon_id) actor,coalesce(t.name,s.anon_name) display,t.email,t.external_id,t.verified_via,coalesce(t.locale,s.locale) locale,s.anon_id IS NOT NULL anonymous
     FROM api_sessions s JOIN apps a ON a.id=s.app_id JOIN api_keys k ON k.id=s.key_id LEFT JOIN contacts t ON t.id=s.contact_id AND t.app_id=s.app_id WHERE s.hash=? AND s.expires>unixepoch()`,
         hash
       ).first<
@@ -78,6 +80,7 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
           key: string
           kind: Scope["kind"]
           bound: string | null
+          family: string
           actor: string
           display: string | null
           email: string | null
@@ -124,25 +127,27 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
           locale: row.locale
         }
       : null
+  if (auth === "email" && user && !user.anonymous) denied()
+  const family = "family" in row ? row.family : hash
   if (user) {
     const typing = c.req.path.endsWith("/typing"),
       read = c.req.method === "GET" || c.req.method === "HEAD"
     await enforce(
       c,
       read || typing ? "RL_V1_READ" : "RL_TEAM",
-      `v1:${typing ? "typing" : read ? "read" : "write"}:${hash}`
+      `v1:${typing ? "typing" : read ? "read" : "write"}:${family}`
     )
   } else if (row.kind === "secret") {
-    if(c.req.path==='/v1/sessions')await enforce(c,'RL_TEAM',`v1:mint:${row.key}:${clientIP(c)}`)
+    if (c.req.path === "/v1/sessions") await enforce(c, "RL_TEAM", `v1:mint:${row.key}:${clientIP(c)}`)
     await enforce(c, "RL_V1_SECRET", "v1:secret:" + row.key)
-  }
+  } else if (auth === "widget") await enforce(c, "RL_V1_READ", `v1:workspace:${row.key}:${clientIP(c)}`)
   else await enforce(c, "RL_TEAM", `v1:mint:${row.key}:${clientIP(c)}`)
   await sql(
     env,
     "UPDATE api_keys SET last_used_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=? AND (last_used_at IS NULL OR last_used_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-1 minute'))",
     row.key
   ).run()
-  return { ...row, hash, origin, user }
+  return { ...row, hash, origin, user, family }
 }
 export function liveGuard(c: Ctx, s: Scope, id?: string) {
   return sql(

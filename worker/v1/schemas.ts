@@ -21,6 +21,14 @@ export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
+  Workspace: obj({
+    name: string,
+    icon_url: ns,
+    allow_anonymous: bool,
+    require_verified_email: bool,
+    turnstile_site_key: ns,
+    brand: obj({ accent: { type: "null" } })
+  }),
   Contacts: page("Contact"),
   Contact: { allOf: [ref("EndUser"), obj({ unverified_email: ns, created_at: date, last_seen_at: nullable(date) })] },
   ContactInput: obj({ email: string, email_verified: bool, link_existing: bool, name: string, locale }, []),

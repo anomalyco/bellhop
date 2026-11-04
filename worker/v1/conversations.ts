@@ -153,7 +153,7 @@ function conversationQuery(a: Audience, id?: string, status?: string, pos?: [str
     `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,
     (SELECT ${wire} FROM api_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
     (SELECT max(t.created_at) FROM api_items t WHERE t.issue_id=i.id) updated_at,
-    (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id') AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
+    (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
     FROM issues i LEFT JOIN api_reads m ON m.issue_id=i.id AND m.actor_id=json_extract(i.author,'$.id') WHERE ${owned} ${id ? "AND i.id=?" : ""} ${status ? `AND i.status${status === "open" ? "!=" : "="}'closed'` : ""}) SELECT * FROM page ${pos ? "WHERE (updated_at,id)<(?,?)" : ""} ORDER BY updated_at DESC,id DESC LIMIT 26`,
     a.app,
     a.who,
@@ -201,33 +201,55 @@ export async function conversations(c: Ctx, s: Scope, id?: string): Promise<Page
     next_cursor: more ? cursor(last!.updated_at, last!.id) : null
   }
 }
-export async function items(c: Ctx, s: Scope, id: string): Promise<Page<ConversationItem>> {
-  const after = c.req.query("after")
-  let pos = position(c.req.query("cursor"))
-  if (after !== undefined) {
-    if (pos) bad("Use either after or cursor")
-    const row = await sql(
+export async function items(c: Ctx, s: Scope, id: string, workspace = false): Promise<Page<ConversationItem>> {
+  const { before, after, last, cursor: raw } = c.req.query()
+  if (
+    (after !== undefined && (before !== undefined || last !== undefined || raw !== undefined)) ||
+    (raw !== undefined && (before !== undefined || last !== undefined))
+  )
+    bad("Conflicting item boundaries")
+  const backCursor = raw?.match(/^b\.([1-9]\d{0,2})\.(.+)$/),
+    back = !!backCursor || before !== undefined || last !== undefined
+  const count = backCursor ? Number(backCursor[1]) : last === undefined ? pageSize : Number(last)
+  if ((last !== undefined && !/^[1-9]\d{0,2}$/.test(last)) || !Number.isInteger(count) || count < 1 || count > 100)
+    bad("last must be 1–100")
+  let pos = position(backCursor ? backCursor[2] : raw)
+  const from = workspace
+      ? "FROM api_workspace_items t JOIN issues i ON i.id=t.issue_id WHERE i.app_id=? AND i.id=?"
+      : `FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=?`,
+    bindings = workspace ? [s.app, id] : [...args(s), id]
+  const anchor = before ?? after
+  if (anchor !== undefined) {
+    const stamp = await sql(
       c.env,
-      `SELECT t.created_at FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=? AND t.id=?`,
-      ...args(s),
-      id,
-      after
+      `SELECT t.created_at ${from} AND t.id=?`,
+      ...bindings,
+      str(anchor, "item id", 100)
     ).first<string>("created_at")
-    if (!row) bad("Invalid after")
-    pos = [row, after]
+    if (!stamp) bad("Unknown visible item")
+    pos = [stamp, anchor]
   }
-  const rs = (
+  const shape = workspace ? `json_set(${wire},'$.internal',t.internal,'$.hidden',t.hidden)` : wire,
+    dir = back ? "DESC" : "ASC"
+  const rows = (
     await sql(
       c.env,
-      `SELECT ${wire} item FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=? ${pos ? "AND (t.created_at,t.id)>(?,?)" : ""} ORDER BY t.created_at,t.id LIMIT 26`,
-      ...args(s),
-      id,
-      ...(pos ?? [])
+      `SELECT ${shape} item ${from} ${pos ? `AND (t.created_at,t.id)${back ? "<" : ">"}(?,?)` : ""} ORDER BY t.created_at ${dir},t.id ${dir} LIMIT ?`,
+      ...bindings,
+      ...(pos ?? []),
+      count + 1
     ).all<{ item: string }>()
   ).results
-  const data = await Promise.all(rs.slice(0, pageSize).map((r) => project(r.item, audience(c, s)))),
-    last = data.at(-1)
-  return { data, next_cursor: rs.length > pageSize ? cursor(last!.created_at, last!.id) : null }
+  const data = await Promise.all(
+      rows
+        .slice(0, count)
+        .map((r) => project(r.item, { env: c.env, app: s.app, who: s.user?.id ?? "", origin: apiOrigin(c) }, workspace))
+    ),
+    edge = data.at(-1)
+  return {
+    data: back ? data.reverse() : data,
+    next_cursor: rows.length > count ? (back ? `b.${count}.` : "") + cursor(edge!.created_at, edge!.id) : null
+  }
 }
 export function message(b: Record<string, unknown>) {
   const body = str(b.body, "body", 65536, true),

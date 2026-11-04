@@ -5,7 +5,7 @@
 // Base URL: https://api.blhp.app/v1 (also /v1 on every workspace host and, later, custom domains).
 // JSON; times are ISO 8601; lists are Page<T> with cursor pagination; errors are { error: { code, message } } with
 // the usual statuses (400, 401, 403, 404, 409, 410, 413, 422, 428, 429 + Retry-After). POSTs accept an
-// Idempotency-Key header (except fresh realtime tickets): successes replay for 24 h, client errors for 5 minutes;
+// Idempotency-Key header (except fresh realtime tickets and session rotation): successes replay for 24 h, client errors for 5 minutes;
 // 1000 active nonces per scope (publishable credentials budgeted per key/IP). Replayed uploads get fresh signed URLs.
 // End users never see "Bellhop": team and agent participants are shown
 // as the workspace presents them.
@@ -32,6 +32,15 @@
 //          Email start returns Challenge-Token in a CORS-exposed response header. Keep it in this browser and send
 //          it on verify (and repeat starts for the same challenge). A publishable key or Origin is not a browser ID.
 //   DELETE /v1/session         session                                           -> { ok: true }
+//   POST   /v1/session/refresh verified session -> Session; rotate before expiry, up to 24 h more, at most 30 days
+//          from original mint. Old bearer and sockets stop working. Serialize refreshes; do not retry the old token.
+//   GET    /v1/workspace       publishable key or user session -> Workspace. A null Turnstile site key means email
+//          and anonymous sign-in are unavailable on that origin; use host identity or a hosted workspace frame.
+//          An anonymous session may also call sessions/email and sessions/email/verify. Pass its bearer and the
+//          same Challenge-Token to verify: its workspace history moves to the proved contact, and the old session ends.
+// Limits per minute: session reads 300, writes 60, typing 300 separately (all follow the family on refresh);
+// credential mints and code entries 60/key/IP, secret-key backstop 6000/key. Ingress 600/IP, entry routes 120/IP.
+// Preflights are uncharged and cacheable for 86400 s; signed media has a separate 600/IP budget.
 //
 // As the end user (session):
 //   GET    /v1/me                                         -> EndUser
@@ -41,6 +50,8 @@
 //   GET    /v1/conversations/:id                          -> Conversation
 //   GET    /v1/conversations/:id/items?cursor=&after=     -> Page<ConversationItem>   public messages and events, oldest
 //          first; `after` (an item id) for catching up after a reconnect
+//          `last=N` (1–100) opens at the newest N; `before=<id>` gets older items, optionally with last=N.
+//          Backward pages are returned in display order; next_cursor continues toward older items. Do not mix with after.
 //   POST   /v1/conversations/:id/messages MessageInput    -> Message
 //   POST   /v1/conversations/:id/read { item_id }         -> { ok: true }
 //   POST   /v1/conversations/:id/typing                   -> { ok: true }      shown to the team for 5 s
@@ -49,9 +60,11 @@
 //   POST   /v1/realtime        -> { url, expires_at }     a single-use wss:// URL valid 60 s; the socket sends
 //                                                         RealtimeEvent JSON frames for all of this user's conversations
 //          Open the returned URL unchanged. Send the text ping every 25 s; pong is a heartbeat, not a JSON event.
+//          In dev path mode the URL uses the origin called by the client (ws for http, wss for https).
 //          On reconnect mint a fresh ticket, open the socket and buffer frames, then page items?after=<last item id>
 //          per conversation and merge by item id. Refresh the conversation list for new requests or changed state.
 //          If the anchor was deleted/hidden, reload that timeline. Close 4401 means the session is no longer authorized.
+//          Typing a public team reply emits typing; editing an internal note does not. Status changes emit conversation.updated.
 //
 // As a workspace (secret bearer, Origin MUST be absent; help desks only). Agents keep using MCP.
 // All server writes accept Idempotency-Key (24 h) and record the key name and preview in the workspace audit log.
@@ -74,6 +87,14 @@ import type { CloseReason, IssueStatus, Locale, Verification } from "./api"
 export interface Page<T> {
   data: T[]
   next_cursor: string | null
+}
+export interface Workspace {
+  name: string
+  icon_url: string | null
+  allow_anonymous: boolean
+  require_verified_email: boolean
+  turnstile_site_key: string | null
+  brand: { accent: null }
 }
 
 export interface Session {
@@ -132,7 +153,7 @@ export interface Conversation {
   created_at: string
   updated_at: string
   last_item: ConversationItem | null
-  /** Items from others after the user's last read mark. */
+  /** Messages from others plus verification requests after the user's read mark; not status or assignment events. */
   unread: number
   assignee: Participant | null
   /** Pending and completed email verifications on this conversation. */
@@ -181,7 +202,7 @@ export interface Message {
 }
 
 export type ConversationEvent =
-  | { type: "workspace_event"; action: string; data: Record<string,unknown> }
+  | { type: "workspace_event"; action: string; data: Record<string, unknown> }
   | { type: "status_changed"; status: IssueStatus; close_reason: CloseReason | null }
   | { type: "assigned"; assignee: Participant | null }
   | { type: "verification_requested"; verification_id: string }

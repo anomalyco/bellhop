@@ -130,7 +130,7 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
     (SELECT id FROM contacts WHERE app_id=i.app_id AND id=json_extract(i.author,'$.id')) contact_id,EXISTS(SELECT 1 FROM api_created_issues WHERE issue_id=i.id) api,
     (SELECT json_group_array(l.name ORDER BY l.name) FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id) labels,
     (SELECT ${staffWire} FROM api_workspace_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
-    (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id') AND NOT EXISTS(SELECT 1 FROM api_reads m WHERE m.issue_id=i.id AND m.actor_id=json_extract(i.author,'$.id') AND (m.stamp,m.item)>=(t.created_at,t.id))) unread
+    (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND NOT EXISTS(SELECT 1 FROM api_reads m WHERE m.issue_id=i.id AND m.actor_id=json_extract(i.author,'$.id') AND (m.stamp,m.item)>=(t.created_at,t.id))) unread
     ${sub} ORDER BY cast(j.key AS integer)`,
       ...args
     ),
@@ -171,31 +171,6 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
     }))
   )
   return { data, next_cursor }
-}
-export async function workspaceItems(c: Ctx, s: Scope, id: string): Promise<Page<ConversationItem>> {
-  let pos = position(c.req.query("cursor"))
-  const after = c.req.query("after"),
-    from = "FROM api_workspace_items t JOIN issues i ON i.id=t.issue_id WHERE i.app_id=? AND i.id=?"
-  if (after !== undefined) {
-    if (pos) bad("Use after or cursor")
-    const stamp = await sql(c.env, `SELECT t.created_at ${from} AND t.id=?`, s.app, id, after).first<string>(
-      "created_at"
-    )
-    if (!stamp) bad("Invalid after")
-    pos = [stamp, after]
-  }
-  const rows = (
-      await sql(
-        c.env,
-        `SELECT ${staffWire} item ${from} ${pos ? "AND (t.created_at,t.id)>(?,?)" : ""} ORDER BY t.created_at,t.id LIMIT 26`,
-        s.app,
-        id,
-        ...(pos ?? [])
-      ).all<{ item: string }>()
-    ).results,
-    data = await Promise.all(rows.slice(0, size).map((r) => project(r.item, audience(c, s), true))),
-    last = data.at(-1)
-  return { data, next_cursor: rows.length > size ? cursor(last!.created_at, last!.id) : null }
 }
 const operator = (s: Scope): Actor => ({ type: "agent", id: "api-key:" + s.key, name: s.name })
 function access(
@@ -319,7 +294,7 @@ export async function patchConversation(c: Ctx, s: Scope, id: string, n: number,
   }
   if (b.labels !== undefined) {
     if (!Array.isArray(b.labels) || b.labels.length > 50) bad("Expected label names")
-    const names = [...new Set(b.labels.map((x) => str(x, "label", 60).replace(/[A-Z]/g,ch=>ch.toLowerCase())))],
+    const names = [...new Set(b.labels.map((x) => str(x, "label", 60).replace(/[A-Z]/g, (ch) => ch.toLowerCase())))],
       labels = (
         await sql(
           c.env,

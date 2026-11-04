@@ -26,7 +26,7 @@ export async function mintTicket(c: Ctx, s: Scope, seed?: string) {
     liveGuard(c, s),
     sql(c.env, "INSERT INTO api_socket_tickets VALUES(?,?,?,?)", await sha256(ticket), s.hash, s.origin, exp)
   ])
-  const url = new URL("/v1/realtime", apiOrigin(c))
+  const url = new URL("/v1/realtime", c.env.APP_DOMAIN ? apiOrigin(c) : c.req.url)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.searchParams.set("ticket", ticket)
   return { url: url.href, expires_at: new Date(exp * 1000).toISOString() }
@@ -67,7 +67,7 @@ async function exchange(c: Ctx, hash: string, origin: string | null, hostSlug: s
   const row = read!.results[0]
   if (!row || !spent!.meta.changes) fail(401, "invalid_ticket", "Invalid or expired ticket")
   checkHost(c, row.slug)
-  const viewer: Viewer = { ...row, origin, base: apiOrigin(c) }
+  const viewer: Viewer = { ...row, origin, base: c.env.APP_DOMAIN ? apiOrigin(c) : new URL(c.req.url).origin }
   return contactRoom(c.env, row.app, row.who).fetch(
     new Request("https://room.invalid/__end_user", {
       headers: { Upgrade: "websocket", "X-Stream-Viewer": JSON.stringify(viewer) }

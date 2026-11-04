@@ -248,6 +248,7 @@ export const api = {
   blocks: (slug: string) => get<Block[]>(`${app(slug)}/blocks`),
   block: (slug: string, actorId: string, hideContent: boolean) => request<Block>("POST", `${app(slug)}/blocks`, { actor_id: actorId, hide_content: hideContent }),
   unblock: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/blocks/${enc(id)}`),
+  typing: (slug: string, number: number) => request<{ ok: true }>("POST", `${app(slug)}/issues/${number}/typing`, {}),
   comment: (slug: string, number: number, input: NewComment) =>
     request<Comment>("POST", `${app(slug)}/issues/${number}/comments`, input),
   addRelation: (slug: string, number: number, type: RelationType, other: number) =>

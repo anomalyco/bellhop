@@ -6,7 +6,7 @@ import { enforce, clientIP } from "../rate-limits"
 import { authorize, checkHost, cors, preflightAllowed, type Auth, type Scope } from "./access"
 import { mintTicket, upgrade, revokeStream } from "./realtime"
 import { upload } from "./uploads"
-import { startEmail, mint, patchMe } from "./sessions"
+import { startEmail, mint, patchMe, refresh, workspace } from "./sessions"
 import { conversations, items, mark, open, postMessage, typing, confirm, target } from "./conversations"
 import { replay } from "./replay"
 import { schemas, ref, string, type Schema } from "./schemas"
@@ -27,6 +27,8 @@ type Route = {
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  workspace: { method: "GET", path: "/workspace", auth: "widget", response: "Workspace", run: workspace },
+  refreshSession: { method: "POST", path: "/session/refresh", auth: "session", response: "Session", run: refresh },
   listContacts: {
     method: "GET",
     path: "/contacts",
@@ -107,7 +109,7 @@ export const routes: Record<string, Route> = {
   startEmail: {
     method: "POST",
     path: "/sessions/email",
-    auth: "publishable",
+    auth: "email",
     request: "EmailStart",
     response: "OK",
     run: (c, s, b, _id, _n, seed) => startEmail(c, s, b, seed)
@@ -115,7 +117,7 @@ export const routes: Record<string, Route> = {
   verifyEmail: {
     method: "POST",
     path: "/sessions/email/verify",
-    auth: "publishable",
+    auth: "email",
     request: "EmailVerify",
     response: "Session",
     run: (c, s, b, _id, _n, seed) => mint(c, s, b, true, seed),
@@ -166,9 +168,9 @@ export const routes: Record<string, Route> = {
     method: "GET",
     path: conv + "/items",
     auth: "shared",
-    workspace: (c, s, _b, id) => server.workspaceItems(c, s, id),
+    workspace: (c, s, _b, id) => items(c, s, id, true),
     response: "Items",
-    query: { cursor: string, after: string },
+    query: { cursor: string, after: string, before: string, last: { type: "integer", minimum: 1, maximum: 100 } },
     run: (c, s, _, id) => items(c, s, id)
   },
   postMessage: {
@@ -212,7 +214,9 @@ const security = {
     session: [{ session: [] }],
     ticket: [{ socketTicket: [] }],
     server: [{ secret: [] }],
-    shared: [{ secret: [] }, { session: [] }]
+    shared: [{ secret: [] }, { session: [] }],
+    widget: [{ publishable: [] }, { session: [] }],
+    email: [{ publishable: [] }, { session: [] }]
   },
   media = (name: string) => ({ "application/json": { schema: ref(name) } })
 function document() {
@@ -229,7 +233,9 @@ function document() {
           schema: v as typeof string
         }))
       )
-    const idempotent = (r.method === "POST" && r.path !== "/realtime") || (r.auth === "server" && r.method !== "GET")
+    const idempotent =
+      (r.method === "POST" && !["/realtime", "/session/refresh"].includes(r.path)) ||
+      (r.auth === "server" && r.method !== "GET")
     if (idempotent) parameters.push({ in: "header", name: "Idempotency-Key", required: false, schema: string })
     if (name === "verifyEmail" || name === "startEmail")
       parameters.push({ in: "header", name: "Challenge-Token", required: name === "verifyEmail", schema: string })
@@ -282,7 +288,24 @@ function document() {
       }
     ;(paths[path] ??= {})[r.method.toLowerCase()] = {
       operationId: name,
-      ...(r.auth==='shared'?{description:'A session receives only its own public conversation view. A secret key without Origin receives the workspace view, including marked staff-only items. For server creation supply contact; for replies supply as.member.'}:{}),
+      ...(r.auth === "email"
+        ? {
+            description:
+              "Publishable key, or an anonymous session on its allowed origin. Verifying with the anonymous bearer claims only that session’s history and revokes it."
+          }
+        : {}),
+      ...(name === "refreshSession"
+        ? {
+            description:
+              "Verified sessions only. Issues a new bearer, invalidates the old bearer, and preserves the absolute 30-day lifetime. Not replayable."
+          }
+        : {}),
+      ...(r.auth === "shared"
+        ? {
+            description:
+              "A session receives only its own public conversation view. A secret key without Origin receives the workspace view, including marked staff-only items. For server creation supply contact; for replies supply as.member."
+          }
+        : {}),
       security: security[r.auth],
       parameters,
       ...(r.request
@@ -452,7 +475,8 @@ export function publicApi() {
               (c.req.param("external_id") !== undefined
                 ? "/v1/contacts/by-external-id/" + (await sha256(c.req.param("external_id")!))
                 : pathname)
-      return (r.method === "POST" && r.path !== "/realtime") || (workspace && r.method !== "GET")
+      return (r.method === "POST" && !["/realtime", "/session/refresh"].includes(r.path)) ||
+        (workspace && r.method !== "GET")
         ? replay(c, s, route, raw, run)
         : run()
     })
