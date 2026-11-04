@@ -85,6 +85,15 @@
 //   POST   /api/apps/:slug/issues/:number/comments/:id/helpful -> { helpful, viewer_helpful }   guest + human, or
 //          account; not the comment's author ("This helped")
 //   DELETE /api/apps/:slug/issues/:number/comments/:id/helpful -> { helpful, viewer_helpful }
+//   GET    /api/apps/:slug/tiers                         -> Tier[]             member
+//   POST   /api/apps/:slug/tiers   TierInput             -> Tier               admin
+//   PATCH  /api/apps/:slug/tiers/:id TierInput           -> Tier               admin
+//   DELETE /api/apps/:slug/tiers/:id                     -> { ok: true }       admin; its people lose the tier
+//   GET    /api/apps/:slug/people?tier=<id>&q=<text>     -> Person[]           member; people with a tier (or all
+//                                                                             reporters when no tier is given)
+//   PUT    /api/apps/:slug/people/tier { email?, actor_id?, tier_id: string | null } -> Person   member; by email for
+//          accounts (applies when that email signs in, like invites) or by actor id for a guest or account. Never
+//          for team members or agents.
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -152,11 +161,19 @@ export type RelationType = "duplicate_of" | "related" | "blocks"
 
 /** Who wrote or did something. Guests have a handle like `guest-7f3a` and, once chosen, a display name. */
 export type Actor =
-  | { type: "guest"; id: string; handle: string; name: string | null }
+  | { type: "guest"; id: string; handle: string; name: string | null; tier?: ActorTier | null }
   // A signed-in account (the type name predates non-team accounts). `role` is its current role in this app, filled
   // in on read; null or absent means signed in but not on the team.
-  | { type: "member"; id: string; name: string; avatar_url: string | null; role?: Role | null }
+  | { type: "member"; id: string; name: string; avatar_url: string | null; role?: Role | null; tier?: ActorTier | null }
   | { type: "agent"; id: string; name: string }
+
+/** An actor's tier, filled in only for the team and agents (and in webhooks). */
+export interface ActorTier {
+  id: string
+  name: string
+  color: string
+  agents_reply: boolean
+}
 
 export interface ApiError {
   /** `moved_to` comes with code "moved" (the issue was transferred). */
@@ -246,6 +263,51 @@ export interface Moderation {
   at: string
 }
 
+/**
+ * A tier the team gives people (e.g. VIP, Pro, Beta). Only the team and agents ever see tiers. When someone with a
+ * tier opens an issue, `rules` apply; agents see the tier (Actor.tier) over MCP and webhooks and handle it.
+ */
+export interface Tier {
+  id: string
+  name: string
+  /** Hex, like label colors. */
+  color: string
+  description: string
+  rules: TierRules
+  /** People with this tier. */
+  count: number
+  position: number
+}
+
+export interface TierRules {
+  /** Label ids added to every issue they open. */
+  label_ids: string[]
+  /** A team member assigned to every issue they open, or null. */
+  assignee_id: string | null
+  /** Their new issues are private (whatever the app's default). */
+  private: boolean
+  /** False: agents can't post public replies on their issues (internal notes only); a human answers. */
+  agents_reply: boolean
+}
+
+export interface TierInput {
+  name: string
+  color?: string
+  description?: string
+  rules?: Partial<TierRules>
+  position?: number
+}
+
+/** Someone outside the team who has a tier (or, in the unfiltered list, has reported here). */
+export interface Person {
+  /** Null for an email assignment that hasn't signed in yet. */
+  actor: Actor | null
+  email: string | null
+  tier: { id: string; name: string; color: string } | null
+  issue_count: number
+  last_seen_at: string | null
+}
+
 /** A blocked guest or account in one app. */
 export interface Block {
   id: string
@@ -262,6 +324,9 @@ export interface Mentionable {
   /** What follows the @: [a-z0-9-], unique in the app, stable while the name doesn't change (e.g. "ryan", "opencode"). */
   handle: string
   avatar_url: string | null
+  /** Agents only: how it connects, and the account it belongs to (tells same-name agents apart). */
+  agent_kind?: "oauth" | "token"
+  owner_name?: string
 }
 
 /** A resolved @handle in a body. Only posts by the team and agents create mentions; guests' @text stays text. */
@@ -513,10 +578,12 @@ export interface Comment {
 
 export type IssueEventType =
   | "status_changed" // data: { from: IssueStatus, to: IssueStatus, close_reason: CloseReason | null }
-  | "labeled" // data: { label: Label }
+  // Events a tier rule caused (labels and assignee on a tiered person's new issue) carry data.rule
+  // { tier_id, tier_name } and are team-only timeline items, so the tier never shows to outsiders.
+  | "labeled" // data: { label: Label, rule? }
   | "unlabeled" // data: { label: Label }
   | "claimed" // data: {}  (actor took the issue; it becomes the assignee)
-  | "assigned" // data: { assignee: Actor | null }
+  | "assigned" // data: { assignee: Actor | null, rule? }
   | "related" // data: { relation: Relation }
   | "unrelated" // data: { relation: Relation }
   | "renamed" // data: { from: string, to: string }
@@ -606,6 +673,10 @@ export interface WebhookPayload {
 //   list_mentionables {}                         team members and agents with their @handles
 //   transfer_issue { number, to_app }            member in both apps
 //   edit_comment   { comment_id, body }          the agent's own comments
+//   list_tiers     {}                            tiers with their rules
+//   set_tier       { email?, actor_id?, tier: string|null (name) }   member
+//                  Issue and comment authors carry `tier` in get_issue, list_issues and webhooks. When the reporter's
+//                  tier has agents_reply false, `comment` without internal fails with code "humans_only".
 //   moderate       { number, comment_id?, action: "hide"|"unhide", reason? }   member; hides or unhides the issue,
 //                                                  or one comment; reason required for hide
 //   update_issue   { number, status?, close_reason?, labels?: string[] (names), title?, private?, locked?, pinned? }

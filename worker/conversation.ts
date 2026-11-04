@@ -4,8 +4,8 @@ import { agentAccessSQL } from "./permissions"
 
 type Target = Mentionable & { role: Role | null }
 async function targets(env: Env, app: string): Promise<Target[]> {
-  const query = `WITH candidates AS (SELECT 'member' type,u.id,u.name,u.avatar_url,m.role FROM members m JOIN users u ON u.id=m.user_id WHERE m.app_id=?1
-    UNION ALL SELECT 'agent',g.id,g.name,NULL,NULL FROM (${agentAccessSQL}) acl JOIN agents g ON g.id=acl.agent_id WHERE acl.app_id=?1 AND acl.role IS NOT NULL)
+  const query = `WITH candidates AS (SELECT 'member' type,u.id,u.name,u.avatar_url,m.role,NULL agent_kind,NULL owner_name FROM members m JOIN users u ON u.id=m.user_id WHERE m.app_id=?1
+    UNION ALL SELECT 'agent',g.id,g.name,NULL,NULL,g.kind,u.name FROM (${agentAccessSQL}) acl JOIN agents g ON g.id=acl.agent_id JOIN users u ON u.id=g.user_id WHERE acl.app_id=?1 AND acl.role IS NOT NULL)
     SELECT c.*,h.handle FROM candidates c LEFT JOIN mention_handles h ON h.app_id=?1 AND h.actor_id=c.id ORDER BY c.name,c.id`
   type Row = Omit<Target, "handle"> & { handle: string | null }
   const load = () => rows<Row>(sql(env, query, app)),
@@ -40,7 +40,9 @@ async function targets(env: Env, app: string): Promise<Target[]> {
   return found as Target[]
 }
 export async function mentionables(env: Env, app: string): Promise<Mentionable[]> {
-  return (await targets(env, app)).map(({ role, ...t }) => t)
+  return (await targets(env, app)).map(({ role, agent_kind, owner_name, ...t }) =>
+    t.type === "agent" ? { ...t, agent_kind, owner_name } : t
+  )
 }
 export async function mentionsIn(env: Env, app: string, body: string, team: boolean): Promise<Mention[]> {
   if (!team || !body.includes("@")) return []

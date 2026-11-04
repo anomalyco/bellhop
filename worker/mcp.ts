@@ -15,6 +15,7 @@ import {
 import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, sha256, sql, str } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { agentAccessSQL, can, teamRole } from "./permissions"
+import { listTiers, setTier } from "./tiers"
 import type { Action } from "./permissions"
 import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
@@ -35,6 +36,8 @@ const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
 const toolRoles = {
   list_apps: "discover",
+  list_tiers: "read",
+  set_tier: "triage",
   list_mentionables: "read",
   transfer_issue: "triage",
   create_app: "create",
@@ -104,6 +107,13 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool("list_tiers", "List this workspace’s reporter tiers and handling rules.", {}),
+  tool(
+    "set_tier",
+    "Set a non-team reporter’s tier by email or actor id; null clears it (member).",
+    { email: text, actor_id: text, tier: { type: ["string", "null"] } },
+    ["tier"]
+  ),
   tool("get_app", "Read workspace details, counts, labels, and templates.", {}),
   tool("update_app", "Update workspace name, description, or public listing (admin).", {
     name: text,
@@ -299,6 +309,20 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id }
   switch (name) {
+    case "list_tiers":
+      return textResult(await listTiers(env, app.id))
+    case "set_tier": {
+      const id =
+        b.tier === null
+          ? null
+          : ((await sql(
+              env,
+              "SELECT id FROM tiers WHERE app_id=? AND name=?",
+              app.id,
+              str(b.tier, "tier", 100).trim()
+            ).first<string>("id")) ?? bad("Unknown workspace tier"))
+      return textResult(await setTier(env, app.id, { email: b.email, actor_id: b.actor_id, tier_id: id }))
+    }
     case "list_mentionables":
       return textResult(await mentionables(env, app.id))
     case "transfer_issue": {
@@ -578,6 +602,11 @@ mcp.post("/mcp", async (c) => {
         return result(await call(c, a, p.name, p.arguments === undefined ? {} : input(p.arguments)))
       } catch (e) {
         const failure = e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null
+        if (failure?.code === "humans_only")
+          return c.json(
+            { jsonrpc: "2.0", id, error: { code: -32003, message: failure.message, data: { code: "humans_only" } } },
+            403
+          )
         if (failure?.status === 403) return error(-32003, failure.message, 403)
         if (!failure) console.error("bellhop.tool_failed", { tool: p.name })
         return result({

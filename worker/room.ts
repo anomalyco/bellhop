@@ -6,6 +6,7 @@ import { sql, now } from "./core"
 import { agentAccessSQL } from "./permissions"
 import { actorIds, commentView, gateOf, includesComment, outsider, sees, type Gate, type Viewer } from "./visibility"
 import { voteCount } from "./conversation"
+import { actorIdsIn, tierBag, tierQuery, tierReplacer, type TierMap } from "./tier-actors"
 
 type Attachment = Viewer & {
   format: "conversation-v1"
@@ -92,6 +93,7 @@ type PolicyRow = {
   pinned: number
 }
 type CommentRow = {
+  tier_bag: string | null
   id: string
   body: string
   author: string
@@ -202,7 +204,8 @@ export class Room extends DurableObject<Env> {
                         viewer_voted: votes.some((r) => r.issue_id === e.issue.id && r.listener === index)
                       }
                     }
-                  : e
+                  : e,
+                tierReplacer()
               )
             )
         } catch {
@@ -254,7 +257,7 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
+            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
       FROM comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
@@ -315,6 +318,8 @@ export class Room extends DurableObject<Env> {
           )
         ) - 1
       : -1
+    const tierActors = sessions.length || bearers.length ? actorIdsIn(events) : []
+    const tierIndex = tierActors.length ? q.push(tierQuery(this.env, app, tierActors)) - 1 : -1
     const result = await this.env.DB.batch<unknown>(q),
       resultRows = <T>(i: number) => (result[i]?.results ?? []) as T[]
     const gates = new Map(
@@ -334,6 +339,9 @@ export class Room extends DurableObject<Env> {
       ),
       helpful = new Set(resultRows<{ comment_id: string; voter: string }>(hi).map((r) => r.comment_id + ":" + r.voter)),
       targets = new Set(resultRows<{ id: string }>(targetMembers).map((r) => r.id))
+    const tiers: TierMap = JSON.parse(resultRows<{ bag: string }>(tierIndex)[0]?.bag ?? "{}")
+    // A guest claim or mention edit can change a comment's actors after it was enqueued.
+    for (const row of comments) if (row.tier_bag) Object.assign(tiers, JSON.parse(row.tier_bag))
     for (const { ws, a } of listeners) {
       if (a?.app && a.app !== app) continue
       const key = a?.session || a?.bearer,
@@ -427,7 +435,7 @@ export class Room extends DurableObject<Env> {
               if (!c) continue
               e = { ...e, item: { kind: "comment", comment: c } }
             } else {
-              if (!v.team && ["hidden", "unhidden"].includes(e.item.event.type)) continue
+              if (!v.team && (e.item.event.data.rule || ["hidden", "unhidden"].includes(e.item.event.type))) continue
               const other = relationId(e.item)
               if (other && !allowed(other)) continue
             }
@@ -436,7 +444,7 @@ export class Room extends DurableObject<Env> {
             if (!c) continue
             e = { ...e, comment: c }
           }
-          ws.send(JSON.stringify(e))
+          ws.send(JSON.stringify(e, tierReplacer(v.team ? tiers : undefined)))
         }
       } catch {
         ws.close(1011, "Send failed")

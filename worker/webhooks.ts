@@ -1,5 +1,6 @@
 import type { WebhookPayload } from "../shared/api"
 import { bad, hex, now, secret, sha256, sql, str, uid } from "./core"
+import { teamProjection } from "./tier-actors"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -67,7 +68,7 @@ export async function enqueueWebhook(
     id,
     app.id,
     payload.type,
-    JSON.stringify(payload),
+    JSON.stringify(await teamProjection(env, app.id, payload)),
     created_at,
     payload.issue?.id ?? null,
     payload.issue?.id ?? null,

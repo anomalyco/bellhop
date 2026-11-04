@@ -130,6 +130,16 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
       )
     ),
     sql(c.env, "UPDATE attachments SET owner_id=? WHERE app_id=? AND owner_id=?", actor.id, app, previous),
+    // The account's existing assignment (including one just bound from email) wins.
+    sql(
+      c.env,
+      `INSERT OR IGNORE INTO tier_assignments(app_id,tier_id,actor_id) SELECT app_id,tier_id,?1 FROM tier_assignments
+      WHERE app_id=?2 AND actor_id=?3 AND NOT EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?1)`,
+      actor.id,
+      app,
+      previous
+    ),
+    sql(c.env, "DELETE FROM tier_assignments WHERE app_id=? AND actor_id=?", app, previous),
     // Signing in with the same browser must not discard an existing moderation block.
     sql(
       c.env,
@@ -174,6 +184,7 @@ export async function claimGuest(c: Ctx, user: User) {
         sql(
           c.env,
           `SELECT value id FROM json_each(?) g WHERE EXISTS(SELECT 1 FROM attachments WHERE owner_id=g.value)
+         OR EXISTS(SELECT 1 FROM tier_assignments WHERE actor_id=g.value)
          OR ${locations.map((s) => `EXISTS(SELECT 1 FROM ${s.table} WHERE ${s.id}=g.value AND ${s.guest})`).join(" OR ")}`,
           JSON.stringify(group.map((g) => g.previous))
         )

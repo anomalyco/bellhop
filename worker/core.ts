@@ -98,6 +98,10 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("tier requires human reply"))
+    return new ApiFailure(403, "humans_only", "A human must reply on this issue; agents can leave internal notes")
+  if (message.includes("invalid tier label") || message.includes("invalid tier assignee"))
+    return new ApiFailure(400, "invalid_input", "Tier rules must use this workspace’s labels and joined team members")
   if (message.includes("outdated comment writer") || message.includes("internal notes not enabled"))
     return new ApiFailure(
       503,

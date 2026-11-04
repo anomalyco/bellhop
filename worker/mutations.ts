@@ -29,6 +29,7 @@ import type { Change, Work } from "./events"
 import { guestWrite } from "./guest-history"
 import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, ref, summaryOf } from "./issues"
 import type { AttachmentRow } from "./issues"
+import { teamProjection } from "./tier-actors"
 
 export interface Access {
   env: Env
@@ -158,8 +159,10 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
     sql(env, "UPDATE apps SET issue_seq=issue_seq+1 WHERE id=?", app.id),
     sql(
       env,
-      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,private,mentions)
-    SELECT ?,id,issue_seq,?,?,?,?,?,?,?,CASE WHEN (reporter_can_choose OR ?) THEN coalesce(?,default_private) ELSE default_private END,? FROM apps WHERE id=? RETURNING number`,
+      `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,private,mentions,assignee,reply_tier_id)
+    SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,CASE WHEN t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
+      (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id),
+      CASE WHEN t.agents_reply=0 THEN t.id END FROM apps a LEFT JOIN reporter_tiers t ON t.app_id=a.id AND t.actor_id=? WHERE a.id=? RETURNING number`,
       id,
       title,
       text,
@@ -171,19 +174,75 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
       Number(can(a.role, "read")),
       b.private === undefined ? null : Number(b.private),
       JSON.stringify(mentions),
+      actor.id,
       app.id
     ),
     ...attach(env, id, null, b.attachment_ids),
     ...guestNameGuard(a)
   ]
-  const items: TimelineItem[] = []
+  const templateEvents = new Set<string>()
   for (const label of labels) {
+    const eventId = uid()
+    templateEvents.add(eventId)
     q.push(sql(env, "INSERT INTO issue_labels VALUES(?,?)", id, label.id))
-    record(a, id, "labeled", { label }, at, q, items)
+    q.push(
+      sql(
+        env,
+        `INSERT INTO issue_events SELECT ?,?,'labeled',?,?,? WHERE NOT EXISTS(SELECT 1 FROM reporter_tiers t JOIN tier_labels tl ON tl.tier_id=t.id WHERE t.app_id=? AND t.actor_id=? AND tl.label_id=?)`,
+        eventId,
+        id,
+        JSON.stringify(actor),
+        JSON.stringify({ label }),
+        at,
+        app.id,
+        actor.id,
+        label.id
+      )
+    )
   }
-  const results = await env.DB.batch<{ number: number }>(q),
-    number = results[1]!.results[0]!.number
+  // When tier and template overlap, one team-only rule event replaces the template event.
+  const rule = `json_object('tier_id',t.id,'tier_name',t.name)`
+  const ruleStart = q.length
+  q.push(
+    sql(
+      env,
+      `INSERT INTO tier_issue_events SELECT lower(hex(randomblob(16))),?1,t.app_id,'labeled',json_object('rule',${rule},'label',json_object('id',l.id,'name',l.name,'color',l.color,'description',l.description))
+     FROM reporter_tiers t JOIN tier_labels tl ON tl.tier_id=t.id JOIN labels l ON l.id=tl.label_id WHERE t.app_id=?2 AND t.actor_id=?3
+     RETURNING id,type,data`,
+      id,
+      app.id,
+      actor.id
+    ),
+    sql(
+      env,
+      `INSERT INTO tier_issue_events SELECT ?,i.id,t.app_id,'assigned',json_object('rule',${rule},'assignee',json(i.assignee))
+      FROM issues i JOIN reporter_tiers t ON t.app_id=i.app_id AND t.actor_id=? WHERE i.id=? AND i.assignee IS NOT NULL RETURNING id,type,data`,
+      uid(),
+      actor.id,
+      id
+    ),
+    sql(
+      env,
+      `INSERT OR IGNORE INTO issue_labels SELECT ?,tl.label_id FROM reporter_tiers t JOIN tier_labels tl ON tl.tier_id=t.id WHERE t.app_id=? AND t.actor_id=?`,
+      id,
+      app.id,
+      actor.id
+    )
+  )
+  const results = await env.DB.batch<Record<string, unknown>>(q),
+    number = results[1]!.results[0]!.number as number
+  const ruleFrames: LiveEvent[] = []
+  for (const result of results.slice(ruleStart, ruleStart + 2)) {
+    for (const row of result.results as { id: string; type: "labeled" | "assigned"; data: string }[]) {
+      const event = { id: row.id, type: row.type, data: JSON.parse(row.data), actor, created_at: at }
+      ruleFrames.push({ type: "timeline.added", issue_id: id, item: { kind: "event", event } })
+    }
+  }
   const issue = await full(a, number)
+  const items = issue.timeline.filter((t) => t.kind === "event" && templateEvents.has(t.event.id))
+  // Even a pre-tiers Room understands internalOnly; never send rules in a mixed-audience RPC.
+  if (ruleFrames.length)
+    a.ctx.waitUntil(issueRoom(env, id).publishConversation(ruleFrames, { app: app.id, internalOnly: true }))
   notify(a, { type: "issue.opened", issue: summaryOf(issue), items, mentioned: addedMentions(mentions, [], actor) })
   return issue
 }
@@ -583,7 +642,7 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
       ),
       sql(
         a.env,
-        `UPDATE issues SET app_id=?1,number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,activity=NULL,
+        `UPDATE issues SET app_id=?1,number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,reply_tier_id=NULL,activity=NULL,
       assignee=CASE WHEN json_extract(assignee,'$.id') IN(SELECT user_id FROM members WHERE app_id=?1 UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL) THEN assignee END,
       updated_at=max(updated_at,?2),revision=CASE WHEN revision=?3 AND app_id=?4 AND number=?5 THEN revision+1 END WHERE id=?6 RETURNING number`,
         dest.id,
@@ -898,7 +957,8 @@ async function history(a: Access, n: number, id?: string) {
     ),
     roles(a)
   ])
-  return versions.map((r) => ({ ...r, actor: parseActor(r.actor, team) }))
+  const result = versions.map((r) => ({ ...r, actor: parseActor(r.actor, team) }))
+  return v.team ? teamProjection(a.env, a.app.id, result) : result
 }
 async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block> {
   const actorId = str(b.actor_id, "actor_id", 64),
@@ -1015,7 +1075,7 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
         }
       })()
     )
-  return { id, actor, by: a.actor, created_at: at }
+  return teamProjection(env, app, { id, actor, by: a.actor, created_at: at })
 }
 export const issues = new Hono<Bindings>()
 issues.on(["POST", "DELETE"], `${path}/vote`, async (c) => {
@@ -1076,12 +1136,16 @@ issues.get("/api/apps/:slug/blocks", async (c) => {
     appRoles(c.env, c.var.app.id)
   ])
   return c.json(
-    bs.map((r) => ({
-      id: r.id,
-      actor: parseActor(r.actor, team),
-      by: parseActor(r.moderator, team),
-      created_at: r.created_at
-    }))
+    await teamProjection(
+      c.env,
+      c.var.app.id,
+      bs.map((r) => ({
+        id: r.id,
+        actor: parseActor(r.actor, team),
+        by: parseActor(r.moderator, team),
+        created_at: r.created_at
+      }))
+    )
   )
 })
 issues.post("/api/apps/:slug/blocks", async (c) => {

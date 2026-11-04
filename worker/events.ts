@@ -11,6 +11,7 @@ import type {
 import { appUrl, missing, now, rows, sql, str } from "./core"
 import { readPresence, visibleIssues } from "./issues"
 import { enqueueWebhook } from "./webhooks"
+import { projectTiers } from "./tier-actors"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
 export interface Change {
@@ -69,6 +70,9 @@ export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[],
 
 // All issue writes converge here after D1 commits. Only the public summary goes on the wire.
 export function emit(env: Env, ctx: Work, change: Change) {
+  // Room RPCs are mixed-audience and may cross a deployment boundary. Even a pre-tiers Room
+  // must never receive tier metadata. The receiving Room decorates only authenticated team frames.
+  change = projectTiers(change)
   const { type, app, issue, items = [] } = change
   const updated: LiveEvent = { type: "issue.updated", issue }
   const list: LiveEvent = type === "issue.opened" ? { type: "issue.created", issue } : updated

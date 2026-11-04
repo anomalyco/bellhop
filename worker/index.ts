@@ -14,6 +14,7 @@ import { mcp, authenticate } from "./mcp"
 import { sees } from "./visibility"
 import { oauth } from "./oauth"
 import { agents } from "./agents"
+import { tierRoutes } from "./tiers"
 import { queue } from "./webhooks"
 import { page, robots, sitemap } from "./pages"
 export { Room } from "./room"
@@ -95,6 +96,7 @@ api.route("/", auth)
 api.route("/", oauth)
 api.route("/", agents)
 api.route("/", apps)
+api.route("/", tierRoutes)
 api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)

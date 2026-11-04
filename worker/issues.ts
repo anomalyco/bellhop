@@ -32,6 +32,7 @@ import {
   type Viewer
 } from "./visibility"
 import { voteCount } from "./conversation"
+import { projectTiers, tierBag } from "./tier-actors"
 import { appIdSQL, appKey, readBatch } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
@@ -40,8 +41,10 @@ const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
 const fields = (
   team: boolean,
-  personal = true
+  personal = true,
+  full = false
 ) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,i.assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,
+  ${team ? tierBag("i.app_id", ["i.author", "i.assignee", "json_extract(i.activity,'$.actor')", "json_extract(i.hidden,'$.by')"], full ? "i.mentions" : undefined) : "NULL"} tier_bag,
   ${voteCount(team ? "1" : "0", personal ? "(SELECT ids FROM viewer)" : "'[]'")} votes,
   ${personal ? "EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=(SELECT voter FROM viewer))" : "0"} viewer_voted,
   (SELECT count(*) FROM comments WHERE issue_id=i.id ${team ? "" : "AND internal=0"}) AS comment_count,
@@ -60,6 +63,7 @@ type StoredSummary = Omit<
   assignee: string | null
   activity: string | null
   labels: string
+  tier_bag: string | null
 }
 type TeamRow = { user_id: string; role: Member["role"] }
 const teamQuery = (env: Env, scope: ReadScope) =>
@@ -112,26 +116,29 @@ export async function readPresence(env: Env, issueId: string, appId?: string, pu
 }
 function summary(r: StoredSummary, roles: Roles): IssueSummary {
   const { id, number, title, status, close_reason, created_at, updated_at, comment_count } = r
-  return {
-    id,
-    number,
-    title,
-    status,
-    close_reason,
-    created_at,
-    updated_at,
-    comment_count,
-    votes: r.votes,
-    viewer_voted: !!r.viewer_voted,
-    pinned: !!r.pinned,
-    locked: !!r.locked,
-    private: !!r.private,
-    hidden: moderation(r.hidden, roles),
-    author: parseActor(r.author, roles),
-    assignee: r.assignee ? parseActor(r.assignee, roles) : null,
-    activity: currentActivity(r.activity, roles),
-    labels: JSON.parse(r.labels)
-  }
+  return projectTiers(
+    {
+      id,
+      number,
+      title,
+      status,
+      close_reason,
+      created_at,
+      updated_at,
+      comment_count,
+      votes: r.votes,
+      viewer_voted: !!r.viewer_voted,
+      pinned: !!r.pinned,
+      locked: !!r.locked,
+      private: !!r.private,
+      hidden: moderation(r.hidden, roles),
+      author: parseActor(r.author, roles),
+      assignee: r.assignee ? parseActor(r.assignee, roles) : null,
+      activity: currentActivity(r.activity, roles),
+      labels: JSON.parse(r.labels)
+    },
+    r.tier_bag ? JSON.parse(r.tier_bag) : undefined
+  )
 }
 export function ref(i: IssueRef): IssueRef {
   const { id, number, title, status, close_reason } = i
@@ -392,9 +399,11 @@ export async function getIssue(
         internal: number
         helpful: number
         viewer_helpful: number
+        tier_bag: string | null
         mentions: string
       },
       Omit<IssueEvent, "actor" | "data"> & {
+        tier_bag: string | null
         actor: string
         data: string
         ref_author: string | null
@@ -413,7 +422,7 @@ export async function getIssue(
   >(env, scope, [
     sql(
       env,
-      `WITH ${viewerCTE} SELECT ${fields(v.team)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+      `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
       ...viewerArgs(v),
       key,
       number
@@ -429,6 +438,7 @@ export async function getIssue(
     sql(
       env,
       `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,
+        ${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=c.issue_id)", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,
        (SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,EXISTS(SELECT 1 FROM comment_helpful WHERE comment_id=c.id AND voter=?) viewer_helpful
        FROM comments c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.rowid`,
       v.voter ?? v.actorId,
@@ -437,10 +447,18 @@ export async function getIssue(
     ),
     sql(
       env,
-      `SELECT e.id,e.type,e.actor,e.data,e.created_at,json_extract(other.author,'$.id') ref_author,other.private ref_private,other.hidden ref_hidden
-       FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') AND other.app_id=(SELECT app_id FROM issues WHERE id=e.issue_id) WHERE e.issue_id=(${target}) ORDER BY e.created_at,e.rowid`,
+      `SELECT e.id,e.type,e.actor,e.data,e.created_at,${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=e.issue_id)", ["e.actor", "json_extract(e.data,'$.assignee')"]) : "NULL"} tier_bag,
+        json_extract(other.author,'$.id') ref_author,other.private ref_private,other.hidden ref_hidden
+       FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') AND other.app_id=(SELECT app_id FROM issues WHERE id=e.issue_id) WHERE e.issue_id=(${target})
+       ${
+         v.team
+           ? `UNION ALL SELECT e.id,e.type,i.author,e.data,i.created_at,${tierBag("i.app_id", ["i.author", "json_extract(e.data,'$.assignee')"])},NULL,NULL,NULL
+         FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target}) ORDER BY created_at`
+           : "ORDER BY e.created_at,e.rowid"
+       }`,
       key,
-      number
+      number,
+      ...(v.team ? [key, number] : [])
     ),
     sql(
       env,
@@ -485,28 +503,31 @@ export async function getIssue(
     timeline: TimelineItem[] = []
   const privileged = v.team
   if (!sees(v, gateOf(s))) missing()
-  for (const c of comments) {
+  for (const { tier_bag, ...c } of comments) {
     const author = parseActor(c.author, roles)
     timeline.push({
       kind: "comment",
-      comment: commentView(
-        {
-          ...c,
-          internal: !!c.internal,
-          helpful: c.helpful,
-          viewer_helpful: !!c.viewer_helpful,
-          mentions: parseMentions(c.mentions, roles),
-          author,
-          by_issue_author: author.id === s.author.id,
-          attachments: byParent.get(c.id) ?? [],
-          hidden: moderation(c.hidden, roles),
-          viewer_is_author: false
-        },
-        v
+      comment: projectTiers(
+        commentView(
+          {
+            ...c,
+            internal: !!c.internal,
+            helpful: c.helpful,
+            viewer_helpful: !!c.viewer_helpful,
+            mentions: parseMentions(c.mentions, roles),
+            author,
+            by_issue_author: author.id === s.author.id,
+            attachments: byParent.get(c.id) ?? [],
+            hidden: moderation(c.hidden, roles),
+            viewer_is_author: false
+          },
+          v
+        ),
+        tier_bag ? JSON.parse(tier_bag) : undefined
       )
     })
   }
-  for (const { ref_author, ref_private, ref_hidden, ...e } of events) {
+  for (const { ref_author, ref_private, ref_hidden, tier_bag, ...e } of events) {
     if (!privileged && (e.type === "hidden" || e.type === "unhidden")) continue
     if (
       (e.type === "related" || e.type === "unrelated") &&
@@ -515,14 +536,20 @@ export async function getIssue(
       continue
     const data = JSON.parse(e.data)
     if (e.type === "assigned" && data.assignee) normalizeActor(data.assignee, roles)
-    timeline.push({ kind: "event", event: { ...e, actor: parseActor(e.actor, roles), data } })
+    timeline.push({
+      kind: "event",
+      event: projectTiers(
+        { ...e, actor: parseActor(e.actor, roles), data },
+        tier_bag ? JSON.parse(tier_bag) : undefined
+      )
+    })
   }
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
   timeline.sort((a, b) => time(a).localeCompare(time(b)))
   return {
     ...s,
     edited_at: r.edited_at,
-    mentions: parseMentions(r.mentions, roles),
+    mentions: projectTiers(parseMentions(r.mentions, roles), r.tier_bag ? JSON.parse(r.tier_bag) : undefined),
     body: r.body,
     template_id: r.template_id,
     system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
