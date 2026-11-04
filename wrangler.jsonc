@@ -23,10 +23,12 @@
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   "queues": {
-    "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
-    "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
+    "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }, {"binding":"MAIL","queue":"bellhop-mail"}],
+    "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }, {"queue":"bellhop-mail","max_retries":6,"max_batch_size":5,"max_batch_timeout":1}]
   },
+  "triggers":{"crons":["* * * * *"]},
   "vars": {
+    "OPENSEND_API":"https://opensend.anoma.ly",
     "RATE_LIMIT_TEST_BYPASS": "0",
     // Cloudflare's always-pass test key; replace per environment.
     "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
@@ -67,10 +69,11 @@
       ],
       "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
       "queues": {
-        "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
-        "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
+        "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }, {"binding":"MAIL","queue":"bellhop-mail"}],
+        "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }, {"queue":"bellhop-mail","max_retries":6,"max_batch_size":5,"max_batch_timeout":1}]
       },
-      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22", "APP_DOMAIN": "blhp.app", "RATE_LIMIT_TEST_BYPASS": "0" },
+      "triggers":{"crons":["* * * * *"]},
+      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22", "APP_DOMAIN": "blhp.app", "RATE_LIMIT_TEST_BYPASS": "0","OPENSEND_API":"https://opensend.anoma.ly", "MAIL_DELIVERY": "held" },
       "observability": { "enabled": true }
     }
   }

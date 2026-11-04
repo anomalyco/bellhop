@@ -93,6 +93,7 @@ type PolicyRow = {
   pinned: number
 }
 type CommentRow = {
+  via: Comment["via"]
   tier_bag: string | null
   id: string
   body: string
@@ -257,7 +258,7 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
+            `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,c.via,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
       FROM comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
@@ -368,6 +369,7 @@ export class Room extends DurableObject<Env> {
           {
             ...c,
             body: row.body,
+            via: row.via,
             hidden: row.hidden ? JSON.parse(row.hidden) : null,
             author,
             by_issue_author: row.reporter === author.id,

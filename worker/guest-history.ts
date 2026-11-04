@@ -157,6 +157,28 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
   const json = JSON.stringify(actor)
   const [hits, ...updates] = await c.env.DB.batch<RoomHit>([
     affectedRooms(c.env, JSON.stringify([previous]), app),
+    // Reissue capabilities at the verified account address. A pending guest opt-in is
+    // not proof; never turn an old guest reply address into an account credential.
+    sql(
+      c.env,
+      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason)
+      SELECT s.issue_id,u.id,u.id,u.email,s.state,'manual' FROM mail_subs s JOIN users u ON u.id=?1 JOIN issues i ON i.id=s.issue_id
+      WHERE i.app_id=?2 AND s.actor_id=?3 AND s.address=u.email AND s.state IN ('on','off') AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email)`,
+      actor.id,
+      app,
+      previous
+    ),
+    sql(
+      c.env,
+      `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,user_id,address,state,reason)
+      SELECT i.id,u.id,u.id,u.email,CASE WHEN gs.state='off' THEN 'off' ELSE 'on' END,
+        CASE WHEN json_extract(i.author,'$.id')=?3 THEN 'opened' ELSE 'replied' END
+      FROM issues i JOIN users u ON u.id=?1 LEFT JOIN mail_settings p ON p.user_id=u.id LEFT JOIN mail_subs gs ON gs.issue_id=i.id AND gs.actor_id=?3
+      WHERE i.app_id=?2 AND ((json_extract(i.author,'$.id')=?3 AND coalesce(p.opened,1)) OR (coalesce(p.replied,1) AND i.id IN(SELECT issue_id FROM comments WHERE json_extract(author,'$.id')=?3))) AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email)`,
+      actor.id,
+      app,
+      previous
+    ),
     ...locations.map((s) =>
       sql(
         c.env,
@@ -174,6 +196,12 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
       )
     ),
     sql(c.env, "UPDATE attachments SET owner_id=? WHERE app_id=? AND owner_id=?", actor.id, app, previous),
+    sql(
+      c.env,
+      "DELETE FROM mail_subs WHERE actor_id=? AND issue_id IN(SELECT id FROM issues WHERE app_id=?)",
+      previous,
+      app
+    ),
     // The account's existing assignment (including one just bound from email) wins.
     sql(
       c.env,
@@ -229,6 +257,7 @@ export async function claimGuest(c: Ctx, user: User) {
           c.env,
           `SELECT value id FROM json_each(?) g WHERE EXISTS(SELECT 1 FROM attachments WHERE owner_id=g.value)
          OR EXISTS(SELECT 1 FROM tier_assignments WHERE actor_id=g.value)
+         OR EXISTS(SELECT 1 FROM mail_subs WHERE user_id IS NULL AND actor_id=g.value)
          OR ${locations.map((s) => `EXISTS(SELECT 1 FROM ${s.table} WHERE ${s.id}=g.value AND ${s.guest})`).join(" OR ")}`,
           JSON.stringify(group.map((g) => g.previous))
         )

@@ -415,7 +415,7 @@ export async function getIssue(
       },
       TeamRow,
       AttachmentRow & { comment_id: string | null },
-      Pick<Comment, "id" | "body" | "created_at" | "updated_at" | "edited_at"> & {
+      Pick<Comment, "id" | "body" | "created_at" | "updated_at" | "edited_at" | "via"> & {
         author: string
         hidden: string | null
         internal: number
@@ -459,7 +459,7 @@ export async function getIssue(
     ),
     sql(
       env,
-      `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,
+      `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,c.via,
         ${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=c.issue_id)", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,
        (SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,EXISTS(SELECT 1 FROM comment_helpful WHERE comment_id=c.id AND voter=?) viewer_helpful
        FROM comments c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.rowid`,

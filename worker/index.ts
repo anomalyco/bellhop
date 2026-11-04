@@ -17,7 +17,12 @@ import { sees } from "./visibility"
 import { oauth } from "./oauth"
 import { agents } from "./agents"
 import { tierRoutes } from "./tiers"
-import { queue } from "./webhooks"
+import { queue as webhookQueue } from "./webhooks"
+import { mailRoutes } from "./mail-routes"
+import { mailQueue, enqueueDue } from "./mail-delivery"
+import { pollInbound } from "./mail-inbound"
+import { pollFeedback } from "./mail-feedback"
+import { secrets } from "./mail-provider"
 import { atom, ogImage, page, robots, sitemap } from "./pages"
 import { similar } from "./similar"
 export { Room } from "./room"
@@ -47,7 +52,14 @@ api.use("*", async (c, next) => {
   const origin = c.req.header("origin")
   // Behind a TLS-terminating proxy the request URL is http while the browser's Origin is PUBLIC_ORIGIN.
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
-  if (!publicOAuth && origin && !allowed && (c.req.method !== "GET" || c.req.header("upgrade"))) denied()
+  if (
+    !publicOAuth &&
+    c.req.path !== "/email/unsubscribe" &&
+    origin &&
+    !allowed &&
+    (c.req.method !== "GET" || c.req.header("upgrade"))
+  )
+    denied()
   if (
     (c.req.path.startsWith("/api/") &&
       !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path) &&
@@ -137,6 +149,7 @@ api.use("/api/apps/:slug/*", async (c, next) => {
   await next()
 })
 api.route("/", auth)
+api.route("/", mailRoutes)
 api.route("/", oauth)
 api.route("/", agents)
 api.route("/", apps)
@@ -170,7 +183,7 @@ async function live(c: Ctx, number?: string) {
   }
   const headers = new Headers(c.req.raw.headers)
   headers.set("X-Bellhop-Viewer", JSON.stringify({ ...viewer, session: bearer ? null : session, bearer, app: app.id }))
-  return room.fetch(new Request(new URL('/__bellhop_conversation_socket',c.req.url), { headers }))
+  return room.fetch(new Request(new URL("/__bellhop_conversation_socket", c.req.url), { headers }))
 }
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))
@@ -179,7 +192,7 @@ api.get("/api/live/feed", async (c) => {
   await enforce(c, "RL_TEAM", caller ? `socket:agent:${caller.actor.id}` : `socket:ip:${clientIP(c)}`)
   const headers = new Headers(c.req.raw.headers)
   headers.set("X-Bellhop-Viewer", JSON.stringify({ ...(await feedViewer(c)), app: "", bearer: null }))
-  return feedRoom(c.env).fetch(new Request(new URL('/__bellhop_conversation_socket',c.req.url), { headers }))
+  return feedRoom(c.env).fetch(new Request(new URL("/__bellhop_conversation_socket", c.req.url), { headers }))
 })
 api.route("/", mcp)
 api.get("/robots.txt", robots)
@@ -223,4 +236,15 @@ api.onError((e, c) => {
   console.error("bellhop.request_failed", { method: c.req.method, path: c.req.path, message: e.message })
   return c.json({ error: { code: "internal_error", message: "Internal server error" } }, 500)
 })
-export default { fetch: api.fetch, queue }
+export default {
+  fetch: api.fetch,
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    if (secrets(env).OPENSEND_API_KEY || (!env.APP_DOMAIN && env.DEV_LOGIN === "1")) ctx.waitUntil(enqueueDue(env))
+    ctx.waitUntil(pollInbound(env, ctx))
+    ctx.waitUntil(pollFeedback(env))
+  },
+  async queue(batch: MessageBatch<unknown>, env: Env) {
+    if (batch.queue === "bellhop-mail") return mailQueue(batch as Parameters<typeof mailQueue>[0], env)
+    return webhookQueue(batch as Parameters<typeof webhookQueue>[0], env)
+  }
+}

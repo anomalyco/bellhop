@@ -158,6 +158,19 @@
 //   POST   /api/oauth/device/lookup { user_code }       -> { request_id }     signed in
 //   POST   /api/oauth/requests/:id/approve OAuthApproval -> { redirect_to: string | null }  null for device requests
 //   POST   /api/oauth/requests/:id/deny                 -> { redirect_to: string | null }
+// Email (OpenSend, from mail.blhp.app). People get an email when someone else replies publicly or changes the
+// status on an issue they follow; replies within ~3 minutes are batched into one email. Accounts follow issues they
+// opened or replied to, and their @mentions and assignments (each switchable). Guests follow an issue by giving an
+// email that they confirm once (a link), so nobody can sign someone else up. Every email can be answered: replying
+// posts the reply in the thread as the same person (guest or account), with quoted text stripped. Internal notes are
+// never emailed to outsiders; team members get mentions and assignments only.
+//   GET    /api/me/notifications                        -> NotificationSettings   signed in
+//   PATCH  /api/me/notifications Partial<NotificationSettings> -> NotificationSettings
+//   GET    /api/apps/:slug/issues/:number/subscription  -> IssueSubscription  anyone who can see the issue
+//   PUT    /api/apps/:slug/issues/:number/subscription { subscribed: boolean, email?: string } -> IssueSubscription
+//          guests (+ human) send an email the first time; it stays pending until confirmed
+//   GET    /email/confirm?t=<token>                     confirms a guest's email (a small page), then follows
+//   GET|POST /email/unsubscribe?t=<token>[&all=1]       one-click unsubscribe (RFC 8058) from that issue, or all email
 // Agents on the account (OAuth connections and token agents):
 //   GET    /api/me/agents                               -> ConnectedAgent[]
 //   POST   /api/me/agents AgentAccess & { name }         -> NewAgentToken      a token agent; the secret is only
@@ -280,6 +293,29 @@ export interface Moderation {
   reason: ModerationReason
   by: Actor
   at: string
+}
+
+export interface NotificationSettings {
+  /** The account's address (from Google). */
+  email: string
+  /** Follow issues I open (on by default). */
+  opened: boolean
+  /** Follow issues I reply to (on by default). */
+  replied: boolean
+  /** Email me when I'm @mentioned (team only; on by default). */
+  mentions: boolean
+  /** Email me when an issue is assigned to me (team only; on by default). */
+  assigned: boolean
+}
+
+export interface IssueSubscription {
+  subscribed: boolean
+  /** Where emails go; a guest's address is shown masked (e.g. "d***@example.com"). */
+  email: string | null
+  /** A guest's address waiting for its confirmation link. */
+  pending: boolean
+  /** Why the viewer follows it; null when not subscribed. */
+  reason: "opened" | "replied" | "mentioned" | "assigned" | "manual" | null
 }
 
 /**
@@ -589,6 +625,8 @@ export interface Comment {
   viewer_is_author: boolean
   /** An internal note: only the team and agents ever receive it (API, live, search, counts, feeds). */
   internal: boolean
+  /** How it was written: on the site, by replying to an email, or by an agent over MCP. */
+  via: "web" | "email" | "mcp"
   /** "This helped" marks. */
   helpful: number
   viewer_helpful: boolean

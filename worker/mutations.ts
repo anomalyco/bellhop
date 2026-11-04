@@ -284,7 +284,8 @@ export async function addComment(
   a: Access,
   n: number,
   b: Record<string, unknown>,
-  target?: IssueSummary
+  target?: IssueSummary,
+  inbound?: { message: string; sub: string; nonce: string; address: string }
 ): Promise<Comment> {
   const { env, actor, app } = a,
     s = target ?? (await commentTarget(a, n, b)),
@@ -294,12 +295,28 @@ export async function addComment(
   const links = attach(env, s.id, id, b.attachment_ids)
   const v = who(a)
   const internal = b.internal === true
+  const via = inbound ? "email" : actor.type === "agent" ? "mcp" : "web"
   const mentions = await mentionsIn(env, app.id, text, v.team)
   if (!text.trim() && !links.length) bad("A comment needs text or an attachment")
   await env.DB.batch([
+    ...(inbound
+      ? [
+          sql(
+            env,
+            `INSERT INTO mail_inbound(id,sub_id) VALUES(?,(SELECT id FROM mail_people WHERE id=? AND nonce=? AND address=? AND issue_id=? AND actor_id=? AND state='on' AND role IS ?))`,
+            inbound.message,
+            inbound.sub,
+            inbound.nonce,
+            inbound.address,
+            s.id,
+            actor.id,
+            a.role
+          )
+        ]
+      : []),
     sql(
       env,
-      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,1)`,
+      `INSERT INTO comments(id,issue_id,author,body,created_at,updated_at,internal,mentions,via,writer_version) VALUES(?,(SELECT id FROM issues i WHERE id=? AND ${visibleSQL(v)}),?,?,?,?,?,?,?,1)`,
       id,
       s.id,
       ...actorBindings(v),
@@ -308,7 +325,8 @@ export async function addComment(
       at,
       at,
       Number(internal),
-      JSON.stringify(mentions)
+      JSON.stringify(mentions),
+      via
     ),
     ...links,
     ...guestNameGuard(a),
@@ -325,6 +343,7 @@ export async function addComment(
       )
     : []
   const comment: Comment = {
+    via,
     id,
     author: actor,
     body: text,
@@ -494,6 +513,17 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       issue.id
     )
   )
+  for (const m of mentioned)
+    q.push(
+      sql(
+        env,
+        "INSERT INTO mail_signal(issue_id,kind,ref,actor,target) VALUES(?,'mention',?,?,?)",
+        issue.id,
+        issue.id,
+        actor.id,
+        m.id
+      )
+    )
   await env.DB.batch([...q, stillHere(a, issue.id), ...guestNameGuard(a)])
   const next = await full(a, n)
   notify(a, { type: "issue.updated", issue: summaryOf(next), changes, items, mentioned })
