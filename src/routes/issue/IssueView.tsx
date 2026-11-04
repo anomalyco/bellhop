@@ -1,4 +1,4 @@
-import { useState, type RefObject } from "react"
+import { useState } from "react"
 import type { App } from "../../../shared/api"
 import { api, errorMessage, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
@@ -21,7 +21,7 @@ import { EditedMarker, HiddenLine, IssueFlags, reasons, type CommentContext } fr
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
-export function IssueView({ model, nameField }: { model: IssueModel; nameField: RefObject<HTMLInputElement | null> }) {
+export function IssueView({ model }: { model: IssueModel }) {
   const { app, issue, actionError } = model
   const authorTier = issue.author.type !== "agent" ? (issue.author.tier ?? null) : null
   const ctx: CommentContext = { app, issue, member: model.member, viewerId: model.viewer?.id ?? null, signedIn: !!model.me?.user }
@@ -52,7 +52,7 @@ export function IssueView({ model, nameField }: { model: IssueModel; nameField: 
               {actionError}
             </p>
           )}
-          {issue.locked && !model.member ? <LockedComposer /> : <Composer model={model} nameField={nameField} />}
+          {issue.locked && !model.member ? <LockedComposer /> : <Composer model={model} />}
         </div>
         <IssueSidebar model={model} />
       </div>

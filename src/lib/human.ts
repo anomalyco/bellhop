@@ -16,6 +16,8 @@ declare global {
 
 let script: Promise<Turnstile> | null = null
 let running: Promise<void> | null = null
+/** Stops a check that renders inside a host the caller owns (the name prompt), when that host goes away. */
+let cancelHosted: (() => void) | null = null
 
 function loadScript(): Promise<Turnstile> {
   script ??= new Promise<Turnstile>((resolve, reject) => {
@@ -41,21 +43,37 @@ async function siteKey() {
   return config.turnstile_site_key
 }
 
-async function check() {
+/**
+ * Turnstile runs invisibly and only shows itself when it needs a click. By default that happens in a small panel of
+ * its own; with `host` (an element inside the caller's own prompt) it shows there instead, so a guest sees one
+ * prompt, not two. `host` gets data-visible while the widget needs them.
+ */
+async function check(host?: HTMLElement) {
   const [turnstile, sitekey] = await Promise.all([loadScript(), siteKey()])
-  const panel = document.createElement("div")
-  panel.className = "human-check"
-  panel.setAttribute("role", "dialog")
-  panel.setAttribute("aria-label", "Human check")
-  const text = document.createElement("div")
-  text.textContent = "Confirm you're human to continue"
-  const slot = document.createElement("div")
-  panel.append(text, slot)
-  document.body.appendChild(panel)
+  // The prompt closed while the script loaded: don't render into an element that's gone (it would never answer).
+  if (host && !host.isConnected) throw new Error("cancelled")
+  let panel: HTMLElement
+  let slot: HTMLElement
+  if (host) {
+    panel = host
+    slot = document.createElement("div")
+    host.appendChild(slot)
+  } else {
+    panel = document.createElement("div")
+    panel.className = "human-check"
+    panel.setAttribute("role", "dialog")
+    panel.setAttribute("aria-label", "Human check")
+    const text = document.createElement("div")
+    text.textContent = "Confirm you're human to continue"
+    slot = document.createElement("div")
+    panel.append(text, slot)
+    document.body.appendChild(panel)
+  }
 
   let widget: string | undefined
   try {
     const token = await new Promise<string>((resolve, reject) => {
+      if (host) cancelHosted = () => reject(new Error("cancelled"))
       widget = turnstile.render(slot, {
         sitekey,
         appearance: "interaction-only",
@@ -75,17 +93,29 @@ async function check() {
     if (!res.ok) throw new Error("The human check failed. Try again.")
     setData<Me>("me", (me) => (me ? { ...me, human: true } : me))
   } finally {
+    cancelHosted = null
     if (widget) turnstile.remove(widget)
-    panel.remove()
+    if (host) {
+      slot.remove()
+      host.removeAttribute("data-visible")
+    } else panel.remove()
   }
 }
 
-/** Runs Turnstile now (after a 428, or before a write when me.human is false). Concurrent callers share one run. */
-export function runHumanCheck(): Promise<void> {
-  running ??= check().finally(() => {
+/**
+ * Runs Turnstile now (after a 428, or before a write when me.human is false). Concurrent callers share one run;
+ * `host` only applies when this call starts it.
+ */
+export function runHumanCheck(host?: HTMLElement): Promise<void> {
+  running ??= check(host).finally(() => {
     running = null
   })
   return running
+}
+
+/** The name prompt closed: drop a check still waiting inside it, so a later write can start a fresh one. */
+export function cancelHostedCheck() {
+  cancelHosted?.()
 }
 
 /** Before a guest writes: passes straight through for members of the app or when the cookie is still valid. */

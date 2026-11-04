@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, CSSProperties, ReactNode } from "react"
+import type { ButtonHTMLAttributes, CSSProperties, ReactNode, Ref } from "react"
 import { jacketPath, jacketTransform } from "./mark"
 import { StatusIcon } from "./icons"
 
@@ -17,6 +17,7 @@ export function Button({
   children,
   ...props
 }: ButtonHTMLAttributes<HTMLButtonElement> & {
+  ref?: Ref<HTMLButtonElement>
   variant?: ButtonVariant
   size?: ButtonSize
   icon?: ReactNode

@@ -216,6 +216,11 @@
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --dur-exit: 100ms;
+  /* A critically damped spring (bounce 0) sampled for linear(); durations are .25 / .3 / .4 springs' settle times */
+  --spring: linear(0, 0.0544, 0.172, 0.308, 0.44, 0.557, 0.656, 0.737, 0.801, 0.851, 0.89, 0.919, 0.942, 0.958, 0.971, 0.98, 0.987, 0.992, 0.995, 0.998, 1);
+  --spring-fast: 296ms;
+  --spring-medium: 355ms;
+  --spring-slow: 473ms;
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "OpenTUI Mono", "OpenTUI Mono Fallback", "OpenTUI Mono Fallback Consolas", ui-monospace, monospace;

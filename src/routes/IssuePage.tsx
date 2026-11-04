@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useLocation } from "wouter"
 import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Me, Relation } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
-import { load, peek, setData, useResource } from "../lib/cache"
+import { load, peek, useResource } from "../lib/cache"
+import { setGuestNameLocally } from "../lib/guest"
 import { ensureHuman } from "../lib/human"
 import {
   appendTimeline,
@@ -64,8 +65,6 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const [pending, setPending] = useState<Pending[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const member = !!app.role
-  const [askName, setAskName] = useState(false)
-  const nameField = useRef<HTMLInputElement>(null)
   // The room's hello can beat the first fetch; hold its activity until the issue is known.
   const helloActivity = useRef<Activity | null | undefined>(undefined)
   const issueId = issue?.id
@@ -106,6 +105,9 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
           break
         case "actor.updated":
           applyActorUpdate(slug, event.previous_id, event.actor)
+          // Maybe this browser's guest, renamed in another tab: refresh who's posting (guest ids differ per app,
+          // so /api/me is the way to tell).
+          if (event.actor.type === "guest" && !peek<Me>(keys.me)?.user) load(keys.me, api.me).catch(() => {})
           break
         case "comment.updated":
           replaceComment(slug, event.issue_id, event.comment)
@@ -195,10 +197,9 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       ),
   }
 
-  const send = async (p: Pending) => {
+  const send = async (p: Pending): Promise<boolean | "name_required"> => {
     setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error: undefined } : x)))
-    // A retry after "name required" picks up whatever is in the name field now.
-    const guestName = nameField.current?.value.trim() || p.guestName
+    const guestName = p.guestName
     try {
       await ensureHuman(member)
       const comment: Comment = await api.comment(slug, number, {
@@ -209,14 +210,16 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       })
       appendTimeline(slug, number, { kind: "comment", comment })
       setPending((list) => list.filter((x) => x.id !== p.id))
-      if (guestName) setData<Me>(keys.me, (m) => (m ? { ...m, guest: { ...m.guest, name: guestName } } : m))
-      setAskName(false)
+      if (guestName) setGuestNameLocally(guestName)
       return true
     } catch (e) {
-      const nameRequired = e instanceof ApiFailure && e.code === "name_required"
-      if (nameRequired) setAskName(true)
-      const error = nameRequired ? "Add your name, then retry." : errorMessage(e)
-      setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error, guestName } : x)))
+      if (e instanceof ApiFailure && e.code === "name_required") {
+        // The composer asks for the name and posts again; drop this attempt rather than show an error.
+        setGuestNameLocally(null)
+        setPending((list) => list.filter((x) => x.id !== p.id))
+        return "name_required"
+      }
+      setPending((list) => list.map((x) => (x.id === p.id ? { ...x, error: errorMessage(e) } : x)))
       return false
     }
   }
@@ -244,7 +247,6 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     viewer: viewerActor,
     actions,
     actionError,
-    askName,
     pending: pending.map((p) => ({
       id: p.id,
       body: p.body,
@@ -311,7 +313,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
     },
   }
 
-  return <IssueView model={model} nameField={nameField} />
+  return <IssueView model={model} />
 }
 
 function IssueLoading({ slug, number }: { slug: string; number: number }) {

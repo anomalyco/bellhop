@@ -1,14 +1,11 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type RefObject } from "react"
-import type { Attachment, CloseReason, Me } from "../../../shared/api"
-import { api, errorMessage, keys } from "../../lib/api"
-import { setData } from "../../lib/cache"
-import { ensureHuman } from "../../lib/human"
-import { signInHref } from "../../lib/site"
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react"
+import type { Attachment, CloseReason } from "../../../shared/api"
+import { useWho } from "../../lib/guest"
 import { Editor } from "../../ui/Editor"
 import { ChevronDownIcon, LockIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
+import { GuestLine, useNamePrompt } from "../../ui/NamePrompt"
 import { Button, StateIcon } from "../../ui/primitives"
-import { SiteLink } from "../../ui/SiteLink"
 import type { IssueModel } from "./model"
 
 const closeOptions: { reason: CloseReason; label: string; description: string }[] = [
@@ -70,19 +67,19 @@ function useDock() {
   return { slot, dock, dockStyle }
 }
 
-/** A guest's display name: 1–40 characters after trimming. */
-export const validGuestName = (name: string) => name.trim().length >= 1 && name.trim().length <= 40
-
 /**
  * The reply box pinned to the bottom of the viewport, with close/reopen as a split button beside Send. Guests see
- * who they post as above it; until they have a name, that line is the name field, and the name goes with the post.
+ * who they post as above it; a guest without a name is asked for one when they first post ("What should we call
+ * you?"), in a prompt growing from the button they pressed, and the name goes along with that post.
  */
-export function Composer({ model, nameField }: { model: IssueModel; nameField: RefObject<HTMLInputElement | null> }) {
+export function Composer({ model }: { model: IssueModel }) {
   const { app, issue, me, member, onStatus, onDuplicate } = model
   const guest = me && !me.user ? me.guest : null
-  const [changing, setChanging] = useState(false)
-  const [nameError, setNameError] = useState<string | null>(null)
-  const naming = !!guest && (!guest.name || changing || model.askName)
+  // Known on the first paint from the local cache; undefined on a first visit until /api/me answers, when the line
+  // holds its space (invisibly) so the composer never grows under the reader.
+  const who = useWho(me)
+  const { ask, prompt } = useNamePrompt()
+  const sendButton = useRef<HTMLButtonElement>(null)
   const { slot, dock, dockStyle } = useDock()
   const [body, setBody] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -97,39 +94,42 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
   const note = member && internal
   const hasText = !!body.trim()
 
-  useEffect(() => {
-    if (model.askName) nameField.current?.focus()
-  }, [model.askName, nameField])
-
-  const comment = async () => {
+  /** Posts the draft; `anchor` is the button pressed, where the name prompt grows from if one is needed. */
+  const comment = async (anchor: HTMLElement | null = sendButton.current) => {
     if (!hasText || busy) return true
     let guestName: string | undefined
-    if (naming) {
-      guestName = nameField.current?.value.trim() ?? ""
-      if (!validGuestName(guestName)) {
-        setNameError(guestName ? "Up to 40 characters." : "Add your name to post.")
-        nameField.current?.focus()
-        return false
-      }
+    if (guest && !guest.name) {
+      const name = await ask({ anchor, mode: "first", action: "Post" })
+      if (!name) return false
+      guestName = name
     }
-    setNameError(null)
     const text = body
-    const ids = attachments.filter((a) => text.includes(a.url)).map((a) => a.id)
+    const files = attachments
+    const ids = files.filter((a) => text.includes(a.url)).map((a) => a.id)
     setBody("")
     setAttachments([])
-    const ok = await model.onComment(text, ids, guestName, note)
-    if (ok) setChanging(false)
-    return ok
+    let result = await model.onComment(text, ids, guestName, note)
+    if (result === "name_required") {
+      // The server has no name for this browser after all (its cookie was cleared): ask, then send the same post.
+      const name = await ask({ anchor, mode: "first", action: "Post" })
+      if (!name) {
+        setBody((b) => b || text)
+        setAttachments((l) => (l.length ? l : files))
+        return false
+      }
+      result = await model.onComment(text, ids, name, note)
+    }
+    return result === true
   }
 
-  const close = async (why: CloseReason = reason) => {
+  const close = async (why: CloseReason = reason, anchor?: HTMLElement) => {
     setDupError(null)
     if (why === "duplicate") {
       const n = Number(dupOf.replace(/^#/, ""))
       if (!Number.isInteger(n) || n < 1) return setDupError("Enter the issue this duplicates.")
       setWorking(true)
       try {
-        if (!(await comment())) return
+        if (!(await comment(anchor))) return
         await onDuplicate(n)
         setDupOf("")
         setReason("completed")
@@ -140,12 +140,12 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
       }
       return
     }
-    if (!(await comment())) return
+    if (!(await comment(anchor))) return
     onStatus("closed", why).catch(() => {})
   }
 
-  const reopen = async () => {
-    if (!(await comment())) return
+  const reopen = async (anchor?: HTMLElement) => {
+    if (!(await comment(anchor))) return
     onStatus("open").catch(() => {})
   }
 
@@ -157,14 +157,14 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
   // The team, and the reporter (completed or not planned; duplicates need the team).
   const options = member ? closeOptions : closeOptions.filter((o) => o.reason !== "duplicate")
   const splitControl = !member && !issue.viewer_is_author ? null : issue.status === "closed" ? (
-    <Button icon={<StateIcon state="open" size={14} />} onClick={reopen} disabled={busy} aria-label={reopenLabel} title={reopenLabel}>
+    <Button icon={<StateIcon state="open" size={14} />} onClick={(e) => void reopen(e.currentTarget)} disabled={busy} aria-label={reopenLabel} title={reopenLabel}>
       <span className="close-label">{reopenLabel}</span>
     </Button>
   ) : (
     <span className="split">
       <Button
         icon={<StateIcon state={reason === "completed" ? "closed" : "not_planned"} size={14} />}
-        onClick={() => void close()}
+        onClick={(e) => void close(reason, e.currentTarget)}
         disabled={busy || working}
         aria-label={closeLabel}
         title={hasText ? `${closeLabel} (posts your reply first)` : closeLabel}
@@ -209,17 +209,11 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
             <span className="composer-mode-hint">{note ? "Only the team and agents see this" : "Everyone who can see the issue sees this"}</span>
           </div>
         )}
-        {guest && (
-          <GuestBar
-            me={me!}
-            naming={naming}
-            nameField={nameField}
-            error={nameError}
-            onChange={() => setChanging(true)}
-            onDone={() => {
-              setChanging(false)
-              setNameError(null)
-            }}
+        {(who === undefined || !who.user) && (
+          <GuestLine
+            name={who && !who.user ? who.name : null}
+            placeholder={who === undefined}
+            onChange={(anchor) => void ask({ anchor, mode: "edit" })}
           />
         )}
         <Editor
@@ -252,116 +246,15 @@ export function Composer({ model, nameField }: { model: IssueModel; nameField: R
           actions={
             <>
               {splitControl}
-              <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
+              <Button ref={sendButton} variant="primary" onClick={(e) => void comment(e.currentTarget)} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
                 {busy ? "Uploading…" : note ? "Add note" : "Send"}
               </Button>
             </>
           }
         />
       </div>
+      {prompt}
     </div>
-  )
-}
-
-/** "Posting as Alex · Change name · Sign in", or the name field while a guest names (or renames) themselves. */
-function GuestBar({
-  me,
-  naming,
-  nameField,
-  error,
-  onChange,
-  onDone,
-}: {
-  me: Me
-  naming: boolean
-  nameField: RefObject<HTMLInputElement | null>
-  error: string | null
-  onChange: () => void
-  onDone: () => void
-}) {
-  const saved = me.guest.name
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
-
-  // A rename without posting: PUT /api/me/guest. A first name just goes along with the post.
-  const save = async (e: FormEvent) => {
-    e.preventDefault()
-    const name = nameField.current?.value.trim() ?? ""
-    if (!validGuestName(name)) return setSaveError(name ? "Up to 40 characters." : "Add a name.")
-    if (name === saved) return onDone()
-    setSaving(true)
-    setSaveError(null)
-    try {
-      await ensureHuman(false)
-      setData<Me>(keys.me, await api.setGuestName(name))
-      onDone()
-    } catch (err) {
-      setSaveError(errorMessage(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const signIn = (
-    <SiteLink href={signInHref()} className="guest-bar-link">
-      Sign in
-    </SiteLink>
-  )
-
-  if (!naming)
-    return (
-      <div className="guest-bar">
-        <span className="guest-bar-text">
-          Posting as <strong>{saved}</strong>
-        </span>
-        <span aria-hidden="true">·</span>
-        <button type="button" className="guest-bar-link" onClick={onChange}>
-          Change name
-        </button>
-        <span aria-hidden="true">·</span>
-        {signIn}
-      </div>
-    )
-
-  const problem = error ?? saveError
-  return (
-    <form className="guest-bar" onSubmit={saved ? save : (e) => e.preventDefault()}>
-      <label htmlFor="guest-name">Your name</label>
-      <div className="input" data-size="small" data-invalid={problem ? "" : undefined}>
-        <input
-          ref={nameField}
-          id="guest-name"
-          defaultValue={saved ?? ""}
-          maxLength={40}
-          autoComplete="name"
-          placeholder="Name"
-          aria-invalid={!!problem}
-          aria-describedby={problem ? "guest-name-error" : undefined}
-          autoFocus={!!saved}
-        />
-      </div>
-      {saved && (
-        <>
-          <Button type="submit" size="small" disabled={saving}>
-            Save
-          </Button>
-          <Button size="small" variant="invisible" onClick={onDone}>
-            Cancel
-          </Button>
-        </>
-      )}
-      {problem && (
-        <span id="guest-name-error" className="field-error">
-          {problem}
-        </span>
-      )}
-      {!saved && (
-        <>
-          <span className="spacer" />
-          {signIn}
-        </>
-      )}
-    </form>
   )
 }
 

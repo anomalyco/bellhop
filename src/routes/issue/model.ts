@@ -16,10 +16,11 @@ export interface IssueModel {
   /** Comments still on their way, each with a "Sending…" or "Not sent: … Retry · Discard" note. */
   pending: { id: string; body: string; note: ReactNode; name?: string; internal?: boolean }[]
   actionError: string | null
-  /** The server asked for a guest name (400 name_required); the composer shows and focuses the field. */
-  askName: boolean
-  /** Posts a comment (or, for the team, an internal note); `guestName` goes along for guests naming themselves. */
-  onComment: (body: string, attachmentIds: string[], guestName?: string, internal?: boolean) => Promise<boolean>
+  /**
+   * Posts a comment (or, for the team, an internal note); `guestName` goes along for guests naming themselves.
+   * "name_required": the server has no name for this guest; the post is dropped so the composer can ask and resend.
+   */
+  onComment: (body: string, attachmentIds: string[], guestName?: string, internal?: boolean) => Promise<boolean | "name_required">
   onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
   onDuplicate: (other: number) => Promise<void>
   /** Team (or the reporter, when the workspace lets them choose): make the issue private or public. */

@@ -857,6 +857,8 @@ a.box-row:hover {
 }
 .issue-form {
   display: grid;
+  /* minmax(0) so a long guest name truncates in "Posting as …" instead of widening the form */
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
 }
 .form-labels {
@@ -1876,27 +1878,38 @@ button.prop:hover,
   text-overflow: ellipsis;
 }
 
-/* Guests: who they post as, or the name field, above the composer */
+/* Guests: who they post as, above the composer and beside Submit on new issue. One line at a fixed height (a long
+   name truncates), so naming yourself or renaming never changes the composer's height. */
 .guest-bar {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  min-height: 24px;
+  gap: 8px;
+  height: 24px;
+  min-width: 0;
   margin: 0 2px 8px;
   color: var(--fg-faint);
   font-size: var(--text-small);
+  white-space: nowrap;
+}
+/* Held for a first visit until /api/me says who's here */
+.guest-bar[data-placeholder] {
+  visibility: hidden;
+}
+.guest-bar-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .guest-bar strong {
   color: var(--fg-muted);
   font-weight: var(--weight-medium);
 }
-.guest-bar label {
-  color: var(--fg-muted);
-  font-weight: var(--weight-medium);
+.guest-bar > :not(.guest-bar-text) {
+  flex: none;
 }
-.guest-bar .input {
-  width: 200px;
+.form-actions .guest-bar {
+  flex: 0 1 auto;
+  margin: 0;
 }
 .guest-bar-link {
   padding: 0;
@@ -1910,6 +1923,99 @@ button.prop:hover,
   color: var(--fg);
   text-decoration: underline;
   text-underline-offset: 0.2em;
+}
+
+/* "What should we call you?": a popover growing from the button that asked (a bottom sheet on phones) */
+.name-prompt {
+  position: fixed;
+  z-index: 100;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 16px;
+  background: var(--layer-1);
+  border-radius: var(--radius);
+  box-shadow: var(--elevation-floating);
+  animation: name-prompt-in var(--spring-fast) var(--spring);
+}
+.name-prompt[data-sheet] {
+  left: 8px;
+  right: 8px;
+  padding: 20px 16px max(16px, env(safe-area-inset-bottom));
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-overlay);
+  animation-name: name-prompt-sheet-in;
+}
+.name-prompt[data-closing],
+.name-prompt-scrim[data-closing] {
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 250ms var(--spring);
+}
+@keyframes name-prompt-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes name-prompt-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .name-prompt,
+  .name-prompt[data-sheet] {
+    animation: fade-in 150ms ease-out;
+  }
+  .name-prompt[data-closing],
+  .name-prompt-scrim[data-closing] {
+    transition-duration: 150ms;
+  }
+}
+.name-prompt-head {
+  display: grid;
+  gap: 4px;
+}
+.name-prompt-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+.name-prompt-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  text-wrap: pretty;
+}
+.name-prompt .field-error {
+  margin-top: -6px;
+}
+/* Turnstile only takes room when it needs a click */
+.name-prompt-check:not([data-visible]) {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+.name-prompt-check[data-visible] {
+  min-height: 65px;
+}
+.name-prompt-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.name-prompt-signin {
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.name-prompt-signin:hover {
+  color: var(--fg);
 }
 .input[data-invalid] {
   box-shadow: inset 0 0 0 1px var(--danger-border);
@@ -2367,10 +2473,9 @@ button.prop:hover,
   .group-msg {
     padding-left: 0;
   }
-  .guest-bar .input {
-    flex: 1;
-    width: auto;
-    min-width: 140px;
+  /* New issue: the line takes its own row above Cancel and Submit */
+  .form-actions .guest-bar {
+    flex-basis: 100%;
   }
   .composer {
     padding: 8px 0 max(8px, env(safe-area-inset-bottom));
@@ -2420,6 +2525,7 @@ button.prop:hover,
       .prop:not([data-static]),
       .report-edit-body,
       .guest-bar-link,
+      .name-prompt-signin,
       .field-label-aside,
       .burst-toggle,
       .issue-row-comments,
@@ -2444,6 +2550,7 @@ button.prop:hover,
       .prop:not([data-static]),
       .report-edit-body,
       .guest-bar-link,
+      .name-prompt-signin,
       .field-label-aside,
       .burst-toggle,
       .issue-row-comments,

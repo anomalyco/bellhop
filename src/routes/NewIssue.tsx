@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useSearch } from "wouter"
-import type { AppDetail, Attachment, Me, SystemInfo, Template } from "../../shared/api"
-import { ApiFailure, api, errorMessage, keys } from "../lib/api"
-import { setData } from "../lib/cache"
+import type { AppDetail, Attachment, SystemInfo, Template } from "../../shared/api"
+import { ApiFailure, api, errorMessage } from "../lib/api"
+import { setGuestNameLocally, useWho } from "../lib/guest"
 import { ensureHuman } from "../lib/human"
 import { storeIssue } from "../lib/issues"
-import { appPath, signInHref } from "../lib/site"
+import { appPath } from "../lib/site"
 import { collectSystemInfo } from "../lib/sysinfo"
 import { Editor } from "../ui/Editor"
 import { LockIcon, XIcon } from "../ui/icons"
 import "../styles/onboarding.css"
 import "../styles/moderation.css"
 import { loadMarkdown } from "../ui/Markdown"
+import { GuestLine, useNamePrompt } from "../ui/NamePrompt"
 import { Button, Label } from "../ui/primitives"
 import { AppLayout, Page, useMe } from "../ui/Shell"
-import { AppLink, SiteLink } from "../ui/SiteLink"
-import { validGuestName } from "./issue/Composer"
+import { AppLink } from "../ui/SiteLink"
 
 export function NewIssue({ slug }: { slug: string }) {
   useEffect(() => {
@@ -77,10 +77,9 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
   const member = !!app.role
   const { data: me } = useMe()
   const guest = me && !me.user ? me.guest : null
-  const [guestName, setGuestName] = useState<string | null>(null)
-  const name = guestName ?? guest?.name ?? ""
-  const [nameError, setNameError] = useState<string | null>(null)
-  const nameInput = useRef<HTMLInputElement>(null)
+  const who = useWho(me)
+  const { ask, prompt } = useNamePrompt()
+  const submitButton = useRef<HTMLButtonElement>(null)
   const [title, setTitle] = useState(template?.title ?? "")
   const [body, setBody] = useState(template?.body ?? "")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -102,17 +101,18 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
 
   const labels = template ? app.labels.filter((l) => template.label_ids.includes(l.id)) : []
 
-  const submit = async (e?: FormEvent) => {
+  // A guest without a name is asked for one here, in a prompt growing from Submit; the name goes with the issue.
+  const submit = async (e?: FormEvent, askedName?: string) => {
     e?.preventDefault()
     if (!title.trim() || busy || submitting) return
-    if (guest && !validGuestName(name)) {
-      setNameError(name.trim() ? "Up to 40 characters." : "Add your name to post.")
-      nameInput.current?.focus()
-      return
+    let guestName = askedName
+    if (guest && !guest.name && !guestName) {
+      const name = await ask({ anchor: submitButton.current, mode: "first", action: "Submit issue" })
+      if (!name) return
+      guestName = name
     }
     setSubmitting(true)
     setError(null)
-    setNameError(null)
     try {
       await ensureHuman(member)
       const used = attachments.filter((a) => body.includes(a.url))
@@ -122,18 +122,20 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         template_id: template?.id,
         attachment_ids: used.length ? used.map((a) => a.id) : undefined,
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
-        guest_name: guest ? name.trim() : undefined,
+        guest_name: guestName,
         private: canChoose ? isPrivate : undefined,
       })
-      if (guest) setData<Me>(keys.me, (m) => (m ? { ...m, guest: { ...m.guest, name: name.trim() } } : m))
+      if (guestName) setGuestNameLocally(guestName)
       storeIssue(app.slug, issue)
       navigate(appPath(app.slug, `/issues/${issue.number}`))
     } catch (err) {
-      if (err instanceof ApiFailure && err.code === "name_required") {
-        setNameError("Add your name to post.")
-        nameInput.current?.focus()
-      } else setError(errorMessage(err))
       setSubmitting(false)
+      if (err instanceof ApiFailure && err.code === "name_required" && !askedName) {
+        // The server has no name for this browser after all: ask now and submit again.
+        setGuestNameLocally(null)
+        const name = await ask({ anchor: submitButton.current, mode: "first", action: "Submit issue" })
+        if (name) await submit(undefined, name)
+      } else setError(errorMessage(err))
     }
   }
 
@@ -144,37 +146,6 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
       <form className="issue-form" onSubmit={submit}>
-        {guest && (
-          <div className="field guest-name-field">
-            <div className="field-label-row">
-              <label className="field-label" htmlFor="guest-name">
-                Your name
-              </label>
-              <SiteLink href={signInHref()} className="field-label-aside">
-                Sign in instead
-              </SiteLink>
-            </div>
-            <div className="input" data-size="large" data-invalid={nameError ? "" : undefined}>
-              <input
-                ref={nameInput}
-                id="guest-name"
-                value={name}
-                onChange={(e) => setGuestName(e.target.value)}
-                placeholder="Shown with what you post"
-                autoComplete="name"
-                maxLength={40}
-                aria-invalid={!!nameError}
-                aria-describedby={nameError ? "guest-name-error" : undefined}
-                autoFocus={!guest.name}
-              />
-            </div>
-            {nameError && (
-              <p id="guest-name-error" className="field-error">
-                {nameError}
-              </p>
-            )}
-          </div>
-        )}
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
             Title
@@ -185,7 +156,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="Title"
-              autoFocus={!template?.title && !(guest && !guest.name)}
+              autoFocus={!template?.title}
               required
               maxLength={256}
             />
@@ -278,14 +249,23 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
 
         {error && <p className="flash" data-tone="danger">{error}</p>}
         <div className="form-actions">
+          {(who === undefined || !who.user) && (
+            <GuestLine
+              name={who && !who.user ? who.name : null}
+              placeholder={who === undefined}
+              onChange={(anchor) => void ask({ anchor, mode: "edit" })}
+            />
+          )}
+          <span className="spacer" />
           <AppLink slug={app.slug} href={appPath(app.slug)} className="btn" data-variant="invisible">
             Cancel
           </AppLink>
-          <Button type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>
+          <Button ref={submitButton} type="submit" variant="primary" disabled={!title.trim() || busy || submitting}>
             {submitting ? "Submitting…" : busy ? "Uploading…" : "Submit new issue"}
           </Button>
         </div>
       </form>
+      {prompt}
     </Page>
   )
 }
