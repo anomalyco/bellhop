@@ -4,6 +4,7 @@ import { bad, body, denied, missing, now, sql, str, uid, type Bindings, type Ctx
 import { auditActor, auditPage, recorded } from "./audit"
 import { requireTeam, can, type Action } from "./permissions"
 import { authenticate } from "./mcp"
+import { analytics } from "./analytics"
 
 const cols = "id,name,body,created_by,updated_at"
 type Row = Omit<SavedReply, "created_by"> & { created_by: string }
@@ -84,4 +85,10 @@ teamTools.delete(base + "/:id", async (c) => {
 teamTools.get("/api/apps/:slug/audit", async (c) => {
   await access(c, "setup")
   return c.json(await auditPage(c.env, c.var.app.id, c.req.query()))
+})
+teamTools.get("/api/apps/:slug/analytics", async (c) => {
+  await access(c, "triage")
+  const days = c.req.query("days") ?? "30"
+  if (!["7", "30", "90"].includes(days)) bad("days must be 7, 30 or 90")
+  return c.json(await analytics(c, c.var.app.id, Number(days)))
 })

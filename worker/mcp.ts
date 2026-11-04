@@ -1,5 +1,6 @@
 import { Hono } from "hono"
 import { savedReplies } from "./team-tools"
+import { analytics } from "./analytics"
 import { allowed, clientIP } from "./rate-limits"
 import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
@@ -41,6 +42,7 @@ const toolRoles = {
   list_apps: "discover",
   list_tiers: "read",
   list_saved_replies: "read",
+  get_analytics: "triage",
   set_tier: "triage",
   list_mentionables: "read",
   transfer_issue: "triage",
@@ -113,6 +115,11 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool(
+    "get_analytics",
+    "Read workspace response, resolution and agent-resolved metrics (member; defaults to 30 days).",
+    { days: { type: "integer", enum: [7, 30, 90] } }
+  ),
   tool("list_saved_replies", "List saved Markdown replies. Substitute {reporter} only when composing a reply.", {}),
   tool("list_tiers", "List this workspace’s reporter tiers and handling rules.", {}),
   tool(
@@ -329,6 +336,8 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "get_analytics":
+      return textResult(await analytics(c, app.id, b.days === undefined ? 30 : integer(b.days, "days")))
     case "list_saved_replies":
       return textResult(await savedReplies(env, app.id))
     case "list_tiers":

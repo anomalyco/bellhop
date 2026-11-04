@@ -131,6 +131,7 @@
 //   PATCH  /api/apps/:slug/saved-replies/:id SavedReplyInput -> SavedReply     member
 //   DELETE /api/apps/:slug/saved-replies/:id             -> { ok: true }       member
 //   GET    /api/apps/:slug/audit?cursor=&actor=&action=  -> AuditPage          admin; newest first, kept 90 days
+//   GET    /api/apps/:slug/analytics?days=7|30|90        -> Analytics          member
 //   GET    /api/apps/:slug/blocks                        -> Block[]            member
 //   POST   /api/apps/:slug/blocks { actor_id, hide_content? } -> Block         member; a guest (per-app id) or account
 //          that isn't on the team. Blocked actors get 403 code "blocked" on posting, editing and uploading here.
@@ -563,6 +564,31 @@ export interface SavedReplyInput {
   body: string
 }
 
+/**
+ * How the workspace is doing over a period (issues opened in it, unless noted). Times are medians in seconds; null
+ * when there's no data. "Agent-resolved": closed as completed with an agent's public reply, no human team reply and
+ * no reopen. Internal notes never count as responses.
+ */
+export interface Analytics {
+  days: number
+  opened: number
+  closed: number
+  /** First public response by the team or an agent. */
+  first_response: { median: number | null; p90: number | null; by_agent_share: number | null }
+  /** Opened to closed (completed or not planned). */
+  resolution: { median: number | null; p90: number | null }
+  agent_resolved_share: number | null
+  reopened_share: number | null
+  /** "This helped" marks on team and agent replies, per reply. */
+  helpful_per_reply: { agent: number | null; human: number | null }
+  /** Open now, waiting on the team (no public team or agent reply after the reporter's latest post). */
+  waiting_on_team: number
+  /** One entry per day, oldest first. */
+  daily: { date: string; opened: number; closed: number; first_response_median: number | null }[]
+  by_tier: { tier: string; opened: number; first_response_median: number | null }[]
+  by_label: { label: string; opened: number }[]
+}
+
 /** What someone (a person or an agent) did in a workspace. */
 export interface AuditEntry {
   id: string
@@ -890,6 +916,7 @@ export interface WebhookPayload {
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
 //   get_metadata   { id }                        report metadata: specs, context, log attachments, fingerprint, matches
 //   list_saved_replies {}                        saved replies; use one by posting its body via comment
+//   get_analytics  { days? }                     the workspace's Analytics (member)
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)
