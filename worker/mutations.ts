@@ -31,7 +31,7 @@ import { appRoles, attachment, getIssue, issueNumber, issueSummary, parseActor, 
 import type { AttachmentRow } from "./issues"
 import { teamProjection } from "./tier-actors"
 import { enqueueWebhooks } from "./webhooks"
-import { entry, recorded, auditActor } from "./audit"
+import { entry, recorded, auditActor, targetEntry } from "./audit"
 import { attachReport, getReport } from "./report-data"
 
 export interface Access {
@@ -527,14 +527,14 @@ export async function updateIssue(a: Access, n: number, b: Record<string, unknow
       )
     )
       q.push(
-        entry(
+        targetEntry(
           env,
           app.id,
           actor,
           `issue.${e.type}`,
-          { type: "issue", number: n },
-          e.type === "assigned" ? { assignee_id: (e.data.assignee as Actor | null)?.id ?? null } : {},
-          "1"
+          "issue",
+          issue.id,
+          e.type === "assigned" ? { assignee_id: (e.data.assignee as Actor | null)?.id ?? null } : {}
         )
       )
   }
@@ -736,16 +736,16 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
     items: TimelineItem[] = []
   record(a, id, "transferred", { from: { slug: a.app.slug, number: n } }, at, q, items)
   q.push(
-    entry(a.env, a.app.id, a.actor, "issue.transferred", { type: "issue", id, number: n }, { to: dest.slug }, "1"),
-    sql(
+    entry(
       a.env,
-      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'issue.transferred',json_object('type','issue','id',id,'number',number),json_object('from',?,'previous_number',?) FROM issues WHERE app_id=? AND id=?`,
-      auditActor(a.actor),
-      a.app.slug,
-      n,
-      dest.id,
-      id
-    )
+      a.app.id,
+      a.actor,
+      "issue.transferred",
+      { type: "issue", id, number: n, title: old.title },
+      { to: dest.slug },
+      "1"
+    ),
+    targetEntry(a.env, dest.id, a.actor, "issue.transferred", "issue", id, { from: a.app.slug, previous_number: n })
   )
   const results = await a.env.DB.batch<{ number: number }>(q),
     num = results[7]!.results[0]?.number ?? missing(),
@@ -795,8 +795,8 @@ export async function removeLabel(a: Access, id: string) {
       id
     ),
     sql(env, `UPDATE issues SET revision=revision+1,updated_at=max(updated_at,?) WHERE id IN (${affected})`, at, id),
-    sql(env, "DELETE FROM labels WHERE id=? AND app_id=?", id, app.id),
-    entry(env, app.id, actor, "label.deleted", { type: "label", id })
+    targetEntry(env, app.id, actor, "label.deleted", "label", id),
+    sql(env, "DELETE FROM labels WHERE id=? AND app_id=?", id, app.id)
   ])
   for (const issue of results[0]!.results) {
     notify(a, {
@@ -961,15 +961,25 @@ export async function moderate(a: Access, n: number, id: string | null, hide: bo
   )
   await a.env.DB.batch([
     ...q,
-    entry(
-      a.env,
-      a.app.id,
-      a.actor,
-      `${c ? "comment" : "issue"}.${hide ? "hidden" : "unhidden"}`,
-      c ? { type: "comment", number: n, id: c.id } : { type: "issue", number: n },
-      hidden ? { reason: hidden.reason } : {},
-      "1"
-    ),
+    c
+      ? entry(
+          a.env,
+          a.app.id,
+          a.actor,
+          `comment.${hide ? "hidden" : "unhidden"}`,
+          { type: "comment", number: n, id: c.id },
+          hidden ? { reason: hidden.reason } : {},
+          "1"
+        )
+      : targetEntry(
+          a.env,
+          a.app.id,
+          a.actor,
+          `issue.${hide ? "hidden" : "unhidden"}`,
+          "issue",
+          issue.id,
+          hidden ? { reason: hidden.reason } : {}
+        ),
     stillHere(a, issue.id)
   ])
   const next = await full(a, n),
@@ -1022,8 +1032,8 @@ async function deleteIssue(a: Access, n: number) {
       a.app.id,
       n
     ),
-    sql(a.env, "DELETE FROM issues WHERE app_id=? AND number=?", a.app.id, n),
-    entry(a.env, a.app.id, a.actor, "issue.deleted", { type: "issue", number: n, id: before.id })
+    targetEntry(a.env, a.app.id, a.actor, "issue.deleted", "issue", before.id),
+    sql(a.env, "DELETE FROM issues WHERE app_id=? AND number=?", a.app.id, n)
   ])
   if (!tomb?.results.length) missing()
   const g = JSON.parse((tomb.results[0] as { gate: string }).gate) as {

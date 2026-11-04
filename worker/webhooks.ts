@@ -2,7 +2,7 @@ import { DEFAULT_WEBHOOK_EVENTS, type WebhookPayload, type WebhookEventType, typ
 import { appUrl, bad, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
 import { teamProjection } from "./tier-actors"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
-import { entry, recorded } from "./audit"
+import { auditActor } from "./audit"
 import { importMessage } from "./github-import"
 
 export function webhookUrl(value: unknown, env: Env) {
@@ -37,6 +37,34 @@ export const webhookEvents = [
   "comment.edited",
   "comment.deleted"
 ] satisfies WebhookEventType[]
+
+// Read the destination in the same transaction as the action. webhookUrl stores
+// URL.href (including the slash after the host). Fail closed on malformed legacy
+// authorities: no userinfo, path, query or fragment may ever enter the audit log.
+function hookEntry(
+  env: Env,
+  app: string,
+  actor: NonNullable<WebhookPayload["actor"]>,
+  action: string,
+  target: Record<string, unknown>,
+  data: Record<string, unknown> = {},
+  beforeWrite = false
+) {
+  return sql(
+    env,
+    `WITH endpoint AS (SELECT CASE WHEN url LIKE 'https://%' THEN substr(url,9) WHEN url LIKE 'http://%' THEN substr(url,8) END rest FROM webhook_settings WHERE app_id=?1),
+    dest AS (SELECT substr(rest,1,instr(rest||'/','/')-1) host FROM endpoint)
+    INSERT INTO audit_log(app_id,actor,action,target,data) SELECT ?1,?2,?3,json_set(?4,'$.host',CASE
+      WHEN host!='' AND host NOT GLOB '*[^a-zA-Z0-9.:-]*' AND (instr(host,':')=0 OR
+        (instr(host,':') BETWEEN 2 AND length(host)-1 AND substr(host,instr(host,':')+1) NOT GLOB '*[^0-9]*')) THEN host END),?5
+    FROM dest ${beforeWrite ? "" : "WHERE changes()>0"}`,
+    app,
+    auditActor(actor),
+    action,
+    JSON.stringify(target),
+    JSON.stringify(data)
+  )
+}
 export async function configureWebhook(
   env: Env,
   app: string,
@@ -48,27 +76,25 @@ export async function configureWebhook(
   if (!Array.isArray(selection) || selection.some((e) => !webhookEvents.includes(e)))
     bad("Unknown webhook event or invalid events list")
   const events = [...new Set<WebhookEventType>(selection)]
-  await recorded(
-    env,
-    sql(env, "UPDATE webhook_settings SET url=?,events=? WHERE app_id=?", url, JSON.stringify(events), app),
-    app,
-    actor,
-    "webhook.updated",
-    { type: "webhook" },
-    { enabled: url !== null, events }
-  )
+  const write = sql(env, "UPDATE webhook_settings SET url=?,events=? WHERE app_id=?", url, JSON.stringify(events), app),
+    audit = hookEntry(
+      env,
+      app,
+      actor,
+      "webhook.updated",
+      { type: "webhook" },
+      { enabled: url !== null, events },
+      url === null
+    )
+  await env.DB.batch(url === null ? [audit, write] : [write, audit])
   return { url, events }
 }
 export async function rotateWebhook(env: Env, app: string, actor: NonNullable<WebhookPayload["actor"]>) {
   const key = secret()
-  await recorded(
-    env,
+  await env.DB.batch([
     sql(env, "UPDATE webhook_settings SET secret=? WHERE app_id=?", key, app),
-    app,
-    actor,
-    "webhook.rotated",
-    { type: "webhook" }
-  )
+    hookEntry(env, app, actor, "webhook.rotated", { type: "webhook" })
+  ])
   return { secret: key }
 }
 export async function testWebhook(
@@ -189,7 +215,7 @@ export async function enqueueWebhooks(
     const result = await env.DB.batch([
       ...pending.map((p) => p.statement),
       ...(events.length === 1 && events[0]!.type === "ping"
-        ? [entry(env, app.id, actor, "webhook.tested", { type: "delivery", id: pending[0]!.id })]
+        ? [hookEntry(env, app.id, actor, "webhook.tested", { type: "delivery", id: pending[0]!.id })]
         : [])
     ])
     const added = pending.flatMap((p, i) => (result[i]!.meta.changes ? [p.id] : []))
@@ -219,7 +245,7 @@ export async function redeliver(env: Env, app: string, actor: NonNullable<Webhoo
       app,
       original
     ),
-    entry(env, app, actor, "webhook.redelivered", { type: "delivery", id: original }, { delivery_id: id })
+    hookEntry(env, app, actor, "webhook.redelivered", { type: "delivery", id: original }, { delivery_id: id })
   ])
   const row = old!.results[0] ?? missing()
   if (!row.url || !copy!.meta.changes) bad("Configure a webhook subscribed to this event first")

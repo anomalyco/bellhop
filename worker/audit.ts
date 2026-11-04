@@ -46,6 +46,36 @@ export async function recorded<T = unknown>(
   const [r] = await env.DB.batch<T>([write, entry(env, app, actor, action, target, data)])
   return r!
 }
+// Snapshot the actual row in the mutation's D1 batch: after a save (including
+// partial updates), or immediately before a delete. Missing rows produce no entry.
+const displayTargets = {
+  label: ["labels", "'name',name,'color',color"],
+  tier: ["tiers", "'name',name,'color',color"],
+  saved_reply: ["saved_replies", "'name',name"],
+  issue: ["issues", "'number',number,'title',title"]
+} as const
+export function targetEntry(
+  env: Env,
+  app: string,
+  actor: Actor,
+  action: string,
+  type: keyof typeof displayTargets,
+  id: string,
+  data: Record<string, unknown> = {}
+) {
+  const [table, fields] = displayTargets[type]
+  return sql(
+    env,
+    `INSERT INTO audit_log(app_id,actor,action,target,data)
+    SELECT app_id,?,?,json_object('type',?,'id',id,${fields}),? FROM ${table} WHERE app_id=? AND id=?`,
+    auditActor(actor),
+    action,
+    type,
+    JSON.stringify(data),
+    app,
+    id
+  )
+}
 // Grants can span several workspaces. Log only scopes the agent actually gained, had,
 // or lost. A workspace admin never learns the other workspaces selected by the owner.
 export async function agentBatch(
@@ -66,7 +96,7 @@ export async function agentBatch(
       env,
       `WITH cur AS MATERIALIZED (${acl}), prev AS (SELECT * FROM audit_agent_scope WHERE agent_id=?),
     apps AS (SELECT app_id FROM prev UNION SELECT app_id FROM cur), delta AS (SELECT a.app_id,p.role old,c.role new,p.override IS NOT c.override OR p.delegated_admin IS NOT c.delegated_admin OR p.role IS NOT c.role changed FROM apps a LEFT JOIN prev p USING(app_id) LEFT JOIN cur c USING(app_id))
-    INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,CASE WHEN ?='agent.updated' AND changed THEN 'agent.access_changed' ELSE ? END,json_object('type','agent','id',?),json_object('from',old,'to',new) FROM delta WHERE ?!='agent.access_changed' OR changed`,
+    INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,CASE WHEN ?='agent.updated' AND changed THEN 'agent.access_changed' ELSE ? END,json_object('type','agent','id',g.id,'name',g.name,'kind',g.kind),json_object('from',old,'to',new) FROM delta JOIN agents g ON g.id=? WHERE ?!='agent.access_changed' OR changed`,
       id,
       key,
       id,

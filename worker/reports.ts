@@ -230,7 +230,7 @@ reports.post(`${base}/report-keys`, async (c) => {
     c.var.app.id,
     c.var.actor,
     "report_key.created",
-    { type: "report_key", id, preview }
+    { type: "report_key", id, name, preview }
   )
   return c.json({ ...r.results[0], key }, 201)
 })
@@ -241,7 +241,7 @@ reports.delete(`${base}/report-keys/:id`, async (c) => {
     [, r] = await c.env.DB.batch([
       sql(
         c.env,
-        `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'report_key.revoked',json_object('type','report_key','id',id,'preview',preview) FROM report_keys WHERE app_id=? AND id=?`,
+        `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'report_key.revoked',json_object('type','report_key','id',id,'name',name,'preview',preview) FROM report_keys WHERE app_id=? AND id=?`,
         auditActor(c.var.actor),
         app,
         id

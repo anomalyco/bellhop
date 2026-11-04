@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import type { SavedReply } from "../shared/api"
 import { bad, body, denied, missing, now, sql, str, uid, type Bindings, type Ctx } from "./core"
-import { auditActor, auditPage, recorded } from "./audit"
+import { auditActor, auditPage, targetEntry } from "./audit"
 import { requireTeam, can, type Action } from "./permissions"
 import { authenticate } from "./mcp"
 import { analytics } from "./analytics"
@@ -55,31 +55,23 @@ async function save(c: Ctx, id?: string) {
         auditActor(actor),
         at
       )
-  const r = await recorded<Row>(c.env, q, app, actor, id ? "saved_reply.updated" : "saved_reply.created", {
-    type: "saved_reply",
-    id: key
-  })
-  return c.json(decode(r.results[0] ?? missing()), id ? 200 : 201)
+  const [r] = await c.env.DB.batch<Row>([
+    q,
+    targetEntry(c.env, app, actor, id ? "saved_reply.updated" : "saved_reply.created", "saved_reply", key)
+  ])
+  return c.json(decode(r!.results[0] ?? missing()), id ? 200 : 201)
 }
 teamTools.post(base, (c) => save(c))
 teamTools.patch(base + "/:id", (c) => save(c, c.req.param("id")))
 teamTools.delete(base + "/:id", async (c) => {
   requireTeam(c, "triage")
   const app = c.var.app.id,
-    id = c.req.param("id")
-  if (
-    !(
-      await recorded(
-        c.env,
-        sql(c.env, "DELETE FROM saved_replies WHERE app_id=? AND id=?", app, id),
-        app,
-        c.var.actor,
-        "saved_reply.deleted",
-        { type: "saved_reply", id }
-      )
-    ).meta.changes
-  )
-    missing()
+    id = c.req.param("id")!
+  const [, deleted] = await c.env.DB.batch([
+    targetEntry(c.env, app, c.var.actor, "saved_reply.deleted", "saved_reply", id),
+    sql(c.env, "DELETE FROM saved_replies WHERE app_id=? AND id=?", app, id)
+  ])
+  if (!deleted!.meta.changes) missing()
   return c.json({ ok: true })
 })
 teamTools.get("/api/apps/:slug/audit", async (c) => {

@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import type { Actor, Person, Tier } from "../shared/api"
 import { bad, body, denied, email, ids, input, missing, rows, sql, str, uid } from "./core"
 import type { Bindings } from "./core"
-import { entry, recorded } from "./audit"
+import { entry, targetEntry } from "./audit"
 import { can, requireTeam } from "./permissions"
 
 type TierRow = Omit<Tier, "rules"> & {
@@ -96,16 +96,9 @@ async function save(env: Env, app: string, actor: Actor, b: Record<string, unkno
   if (q.length)
     await env.DB.batch([
       ...q,
-      entry(
-        env,
-        app,
-        actor,
-        id ? "tier.updated" : "tier.created",
-        { type: "tier", id: key },
-        { fields: [...columns, ...(rules.label_ids !== undefined ? ["label_ids"] : [])] },
-        "EXISTS(SELECT 1 FROM tiers WHERE app_id=? AND id=?)",
-        [app, key]
-      )
+      targetEntry(env, app, actor, id ? "tier.updated" : "tier.created", "tier", key, {
+        fields: [...columns, ...(rules.label_ids !== undefined ? ["label_ids"] : [])]
+      })
     ])
   return one(env, app, key)
 }
@@ -247,19 +240,13 @@ tierRoutes.patch(`${base}/:id`, async (c) => {
 })
 tierRoutes.delete(`${base}/:id`, async (c) => {
   requireTeam(c, "setup")
-  if (
-    !(
-      await recorded(
-        c.env,
-        sql(c.env, "DELETE FROM tiers WHERE app_id=? AND id=?", c.var.app.id, c.req.param("id")),
-        c.var.app.id,
-        c.var.actor,
-        "tier.deleted",
-        { type: "tier", id: c.req.param("id") }
-      )
-    ).meta.changes
-  )
-    missing()
+  const app = c.var.app.id,
+    id = c.req.param("id")
+  const [, deleted] = await c.env.DB.batch([
+    targetEntry(c.env, app, c.var.actor, "tier.deleted", "tier", id),
+    sql(c.env, "DELETE FROM tiers WHERE app_id=? AND id=?", app, id)
+  ])
+  if (!deleted!.meta.changes) missing()
   return c.json({ ok: true })
 })
 tierRoutes.get("/api/apps/:slug/people", async (c) => {

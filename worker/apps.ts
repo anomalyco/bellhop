@@ -487,7 +487,7 @@ apps.post("/api/me/invitations/:id/accept", async (c) => {
     ),
     sql(
       c.env,
-      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'member.accepted',json_object('type','invitation','id',id),json_object('role',role) FROM workspace_invitations WHERE id=? AND email=?`,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'member.accepted',json_object('type','invitation','id',id,'email',email),json_object('role',role) FROM workspace_invitations WHERE id=? AND email=?`,
       auditActor(memberActor(u, null)),
       id,
       u.email
@@ -503,7 +503,7 @@ apps.post("/api/me/invitations/:id/decline", async (c) => {
   const [, removed] = await c.env.DB.batch([
     sql(
       c.env,
-      `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'member.declined',json_object('type','invitation','id',id) FROM workspace_invitations WHERE id=? AND email=?`,
+      `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'member.declined',json_object('type','invitation','id',id,'email',email) FROM workspace_invitations WHERE id=? AND email=?`,
       auditActor(memberActor(u, null)),
       id,
       u.email
@@ -523,7 +523,7 @@ apps.delete("/api/apps/:slug/members/me", async (c) => {
         c.var.app.id,
         c.var.actor,
         "member.left",
-        { type: "member", id: c.var.user!.id }
+        { type: "member", id: c.var.user!.id, email: c.var.user!.email }
       )
     ).meta.changes
   )
@@ -560,7 +560,12 @@ export async function writeLabel(env: Env, appId: string, actor: Actor, b: Recor
     : sql(env, "INSERT INTO labels VALUES(?,?,?,?,?)", label.id, appId, label.name, label.color, label.description)
   if (
     !(
-      await recorded(env, write, appId, actor, old ? "label.updated" : "label.created", { type: "label", id: label.id })
+      await recorded(env, write, appId, actor, old ? "label.updated" : "label.created", {
+        type: "label",
+        id: label.id,
+        name: label.name,
+        color: label.color
+      })
     ).meta.changes
   )
     missing()

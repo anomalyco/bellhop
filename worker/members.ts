@@ -44,7 +44,15 @@ export async function invite(env: Env, app: string, manager: Manager, address: u
     e,
     ...args
   )
-  const r = await recorded(env, write, app, manager.actor, "member.invited", { type: "invitation", id }, { role })
+  const r = await recorded(
+    env,
+    write,
+    app,
+    manager.actor,
+    "member.invited",
+    { type: "invitation", id, email: e },
+    { role }
+  )
   if (!r.meta.changes) denied()
 }
 export async function changeMember(
@@ -58,11 +66,11 @@ export async function changeMember(
   const byId = "id" in target
   const row = await sql(
     env,
-    `SELECT id,role,user_id,0 pending FROM members WHERE app_id=?1 AND ${byId ? "coalesce(user_id,id)" : "email"}=?2
-    UNION ALL SELECT id,role,NULL,1 FROM workspace_invitations WHERE app_id=?1 AND ${byId ? "id" : "email"}=?2`,
+    `SELECT id,role,user_id,email,0 pending FROM members WHERE app_id=?1 AND ${byId ? "coalesce(user_id,id)" : "email"}=?2
+    UNION ALL SELECT id,role,NULL,email,1 FROM workspace_invitations WHERE app_id=?1 AND ${byId ? "id" : "email"}=?2`,
     app,
     byId ? target.id : email(target.email)
-  ).first<{ id: string; role: Role; user_id: string | null; pending: number }>()
+  ).first<{ id: string; role: Role; user_id: string | null; email: string; pending: number }>()
   if (!row) missing()
   if (transfer && !row.user_id) bad("Ownership can only be transferred to a joined member")
   const [allowed, args] = gate(app, manager, can(row.role, "setup") || can(role, "setup"))
@@ -81,7 +89,7 @@ export async function changeMember(
     app,
     manager.actor,
     transfer ? "app.ownership_transferred" : role ? "member.role_changed" : "member.removed",
-    { type: row.pending ? "invitation" : "member", id: row.user_id ?? row.id },
+    { type: row.pending ? "invitation" : "member", id: row.user_id ?? row.id, email: row.email },
     { from: row.role, to: role }
   )
   if (!r.meta.changes) denied()
