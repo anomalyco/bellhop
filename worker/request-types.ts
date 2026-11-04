@@ -49,12 +49,13 @@ export function routeTarget(v: unknown): RouteTarget {
   if (Object.keys(b).length !== 1) bad("Expected one route target")
   if (b.member !== undefined) return { member: email(b.member) }
   if (b.agent !== undefined) return { agent: str(b.agent, "agent id", 100) }
+  if (b.group !== undefined) return { group: str(b.group, "group id", 100) }
   return bad("Unknown route target")
 }
 export function lookupRoute(app: string, target: RouteTarget) {
   if (!target) return { query: "SELECT NULL", args: [] as string[] }
-  // Group routes arrive with human handoff (H5); until then they resolve to nobody (unassigned).
-  if ("group" in target) return { query: "SELECT NULL", args: [] as string[] }
+  if ("group" in target)
+    return { query: "SELECT id FROM handoff_groups WHERE app_id=? AND id=?", args: [app, target.group] }
   return "member" in target
     ? {
         query: `SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?`,
@@ -179,9 +180,11 @@ export function routingWrites(
   t: Config,
   answers: ReturnType<typeof formAnswers>,
   operator: Actor,
-  event: string
+  event: string,
+  handoff: D1PreparedStatement[] = []
 ) {
-  const target = lookupRoute(app, t.route)
+  const group = t.route && "group" in t.route,
+    target = lookupRoute(app, group ? null : t.route)
   return [
     typeGuard(
       env,
@@ -202,12 +205,13 @@ export function routingWrites(
     ),
     sql(
       env,
-      `UPDATE issues SET assignee=(${target.query}),revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
+      `UPDATE issues SET assignee=CASE WHEN EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL) THEN assignee ELSE (${target.query}) END,revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
       ...target.args,
       now(),
       id,
       app
     ),
+    ...handoff,
     sql(
       env,
       `INSERT INTO request_route_events SELECT ?,i.id,i.app_id,?,json_object('request_type',?,'target',json(?),'outcome',CASE WHEN i.assignee IS NOT NULL THEN 'assigned' WHEN ? THEN 'target_unavailable' ELSE 'unassigned' END,'assignee',json(i.assignee)),? FROM issues i WHERE id=? AND app_id=?`,
@@ -222,7 +226,7 @@ export function routingWrites(
     ),
     sql(
       env,
-      `INSERT INTO mail_signal(issue_id,kind,ref,actor,target) SELECT id,'assigned',?,?,json_extract(assignee,'$.id') FROM issues WHERE id=? AND app_id=? AND json_extract(assignee,'$.type')='member'`,
+      `INSERT INTO mail_signal(issue_id,kind,ref,actor,target) SELECT id,'assigned',?,?,json_extract(assignee,'$.id') FROM issues WHERE id=? AND app_id=? AND json_extract(assignee,'$.type')='member' AND NOT EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL)`,
       event,
       operator.id,
       id,

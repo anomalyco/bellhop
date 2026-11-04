@@ -13,6 +13,7 @@ import { liveGuard, apiOrigin, type Scope } from "./access"
 import { signedFiles, type Audience } from "./signed-media"
 import { signalContact } from "./signals"
 import { requestJson, typeInfo } from "../request-types"
+import { withPerson } from "../handoff"
 
 const owned = `i.app_id=? AND i.hidden IS NULL AND json_extract(i.author,'$.id')=? AND EXISTS(SELECT 1 FROM apps a WHERE a.id=i.app_id AND a.mode='helpdesk')`
 const args = (s: Scope) => [s.app, s.user!.id]
@@ -105,6 +106,7 @@ export async function project(raw: string, a: Audience, workspace = false): Prom
       actor: who,
       event: { type: "workspace_event", action: r.type, data: r.data ?? {} }
     }
+  if (r.type === "escalated") return { ...base, kind: "event", actor: null, event: { type: "escalated" } }
   const d = r.data!,
     event =
       r.type === "assigned" || r.type === "claimed"
@@ -161,10 +163,10 @@ type Row = Omit<Conversation, "assignee" | "last_item" | "verifications"> & {
 function conversationQuery(a: Audience, id?: string, status?: string, pos?: [string, string] | null) {
   return sql(
     a.env,
-    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,${requestJson(false)} request_info,
-    (SELECT ${wire} FROM api_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
-    (SELECT max(t.created_at) FROM api_items t WHERE t.issue_id=i.id) updated_at,
-    (SELECT count(*) FROM api_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
+    `WITH page AS (SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.assignee,${withPerson} with_person,${requestJson(false)} request_info,
+    (SELECT ${wire} FROM api_requester_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
+    (SELECT max(t.created_at) FROM api_requester_items t WHERE t.issue_id=i.id) updated_at,
+    (SELECT count(*) FROM api_requester_items t WHERE t.issue_id=i.id AND (t.type='verification_requested' OR (t.type='message' AND json_extract(t.actor,'$.id')!=json_extract(i.author,'$.id'))) AND (t.created_at,t.id)>(coalesce(m.stamp,''),coalesce(m.item,''))) unread
     FROM issues i LEFT JOIN api_reads m ON m.issue_id=i.id AND m.actor_id=json_extract(i.author,'$.id') WHERE ${owned} ${id ? "AND i.id=?" : ""} ${status ? `AND i.status${status === "open" ? "!=" : "="}'closed'` : ""}) SELECT * FROM page ${pos ? "WHERE (updated_at,id)<(?,?)" : ""} ORDER BY updated_at DESC,id DESC LIMIT 26`,
     a.app,
     a.who,
@@ -185,6 +187,7 @@ async function projectRow(a: Audience, r: Row, proofs: ProofRow[]): Promise<Conv
   const { request_info, ...rest } = r
   return {
     ...rest,
+    with_person: !!r.with_person,
     ...typeInfo(request_info),
     assignee: r.assignee ? participant(JSON.parse(r.assignee)) : null,
     last_item: r.last_item ? await project(r.last_item, a) : null,
@@ -229,7 +232,7 @@ export async function items(c: Ctx, s: Scope, id: string, workspace = false): Pr
   let pos = position(backCursor ? backCursor[2] : raw)
   const from = workspace
       ? "FROM api_workspace_items t JOIN issues i ON i.id=t.issue_id WHERE i.app_id=? AND i.id=?"
-      : `FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=?`,
+      : `FROM api_requester_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=?`,
     bindings = workspace ? [s.app, id] : [...args(s), id]
   const anchor = before ?? after
   if (anchor !== undefined) {
@@ -309,7 +312,7 @@ export async function mark(c: Ctx, s: Scope, id: string, b: Record<string, unkno
     liveGuard(c, s, id),
     sql(
       c.env,
-      `INSERT INTO api_reads SELECT issue_id,?,created_at,id FROM api_items WHERE issue_id=? AND id=? ON CONFLICT(issue_id,actor_id) DO UPDATE SET stamp=CASE WHEN (excluded.stamp,excluded.item)>(stamp,item) THEN excluded.stamp ELSE stamp END,item=CASE WHEN (excluded.stamp,excluded.item)>(stamp,item) THEN excluded.item ELSE item END RETURNING item`,
+      `INSERT INTO api_reads SELECT issue_id,?,created_at,id FROM api_requester_items WHERE issue_id=? AND id=? ON CONFLICT(issue_id,actor_id) DO UPDATE SET stamp=CASE WHEN (excluded.stamp,excluded.item)>(stamp,item) THEN excluded.stamp ELSE stamp END,item=CASE WHEN (excluded.stamp,excluded.item)>(stamp,item) THEN excluded.item ELSE item END RETURNING item`,
       s.user!.id,
       id,
       item
@@ -326,7 +329,7 @@ export async function streamSnapshot(a: Audience, id: string, ids: string[], aut
     proofsQuery(a, [id]),
     sql(
       a.env,
-      `SELECT ${wire} item FROM api_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=? AND t.id IN(SELECT value FROM json_each(?)) ORDER BY t.created_at,t.id`,
+      `SELECT ${wire} item FROM api_requester_items t JOIN issues i ON i.id=t.issue_id WHERE ${owned} AND i.id=? AND t.id IN(SELECT value FROM json_each(?)) ORDER BY t.created_at,t.id`,
       a.app,
       a.who,
       id,

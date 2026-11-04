@@ -38,6 +38,7 @@ import {
 } from "./mutations"
 import { types as requestTypes } from "./request-types"
 import { requestApproval, getApproval } from "./approvals"
+import { groups, agentEscalate } from "./handoff-routes"
 import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
@@ -57,6 +58,8 @@ export const toolRoles = {
   get_analytics: "triage",
   get_contact: "read",
   list_request_types: "read",
+  list_groups: "read",
+  escalate: "respond",
   set_request_type: "triage",
   request_verification: "respond",
   request_approval: "respond",
@@ -134,6 +137,13 @@ const templateFields = {
   position: { type: "integer" }
 }
 const workspaceTools = [
+  tool("list_groups", "List help desk groups, working hours, assignment strategy and available members.", {}),
+  tool(
+    "escalate",
+    "Hand a help desk request to a person. Optionally name a group; otherwise use routing defaults.",
+    { number, reason: text, group: text },
+    ["number", "reason"]
+  ),
   tool(
     "request_approval",
     "Ask a member to approve an action on this help desk request.",
@@ -141,7 +151,12 @@ const workspaceTools = [
       number,
       action: { ...text, pattern: "^[a-z0-9_]{1,40}$" },
       summary: { ...text, maxLength: 300 },
-      details: { type: "object", description:"Flat signed parameters, at most 4096 UTF-8 bytes as JSON.", maxProperties: 20, additionalProperties: { type: ["string", "number", "boolean"], maxLength:256 } }
+      details: {
+        type: "object",
+        description: "Flat signed parameters, at most 4096 UTF-8 bytes as JSON.",
+        maxProperties: 20,
+        additionalProperties: { type: ["string", "number", "boolean"], maxLength: 256 }
+      }
     },
     ["number", "action", "summary"]
   ),
@@ -400,6 +415,13 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
     n = () => integer(b.number, "number")
   const manager = { user: caller.user, agent: caller.actor.id, actor }
   switch (name) {
+    case "list_groups":
+    case "escalate":
+      if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND mode='helpdesk'", app.id).first()))
+        fail(403, "helpdesk_only", "Help desk workspace required")
+      return textResult(
+        name === "list_groups" ? await groups(env, app.id) : await agentEscalate(c, app.id, n(), actor, b)
+      )
     case "request_approval":
     case "get_approval":
       if (!(await sql(env, "SELECT 1 FROM apps WHERE id=? AND mode='helpdesk'", app.id).first()))

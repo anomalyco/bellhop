@@ -7,6 +7,8 @@ import { helpdesk, processVerifications } from "./helpdesk"
 import { handoff } from "./identity"
 import { identityKeys } from "./identity-keys"
 import { requestTypes } from "./request-type-routes"
+import { handoffRoutes } from "./handoff-routes"
+import { sweepHandoffs } from "./handoff"
 import { publicApi } from "./v1"
 import { sweepUploads } from "./v1/uploads"
 import { sweepStreams } from "./v1/realtime"
@@ -203,6 +205,7 @@ api.route("/", auth)
 api.route("/", helpdesk)
 api.route("/", identityKeys)
 api.route("/", requestTypes)
+api.route("/", handoffRoutes)
 api.route("/", apiKeys)
 api.route("/", mailRoutes)
 api.route("/", oauth)
@@ -305,6 +308,7 @@ api.onError((e, c) => {
 export default {
   fetch: api.fetch,
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(sweepHandoffs(env, ctx, _event.scheduledTime))
     ctx.waitUntil(pruneAudit(env))
     ctx.waitUntil(sql(env, "DELETE FROM mail_sent WHERE provider_id IN(SELECT provider_id FROM mail_sent WHERE sent_at<unixepoch()-30*86400 ORDER BY sent_at LIMIT 1000)").run())
     ctx.waitUntil(sweepUploads(env))

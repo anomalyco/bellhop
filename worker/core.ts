@@ -103,6 +103,16 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("invalid workspace group"))
+    return new ApiFailure(400, "invalid_input", "Unknown workspace group")
+  if (message.includes("handoff_changed") || message.includes("UNIQUE constraint failed: handoffs.issue_id"))
+    return new ApiFailure(
+      409,
+      "handoff_unavailable",
+      "Handoff or permissions changed, or this request already escalated"
+    )
+  if (message.includes("handoff_groups.app_id, handoff_groups.name"))
+    return new ApiFailure(409, "group_exists", "A group already has this name")
   if (message.includes("active request type limit")) return new ApiFailure(409, "type_limit", "A workspace can have at most 50 active request types")
   if (message.includes("request fields byte limit")) return new ApiFailure(400, "fields_too_large", "Active request type fields exceed 256 KiB")
   if (message.includes("public reply requires review"))

@@ -80,6 +80,7 @@ function validAttachment(a: Attachment | null | undefined) {
 type Delivery = {
   app?: string
   internalOnly?: boolean
+  requesterOnly?: boolean
   moved?: { gate: Gate; target: string; number: number }
   deleted?: Gate
   actorIssues?: string[]
@@ -362,6 +363,7 @@ export class Room extends DurableObject<Env> {
       const conversationPayload = events.some((e) =>
         ["timeline.added", "comment.updated", "comment.deleted", "issue.created", "issue.updated"].includes(e.type)
       )
+      if (v.team && options.requesterOnly) continue
       if (!v.team && (options.internalOnly === true || (conversationPayload && options.internalOnly !== false)))
         continue
       const voter = v.voter ?? v.actorId ?? ""
@@ -461,12 +463,19 @@ export class Room extends DurableObject<Env> {
               if (
                 !v.team &&
                 (e.item.event.data.rule ||
-                  ["hidden", "unhidden", "routed", "approval.requested", "approval.decided"].includes(
-                    e.item.event.type
-                  ))
+                  [
+                    "hidden",
+                    "unhidden",
+                    "routed",
+                    "approval.requested",
+                    "approval.decided",
+                    "handed_back",
+                    "reassigned"
+                  ].includes(e.item.event.type))
               )
                 continue
               const other = relationId(e.item)
+              if (!v.team && e.item.event.type === "escalated" && !options.requesterOnly) continue
               if (other && !allowed(other)) continue
               if (!v.team)
                 e = {

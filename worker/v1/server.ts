@@ -14,6 +14,7 @@ import { requestVerification } from "../helpdesk"
 import { requestJson, typeInfo } from "../request-types"
 import { proofCols, verification, type ProofRow } from "../helpdesk-data"
 import { cursor, position, message, participant, project, wire } from "./conversations"
+import { withPerson } from "../handoff"
 
 const contactCols =
   "id,name,email,external_id,unverified_email,verified_via,coalesce(locale,'en') locale,created_at,last_seen_at"
@@ -127,7 +128,7 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
   const [rs, vs] = await c.env.DB.batch([
     sql(
       c.env,
-      `SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.updated_at,i.assignee,i.hidden IS NOT NULL hidden,${requestJson(true)} request_info,
+      `SELECT i.id,i.number,i.title subject,i.status,i.close_reason,i.created_at,i.updated_at,i.assignee,i.hidden IS NOT NULL hidden,${withPerson} with_person,${requestJson(true)} request_info,
     (SELECT id FROM contacts WHERE app_id=i.app_id AND id=json_extract(i.author,'$.id')) contact_id,EXISTS(SELECT 1 FROM api_created_issues WHERE issue_id=i.id) api,
     (SELECT json_group_array(l.name ORDER BY l.name) FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id) labels,
     (SELECT ${staffWire} FROM api_workspace_items t WHERE t.issue_id=i.id ORDER BY t.created_at DESC,t.id DESC LIMIT 1) last_item,
@@ -157,6 +158,7 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
         hidden: number
         contact_id: string | null
         request_info: string | null
+        with_person: number
         api: number
         labels: string
         last_item: string | null
@@ -164,6 +166,7 @@ export async function workspaceConversations(c: Ctx, s: Scope, id?: string): Pro
       }[]
     ).map(async ({ api, labels, assignee, hidden, last_item, request_info, ...r }) => ({
       ...r,
+      with_person: !!r.with_person,
       ...typeInfo(request_info),
       labels: JSON.parse(labels) as string[],
       assignee: assignee ? participant(JSON.parse(assignee)) : null,

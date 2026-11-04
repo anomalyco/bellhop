@@ -1,5 +1,56 @@
 import type { Locale } from "../shared/api"
 
+export const handoffCopy: Record<Locale, Record<"assigned" | "passed" | "nobody" | "reminder", string>> = {
+  en: {
+    assigned: "Support request #{number} needs your reply.",
+    passed: "Support request #{number} has passed to another team member.",
+    nobody: "Nobody was available to take support request #{number}.",
+    reminder: "Support request #{number} is still waiting for your reply."
+  },
+  es: {
+    assigned: "La solicitud de soporte n.º {number} necesita tu respuesta.",
+    passed: "La solicitud n.º {number} ha pasado a otra persona del equipo.",
+    nobody: "No había nadie disponible para atender la solicitud n.º {number}.",
+    reminder: "La solicitud n.º {number} sigue esperando tu respuesta."
+  },
+  "pt-BR": {
+    assigned: "A solicitação de suporte nº {number} precisa da sua resposta.",
+    passed: "A solicitação nº {number} foi encaminhada a outra pessoa da equipe.",
+    nobody: "Não havia ninguém disponível para atender à solicitação nº {number}.",
+    reminder: "A solicitação nº {number} ainda aguarda sua resposta."
+  },
+  fr: {
+    assigned: "La demande d’assistance nº {number} nécessite votre réponse.",
+    passed: "La demande nº {number} a été transmise à un autre membre de l’équipe.",
+    nobody: "Personne n’était disponible pour traiter la demande nº {number}.",
+    reminder: "La demande nº {number} attend toujours votre réponse."
+  },
+  de: {
+    assigned: "Supportanfrage Nr. {number} benötigt deine Antwort.",
+    passed: "Supportanfrage Nr. {number} wurde an ein anderes Teammitglied weitergegeben.",
+    nobody: "Für Supportanfrage Nr. {number} war niemand verfügbar.",
+    reminder: "Supportanfrage Nr. {number} wartet weiterhin auf deine Antwort."
+  },
+  ja: {
+    assigned: "サポート依頼 #{number} に返信してください。",
+    passed: "サポート依頼 #{number} は別のチームメンバーに引き継がれました。",
+    nobody: "サポート依頼 #{number} を担当できるメンバーがいませんでした。",
+    reminder: "サポート依頼 #{number} は引き続き返信を待っています。"
+  },
+  "zh-CN": {
+    assigned: "支持请求 #{number} 需要你回复。",
+    passed: "支持请求 #{number} 已转交给其他团队成员。",
+    nobody: "转交时无人可以处理支持请求 #{number}。",
+    reminder: "支持请求 #{number} 仍在等待你的回复。"
+  },
+  ko: {
+    assigned: "지원 요청 #{number}에 답변해 주세요.",
+    passed: "지원 요청 #{number}이 다른 팀원에게 전달되었습니다.",
+    nobody: "지원 요청 #{number}을 맡을 수 있는 팀원이 없었습니다.",
+    reminder: "지원 요청 #{number}이 아직 답변을 기다리고 있습니다."
+  }
+}
+
 export const accountCopy: Record<Locale, { google: string; notice: string }> = {
   en: { google: "This account signs in with Google.", notice: "New sign-in to your account using an email code." },
   es: {

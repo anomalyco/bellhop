@@ -21,13 +21,19 @@ export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
+  EscalateInput: obj({ reason: { type: "string", maxLength: 1000 } }, []),
   Approval: obj({
-    details_hash:{type:"string",pattern:"^[A-Za-z0-9_-]{43}$"},
+    details_hash: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" },
     id: string,
     issue_number: integer,
     action: string,
     summary: string,
-    details: { type: "object", description:"At most 4096 UTF-8 bytes as JSON.", maxProperties: 20, additionalProperties: { type: ["number", "boolean", "string"], maxLength:256 } },
+    details: {
+      type: "object",
+      description: "At most 4096 UTF-8 bytes as JSON.",
+      maxProperties: 20,
+      additionalProperties: { type: ["number", "boolean", "string"], maxLength: 256 }
+    },
     state: { enum: ["pending", "approved", "rejected", "expired", "used"] },
     requested_by: ref("Actor"),
     decided_by: nullable(ref("Actor")),
@@ -180,6 +186,7 @@ export const schemas = {
     ["id", "conversation_id", "author", "body", "attachments", "created_at", "edited_at"]
   ),
   Event: one(
+    variant("escalated", {}),
     variant("workspace_event", { action: string, data: { type: "object" } }),
     variant("status_changed", { status, close_reason: reason }),
     variant("assigned", { assignee: nullable(ref("Participant")) }),
@@ -203,6 +210,7 @@ export const schemas = {
   },
   Conversation: obj(
     {
+      with_person: bool,
       request_type: nullable(obj({ id: string, name: string })),
       fields: { type: "object", additionalProperties: string },
       effective_autonomy: { enum: ["suggest", "approve_actions", "autonomous"] },
@@ -228,6 +236,7 @@ export const schemas = {
       "subject",
       "request_type",
       "fields",
+      "with_person",
       "status",
       "close_reason",
       "created_at",

@@ -2,6 +2,7 @@ import { Hono } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { bad, denied, fail, input, missing, sha256, type Bindings, type Ctx } from "../core"
 import * as server from "./server"
+import { apiEscalate } from "../handoff-routes"
 import { consume, jwks, listApprovals } from "../approvals"
 import { enforce, clientIP } from "../rate-limits"
 import { authorize, checkHost, cors, preflightAllowed, type Auth, type Scope } from "./access"
@@ -28,13 +29,21 @@ type Route = {
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  escalateConversation: {
+    method: "POST",
+    path: conv + "/escalate",
+    auth: "shared",
+    request: "EscalateInput",
+    response: "Conversation",
+    run: apiEscalate
+  },
   approvalKeys: {
     method: "GET",
     path: "/approvals/jwks.json",
     auth: "public",
     response: "JWKS",
-    query:{workspace:string},
-    run: (c) => jwks(c.env,c.req.query('workspace'))
+    query: { workspace: string },
+    run: (c) => jwks(c.env, c.req.query("workspace"))
   },
   consumeApproval: {
     method: "POST",

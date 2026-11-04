@@ -360,7 +360,7 @@ export async function setRequestType(a: Access, c: Ctx, n: number, type: unknown
       sql(a.env, "DELETE FROM request_answers WHERE issue_id=? AND app_id=?", i.id, a.app.id),
       sql(
         a.env,
-        `UPDATE issues SET assignee=(SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM reporter_tiers t JOIN members m ON m.app_id=t.app_id AND m.user_id=t.assignee_id JOIN users u ON u.id=m.user_id WHERE t.app_id=issues.app_id AND t.actor_id=json_extract(issues.author,'$.id')),revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
+        `UPDATE issues SET assignee=CASE WHEN EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL) THEN assignee ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM reporter_tiers t JOIN members m ON m.app_id=t.app_id AND m.user_id=t.assignee_id JOIN users u ON u.id=m.user_id WHERE t.app_id=issues.app_id AND t.actor_id=json_extract(issues.author,'$.id')) END,revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
         at,
         i.id,
         a.app.id
@@ -375,7 +375,7 @@ export async function setRequestType(a: Access, c: Ctx, n: number, type: unknown
       ),
       sql(
         a.env,
-        `INSERT INTO mail_signal(issue_id,kind,ref,actor,target) SELECT id,'assigned',?,?,json_extract(assignee,'$.id') FROM issues WHERE id=? AND assignee IS NOT NULL`,
+        `INSERT INTO mail_signal(issue_id,kind,ref,actor,target) SELECT id,'assigned',?,?,json_extract(assignee,'$.id') FROM issues WHERE id=? AND assignee IS NOT NULL AND NOT EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL)`,
         eid,
         a.actor.id,
         i.id

@@ -26,6 +26,8 @@ export function webhookUrl(value: unknown, env: Env) {
 }
 
 export const webhookEvents = [
+  "issue.escalated",
+  "issue.handed_back",
   "ping",
   ...DEFAULT_WEBHOOK_EVENTS,
   "issue.closed",
@@ -120,7 +122,7 @@ interface Job {
 
 export type Hook = Pick<
   WebhookPayload,
-  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification" | "approval"
+  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification" | "approval" | "escalation"
 > & {
   transition?: Partial<Pick<IssueSummary, "assignee" | "status" | "close_reason">>
 }

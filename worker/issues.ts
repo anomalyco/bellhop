@@ -33,6 +33,7 @@ import {
 } from "./visibility"
 import { mentionables, voteCount } from "./conversation"
 import { parseSearch, sorts } from "./search"
+import { active, withPerson, neutral } from "./handoff"
 import { projectTiers, tierBag } from "./tier-actors"
 import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
@@ -206,6 +207,14 @@ function issueFilter(
   }
   for (const { key, value } of parsed.terms) {
     switch (key) {
+      case "group":
+        if (v.team) {
+          where.push(
+            "EXISTS(SELECT 1 FROM handoffs h JOIN handoff_groups g ON g.id=h.group_id WHERE h.issue_id=i.id AND h.app_id=i.app_id AND h.ended_at IS NULL AND g.name=? COLLATE NOCASE)"
+          )
+          values.push(value)
+        }
+        break
       case "type":
         if (v.team) {
           where.push(
@@ -215,6 +224,15 @@ function issueFilter(
         }
         break
       case "is":
+        if (["escalated", "with-person", "waiting-for-person"].includes(value)) {
+          if (v.team)
+            where.push(
+              value === "waiting-for-person"
+                ? "EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=i.id AND h.ended_at IS NULL AND h.waiting IS NOT NULL)"
+                : withPerson
+            )
+          break
+        }
         if (value === "held" || value === "awaiting-approval") {
           if (v.team)
             where.push(
@@ -315,7 +333,16 @@ export async function listIssues(
 ): Promise<IssueList> {
   const parsed = parseSearch(options.query),
     mine = parsed.terms.some((t) => t.key === "author" && t.value === "@me"),
-    filterPins = mine || (viewer.team && parsed.terms.some(t => t.key === 'type' || (t.key === 'is' && ['held', 'awaiting-approval'].includes(t.value)))),
+    filterPins =
+      mine ||
+      (viewer.team &&
+        parsed.terms.some(
+          (t) =>
+            t.key === "type" ||
+            t.key === "group" ||
+            (t.key === "is" &&
+              ["held", "awaiting-approval", "escalated", "with-person", "waiting-for-person"].includes(t.value))
+        )),
     needsHandles = parsed.terms.some((t) => (t.key === "author" || t.key === "assignee") && t.value !== "@me"),
     handles = needsHandles
       ? new Map(
@@ -589,11 +616,13 @@ export async function getIssue(
     target = `SELECT id FROM issues WHERE ${where}`,
     key = appKey(scope)
   const {
-    data: [items, team, files, comments, events, relations, reports, contacts, proofs]
+    data: [items, team, files, comments, events, relations, reports, contacts, proofs, handoffs]
   } = await readBatch<
     [
       StoredSummary & {
         request_info: string | null
+        handoff: string | null
+        with_person: number
         body: string
         github_repo: string | null
         github_number: number | null
@@ -633,7 +662,8 @@ export async function getIssue(
       },
       ReportRow,
       ContactRow,
-      ProofRow
+      ProofRow,
+      { id: string; actor: string | null; type: IssueEvent["type"]; data: string | null; created_at: string }
     ]
   >(
     env,
@@ -641,7 +671,7 @@ export async function getIssue(
     [
       sql(
         env,
-        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},${requestJson(v.team)} request_info,i.github_repo,i.github_number,i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},${requestJson(v.team)} request_info,${v.team ? `(${active})` : "NULL"} handoff,${withPerson} with_person,i.github_repo,i.github_number,i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
         ...viewerArgs(v),
         key,
         number
@@ -700,6 +730,12 @@ export async function getIssue(
         number,
         Number(v.team),
         JSON.stringify(actorIds(v))
+      ),
+      sql(
+        env,
+        `SELECT id,type,created_at,${v.team ? "data,actor" : "NULL data,NULL actor"} FROM handoff_timeline WHERE issue_id=(${target}) ${v.team ? "" : "AND type='escalated'"}`,
+        key,
+        number
       )
     ],
     read
@@ -743,6 +779,11 @@ export async function getIssue(
     timeline: TimelineItem[] = []
   const privileged = v.team
   if (!sees(v, gateOf(s))) missing()
+  for (const e of handoffs)
+    timeline.push({
+      kind: "event",
+      event: { ...e, data: e.data ? JSON.parse(e.data) : {}, actor: e.actor ? parseActor(e.actor, roles) : neutral }
+    })
   for (const { tier_bag, held_at, sent_by, ...c } of comments) {
     const author = parseActor(c.author, roles)
     timeline.push({
@@ -807,6 +848,8 @@ export async function getIssue(
     ...s,
     contact: contacts.length ? (({ issue_id, ...c }) => c)(contacts[0]!) : null,
     ...typeInfo(r.request_info),
+    escalation: r.handoff ? JSON.parse(r.handoff) : null,
+    escalated_to_person: !!r.with_person,
     verifications,
     edited_at: r.edited_at,
     imported: r.github_repo
@@ -838,6 +881,8 @@ export async function getIssue(
 }
 export function summaryOf(issue: Issue): IssueSummary {
   const {
+    escalation,
+    escalated_to_person,
     request_type,
     fields,
     effective_autonomy,
