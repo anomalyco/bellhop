@@ -1,8 +1,7 @@
 import { DurableObject } from "cloudflare:workers"
 import type { LiveEvent } from "../shared/api"
-import { sql } from "./core"
 import { expireActivity, refreshActivity } from "./events"
-import { currentActivity } from "./issues"
+import { readActivity } from "./issues"
 
 export class Room extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -33,11 +32,7 @@ export class Room extends DurableObject<Env> {
         { status: 426 }
       )
     const issueId = this.issueId
-    const activity = issueId
-      ? currentActivity(
-          await sql(this.env, "SELECT activity FROM issues WHERE id=?", issueId).first<string>("activity")
-        )
-      : null
+    const activity = issueId ? await readActivity(this.env, issueId) : null
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket]
     this.ctx.acceptWebSocket(server, [issueId ? "issue" : "app"])
     server.serializeAttachment({ at: Date.now() })

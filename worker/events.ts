@@ -1,6 +1,6 @@
 import type { Activity, Actor, App, IssueSummary, LiveEvent, TimelineItem, WebhookEventType } from "../shared/api"
 import { appUrl, missing, now, sql, str } from "./core"
-import { currentActivity } from "./issues"
+import { readActivity } from "./issues"
 import { enqueueWebhook } from "./webhooks"
 
 export type Work = Pick<ExecutionContext, "waitUntil">
@@ -15,6 +15,16 @@ export interface Change {
 }
 export const appRoom = (env: Env, id: string) => env.ROOMS.getByName(`app:${id}`)
 export const issueRoom = (env: Env, id: string) => env.ROOMS.getByName(`issue:${id}`)
+
+export function actorUpdated(env: Env, ctx: Work, app: string, issues: string[], previous_id: string, actor: Actor) {
+  const event: LiveEvent = { type: "actor.updated", previous_id, actor }
+  ctx.waitUntil((async () => {
+    await appRoom(env, app).publish([event])
+    for (let i = 0; i < issues.length; i += 8) {
+      await Promise.all(issues.slice(i, i + 8).map((id) => issueRoom(env, id).publish([event])))
+    }
+  })())
+}
 
 // All issue writes converge here after D1 commits. Only the public summary goes on the wire.
 export function emit(env: Env, ctx: Work, change: Change) {
@@ -74,9 +84,7 @@ export async function refreshActivity(
   publish: (event: LiveEvent) => void,
   schedule: (at: number | null) => Promise<void>
 ) {
-  const activity = currentActivity(
-    await sql(env, "SELECT activity FROM issues WHERE id=? AND app_id=?", issueId, appId).first<string>("activity")
-  )
+  const activity = await readActivity(env, issueId, appId)
   const event: LiveEvent = { type: "activity", issue_id: issueId, activity }
   await schedule(activity ? Date.parse(activity.expires_at) : null)
   publish(event)

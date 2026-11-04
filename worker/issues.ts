@@ -8,6 +8,7 @@ import type {
   IssueList,
   IssueRef,
   IssueSummary,
+  Member,
   Relation,
   TimelineItem
 } from "../shared/api"
@@ -23,16 +24,31 @@ type StoredSummary = Omit<IssueSummary, "author" | "assignee" | "activity" | "la
   activity: string | null
   labels: string
 }
-function normalizeActor(actor: Actor): Actor {
+export async function appRoles(env: Env, appId: string) {
+  const team = await rows<{ user_id: string; role: Member["role"] }>(
+    sql(env, "SELECT user_id,role FROM members WHERE app_id=? AND user_id IS NOT NULL", appId)
+  )
+  return new Map(team.map(({ user_id, role }) => [user_id, role]))
+}
+type Roles = Awaited<ReturnType<typeof appRoles>>
+function normalizeActor(actor: Actor, roles: Roles): Actor {
   if (actor.type === "guest") actor.name ??= null
+  if (actor.type === "member") actor.role = roles.get(actor.id) ?? null
   return actor
 }
-const parseActor = (json: string) => normalizeActor(JSON.parse(json))
-export function currentActivity(json: string | null): Activity | null {
+const parseActor = (json: string, roles: Roles) => normalizeActor(JSON.parse(json), roles)
+function currentActivity(json: string | null, roles: Roles): Activity | null {
   const activity: Activity | null = json && JSON.parse(json)
-  return activity && activity.expires_at > now() ? { ...activity, actor: normalizeActor(activity.actor) } : null
+  return activity && activity.expires_at > now() ? { ...activity, actor: normalizeActor(activity.actor, roles) } : null
 }
-function summary(r: StoredSummary): IssueSummary {
+export async function readActivity(env: Env, issueId: string, appId?: string) {
+  const row = await sql(env, `SELECT i.activity,m.user_id,m.role FROM issues i LEFT JOIN members m
+    ON m.app_id=i.app_id AND m.user_id=json_extract(i.activity,'$.actor.id') WHERE i.id=? ${appId ? "AND i.app_id=?" : ""}`,
+    issueId, ...(appId ? [appId] : []))
+    .first<{ activity: string | null; user_id: string | null; role: Member["role"] | null }>()
+  return row ? currentActivity(row.activity, new Map(row.user_id && row.role ? [[row.user_id, row.role]] : [])) : null
+}
+function summary(r: StoredSummary, roles: Roles): IssueSummary {
   const { id, number, title, status, close_reason, created_at, updated_at, comment_count } = r
   return {
     id,
@@ -43,9 +59,9 @@ function summary(r: StoredSummary): IssueSummary {
     created_at,
     updated_at,
     comment_count,
-    author: parseActor(r.author),
-    assignee: r.assignee ? parseActor(r.assignee) : null,
-    activity: currentActivity(r.activity),
+    author: parseActor(r.author, roles),
+    assignee: r.assignee ? parseActor(r.assignee, roles) : null,
+    activity: currentActivity(r.activity, roles),
     labels: JSON.parse(r.labels)
   }
 }
@@ -53,14 +69,14 @@ export function ref(i: IssueRef): IssueRef {
   const { id, number, title, status, close_reason } = i
   return { id, number, title, status, close_reason }
 }
-export async function issueSummary(env: Env, appId: string, number: number) {
-  const r = await sql(
+export async function issueSummary(env: Env, appId: string, number: number, team = appRoles(env, appId)) {
+  const [r, roles] = await Promise.all([sql(
     env,
     `SELECT ${fields} FROM issues i WHERE i.app_id=? AND i.number=?`,
     appId,
     number
-  ).first<StoredSummary>()
-  return r ? summary(r) : missing()
+  ).first<StoredSummary>(), team])
+  return r ? summary(r, roles) : missing()
 }
 export function issueNumber(n: unknown) {
   if (
@@ -111,9 +127,9 @@ export async function listIssues(
     ...(cursor ? [cursor] : []),
     limit + 1
   )
-  const [items, counts] = await Promise.all([rows<StoredSummary>(list), totals.first<IssueList["counts"]>()])
+  const [items, counts, roles] = await Promise.all([rows<StoredSummary>(list), totals.first<IssueList["counts"]>(), appRoles(env, appId)])
   return {
-    issues: items.slice(0, limit).map(summary),
+    issues: items.slice(0, limit).map((r) => summary(r, roles)),
     counts: counts!,
     next_cursor: items.length > limit ? String(items[limit - 1]!.number) : null
   }
@@ -129,14 +145,14 @@ export async function getIssue(
   number: number,
   viewer: Actor,
   privileged: boolean,
-  guestId?: string
+  team = appRoles(env, appId)
 ): Promise<Issue> {
-  const r = await sql(
+  const [r, roles] = await Promise.all([sql(
     env,
     `SELECT ${fields},i.body,i.template_id,i.system_info FROM issues i WHERE i.app_id=? AND i.number=?`,
     appId,
     number
-  ).first<StoredSummary & { body: string; template_id: string | null; system_info: string | null }>()
+  ).first<StoredSummary & { body: string; template_id: string | null; system_info: string | null }>(), team])
   if (!r) missing()
   const [files, comments, events, relations] = await Promise.all([
     rows<AttachmentRow & { comment_id: string | null }>(
@@ -179,17 +195,20 @@ export async function getIssue(
     group.push(attachment(a))
     byParent.set(a.comment_id, group)
   }
-  const s = summary(r),
+  const s = summary(r, roles),
     timeline: TimelineItem[] = []
   for (const c of comments) {
-    const author = parseActor(c.author)
+    const author = parseActor(c.author, roles)
     timeline.push({
       kind: "comment",
       comment: { ...c, author, by_issue_author: author.id === s.author.id, attachments: byParent.get(c.id) ?? [] }
     })
   }
-  for (const e of events)
-    timeline.push({ kind: "event", event: { ...e, actor: parseActor(e.actor), data: JSON.parse(e.data) } })
+  for (const e of events) {
+    const data = JSON.parse(e.data)
+    if (e.type === "assigned" && data.assignee) normalizeActor(data.assignee, roles)
+    timeline.push({ kind: "event", event: { ...e, actor: parseActor(e.actor, roles), data } })
+  }
   const time = (item: TimelineItem) => (item.kind === "event" ? item.event.created_at : item.comment.created_at)
   timeline.sort((a, b) => time(a).localeCompare(time(b)))
   return {
@@ -197,7 +216,7 @@ export async function getIssue(
     body: r.body,
     template_id: r.template_id,
     system_info: r.system_info ? (privileged ? JSON.parse(r.system_info) : "hidden") : null,
-    viewer_is_author: viewer.id === s.author.id || guestId === s.author.id,
+    viewer_is_author: viewer.type === s.author.type && viewer.id === s.author.id,
     attachments: byParent.get(null) ?? [],
     timeline,
     relations: relations.map(({ relation_id: id, direction, type, ...issue }) => ({ id, direction, type, issue }))

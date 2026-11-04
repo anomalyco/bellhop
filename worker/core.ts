@@ -4,7 +4,7 @@ import type { Actor, App, Me } from "../shared/api"
 export type User = NonNullable<Me["user"]>
 export type Bindings = {
   Bindings: Env
-  Variables: { guestId: string; guestHash: string; appGuestId: string; user: User | null; app: App; actor: Actor }
+  Variables: { guestId: string; existingGuest: boolean; guestHash: string; user: User | null; app: App; actor: Actor }
 }
 export type Ctx = Context<Bindings>
 export const now = () => new Date().toISOString()
@@ -87,8 +87,8 @@ export function owner(c: Ctx) {
   member(c)
   if (c.var.app.role !== "owner") denied()
 }
-export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">): Actor {
-  return { type: "member", id: user.id, name: user.name, avatar_url: user.avatar_url }
+export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role: App["role"]): Actor {
+  return { type: "member", id: user.id, name: user.name, avatar_url: user.avatar_url, role }
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`

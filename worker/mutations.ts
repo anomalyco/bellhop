@@ -17,7 +17,8 @@ import { bad, body, choice, denied, ids, input, member, missing, now, rows, sql,
 import type { Bindings, Ctx } from "./core"
 import { emit, setActivity } from "./events"
 import type { Change, Work } from "./events"
-import { attachment, getIssue, issueNumber, issueSummary, listIssues, ref, summaryOf } from "./issues"
+import { guestWrite } from "./guest-history"
+import { appRoles, attachment, getIssue, issueNumber, issueSummary, listIssues, ref, summaryOf } from "./issues"
 import type { AttachmentRow } from "./issues"
 
 export interface Access {
@@ -25,7 +26,7 @@ export interface Access {
   ctx: Work
   app: Pick<App, "id" | "slug" | "name">
   actor: Actor
-  guestId?: string
+  roles?: ReturnType<typeof appRoles>
   guestHash?: string
   privileged: boolean
   origin: string
@@ -36,18 +37,21 @@ function access(c: Ctx): Access {
     ctx: c.executionCtx,
     app: c.var.app,
     actor: c.var.actor,
-    guestId: c.var.appGuestId,
     guestHash: c.var.guestHash,
     privileged: !!c.var.app.role,
     origin: c.env.PUBLIC_ORIGIN || new URL(c.req.url).origin
   }
 }
-const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, a.privileged, a.guestId)
+const roles = (a: Access) => a.roles ??= appRoles(a.env, a.app.id)
+const full = (a: Access, n: number) => getIssue(a.env, a.app.id, n, a.actor, a.privileged, roles(a))
+const summary = (a: Access, n: number) => issueSummary(a.env, a.app.id, n, roles(a))
 // A rename can commit between loading the request actor and writing its JSON snapshot. Usually this
 // matches no rows; a stale guest would violate NOT NULL and roll back the entire post or event.
 function guestNameGuard(a: Access) {
-  return a.actor.type === "guest" ? [sql(a.env,
-    "UPDATE guest_names SET name=NULL WHERE guest_hash=? AND name IS NOT ?", a.guestHash, a.actor.name)] : []
+  return a.actor.type === "guest" ? [
+    sql(a.env, "UPDATE guest_names SET name=NULL WHERE guest_hash=? AND name IS NOT ?", a.guestHash, a.actor.name),
+    guestWrite(a.env, a.guestHash!)
+  ] : []
 }
 function notify(a: Access, payload: Pick<Change, "type" | "issue" | "items" | "changes">) {
   emit(a.env, a.ctx, { app: a.app, origin: a.origin, actor: a.actor, ...payload })
@@ -142,7 +146,7 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
 }
 export async function addComment(a: Access, n: number, b: Record<string, unknown>): Promise<Comment> {
   const { env, actor, app } = a,
-    s = await issueSummary(env, app.id, n),
+    s = await summary(a, n),
     at = now(),
     id = uid(),
     text = str(b.body, "body", 65536, true)
@@ -175,7 +179,7 @@ export async function addComment(a: Access, n: number, b: Record<string, unknown
   if (actor.type === "agent") await setActivity(env, app.id, s.id, actor, null, true)
   notify(a, {
     type: "comment.created",
-    issue: await issueSummary(env, app.id, n),
+    issue: await summary(a, n),
     items: [{ kind: "comment", comment }]
   })
   return comment
@@ -273,7 +277,7 @@ export async function relate(a: Access, n: number, other: number, type: Relation
   if (!a.privileged) denied()
   if (n === other) bad("Cannot relate an issue to itself")
   const { env, app } = a,
-    [s, t] = await Promise.all([issueSummary(env, app.id, n), issueSummary(env, app.id, other)])
+    [s, t] = await Promise.all([summary(a, n), summary(a, other)])
   const id = remove ?? uid(),
     at = now(),
     q: D1PreparedStatement[] = []
@@ -297,7 +301,7 @@ export async function relate(a: Access, n: number, other: number, type: Relation
   )
   await env.DB.batch(q)
   const next = await full(a, n),
-    otherSummary = await issueSummary(env, app.id, other)
+    otherSummary = await summary(a, other)
   notify(a, { type: "issue.updated", issue: summaryOf(next), items: items[0], changes: ["relations"] })
   notify(a, { type: "issue.updated", issue: otherSummary, items: items[1], changes: ["relations"] })
   return next
@@ -327,7 +331,7 @@ async function removeLabel(a: Access, id: string) {
   for (const issue of results[0]!.results) {
     notify(a, {
       type: "issue.updated",
-      issue: await issueSummary(env, app.id, issue.number),
+      issue: await summary(a, issue.number),
       changes: ["labels"],
       items: [{ kind: "event", event: { id: prefix + issue.id, type: "unlabeled", actor, data, created_at: at } }]
     })

@@ -44,9 +44,7 @@ export async function loadApp(c: Ctx) {
   ).first<App>()
   if (!app) missing()
   c.set("app", app)
-  const guest = await guestActor(c, app.id)
-  c.set("appGuestId", guest.id)
-  c.set("actor", app.role && c.var.user ? memberActor(c.var.user) : guest)
+  c.set("actor", c.var.user ? memberActor(c.var.user, app.role) : await guestActor(c, app.id))
 }
 export const labelCols = "id,name,color,description"
 export function labels(env: Env, appId: string) {
@@ -128,11 +126,11 @@ export async function assignee(env: Env, appId: string, id: unknown): Promise<Ac
   if (id === null) return null
   const row = await sql(
     env,
-    `SELECT u.id,u.name,u.avatar_url FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.id=?`,
+    `SELECT u.id,u.name,u.avatar_url,m.role FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.id=?`,
     appId,
     str(id, "assignee_id")
-  ).first<{ id: string; name: string; avatar_url: string | null }>()
-  return row ? memberActor(row) : bad("Unknown member")
+  ).first<{ id: string; name: string; avatar_url: string | null; role: Member["role"] }>()
+  return row ? memberActor(row, row.role) : bad("Unknown member")
 }
 const seedLabels = [
   ["bug", "d73a4a", "Something isn’t working"],

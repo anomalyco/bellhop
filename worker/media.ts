@@ -3,6 +3,7 @@ import type { Attachment } from "../shared/api"
 import { allowWrite } from "./auth"
 import { bad, fail, missing, now, sql, str, uid } from "./core"
 import type { Bindings } from "./core"
+import { guestWrite } from "./guest-history"
 import { attachment } from "./issues"
 import type { AttachmentRow } from "./issues"
 
@@ -88,7 +89,7 @@ media.post("/api/apps/:slug/uploads", async (c) => {
       : (await env.MEDIA.put(key, body, { httpMetadata: { contentType: mime } })).size
   try {
     if (size > limit) tooLarge()
-    await sql(
+    const insert = sql(
       env,
       "INSERT INTO attachments VALUES(?,?,?,?,?,?,?,?,?)",
       id,
@@ -100,7 +101,9 @@ media.post("/api/apps/:slug/uploads", async (c) => {
       size,
       kind,
       now()
-    ).run()
+    )
+    if (actor.type === "guest") await env.DB.batch([insert, guestWrite(env, c.var.guestHash)])
+    else await insert.run()
   } catch (e) {
     await env.MEDIA.delete(key)
     throw e

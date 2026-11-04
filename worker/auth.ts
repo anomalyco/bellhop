@@ -1,8 +1,9 @@
 import { Hono } from "hono"
 import { getCookie, setCookie } from "hono/cookie"
 import type { Actor, Config, Me } from "../shared/api"
-import { bad, body, denied, email, fail, hex, missing, now, rows, secret, sha256, sql, str, uid } from "./core"
+import { bad, body, denied, email, fail, hex, missing, now, secret, sha256, sql, str, uid } from "./core"
 import type { Bindings, Ctx, User } from "./core"
+import { claimGuest, renameGuest, scopedGuestId } from "./guest-history"
 
 const month = 30 * 86400
 /** Shared cookies cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
@@ -24,12 +25,12 @@ export function firstContact(c: Ctx) {
     if (ids.length > 1) id = ids.at(-1)![1]
   }
   if (!id || !/^[0-9a-f]{64}$/.test(id)) {
+    c.set("existingGuest", false)
     id = secret()
     cookie(c, "bh_guest", id, 365 * 86400, true)
-  }
+  } else c.set("existingGuest", true)
   c.set("guestId", id)
 }
-const scopedGuestId = async (id: string, scope: string) => (await sha256(`${id}:${scope}`)).slice(0, 32)
 async function guestName(c: Ctx) {
   const hash = c.var.guestHash ?? await sha256(c.var.guestId)
   c.set("guestHash", hash)
@@ -45,34 +46,7 @@ async function saveGuestName(c: Ctx, value: unknown, previous: string | null) {
   if (!name || [...name].length > 40) bad("Guest names must be 1–40 characters")
   if (previous === name) return name
 
-  const statements: D1PreparedStatement[] = []
-  // No cross-app identifier is stored on posts. Derive possible scoped IDs for populated apps;
-  // update via the actor-ID indexes, in groups rather than one D1 call per app or per post.
-  let after = "", populated = 0
-  for (;;) {
-    const apps = await rows<{ id: string }>(
-      sql(c.env, "SELECT id FROM apps WHERE issue_seq>0 AND id>? ORDER BY id LIMIT 128", after)
-    )
-    if (!apps.length) break
-    populated += apps.length
-    const ids = JSON.stringify(await Promise.all(apps.map((app) => scopedGuestId(c.var.guestId, app.id))))
-    for (const [table, column] of [["issues", "author"], ["comments", "author"], ["issue_events", "actor"]]) {
-      statements.push(sql(c.env,
-        `UPDATE ${table} SET ${column}=json_set(${column},'$.name',?)
-         WHERE json_extract(${column},'$.id') IN (SELECT value FROM json_each(?))
-         AND json_extract(${column},'$.type')='guest'`, name, ids))
-    }
-    if (apps.length < 128) break
-    after = apps[apps.length - 1]!.id
-  }
-  // If an app gained its very first issue during discovery it could contain a guest ID we missed.
-  // A NOT NULL conflict aborts the whole rename, exactly like the issue revision guard.
-  statements.unshift(sql(c.env,
-    `INSERT INTO guest_names(guest_hash,name,updated_at)
-     VALUES(?,CASE WHEN (SELECT count(*) FROM apps WHERE issue_seq>0)=? THEN ? END,?)
-     ON CONFLICT(guest_hash) DO UPDATE SET name=excluded.name,updated_at=excluded.updated_at`,
-    c.var.guestHash, populated, name, now()))
-  await c.env.DB.batch(statements)
+  await renameGuest(c, name)
 
   // Promote a pre-profile, host-only cookie when its owner chooses a shared name.
   const site = c.env.APP_DOMAIN
@@ -118,7 +92,7 @@ async function requireHuman(c: Ctx) {
   if (!(await human(c))) fail(428, "human_required", "Complete the human check to continue")
 }
 export async function allowWrite(c: Ctx) {
-  if (!c.var.app.role) await requireHuman(c)
+  if (!c.var.user) await requireHuman(c)
 }
 export async function postBody(c: Ctx) {
   await allowWrite(c)
@@ -147,7 +121,7 @@ function nextPath(c: Ctx, input?: string) {
 async function signIn(c: Ctx, address: string, name: string, picture: string | null, sub: string | null) {
   const token = secret(),
     hash = await sha256(token)
-  await c.env.DB.batch([
+  const result = await c.env.DB.batch<{ user_id: string }>([
     sql(
       c.env,
       `INSERT INTO users(id,email,name,avatar_url,google_sub) VALUES(?,?,?,?,?) ON CONFLICT(email) DO UPDATE SET
@@ -167,16 +141,17 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
     ),
     sql(
       c.env,
-      `INSERT INTO sessions SELECT ?,id,? FROM users WHERE email=? AND (? IS NULL OR google_sub=?)`,
+      `INSERT INTO sessions SELECT ?,id,? FROM users WHERE email=? AND (? IS NULL OR google_sub=?) RETURNING user_id`,
       hash,
       new Date(Date.now() + month * 1000).toISOString(),
       address,
       sub,
       sub
     )
-  ]).then((result) => {
-    if (!result[2]?.meta.changes) denied()
-  })
+  ])
+  const session = result[2]?.results[0]
+  if (!session) denied()
+  if (c.var.existingGuest) await claimGuest(c, { id: session.user_id, email: address, name, avatar_url: picture })
   cookie(c, "bh_session", token, month, true)
 }
 /** Behind a TLS-terminating proxy (the tailnet dev URL) the Worker sees http, so PUBLIC_ORIGIN can pin the origin. */
