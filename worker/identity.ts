@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type { Me } from "../shared/api"
-import { firstContact, me } from "./auth"
+import { me } from "./auth"
+import { esc } from "./mail-provider"
 import { contactCookie, contactHash, contactHost, contactTTL, hostWorkspace } from "./contact-session"
 import { ApiFailure, denied, email, fail, now, secret, sha256, sql, uid, type Bindings, type Ctx } from "./core"
 import { claimContactGuest } from "./guest-history"
@@ -38,7 +39,7 @@ function json(part: string): Record<string, unknown> {
   return x as Record<string, unknown>
 }
 function text(x: unknown, max: number): x is string {
-  return typeof x === "string" && x.length <= max && !!x.trim() && !/[\p{Cc}\p{Cs}]/u.test(x)
+  return typeof x === "string" && x.length <= max && !!x.trim() && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(x)
 }
 async function verify(c: Ctx, slug: string | null, token: unknown) {
   if (!slug || !contactHost(c, slug)) return invalid("workspace")
@@ -53,10 +54,10 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
   if (sig.byteLength !== 32) return invalid("signature")
   const key = await sql(
     c.env,
-    `SELECT k.app_id,k.cipher FROM identity_keys k JOIN apps a ON a.id=k.app_id WHERE a.slug=? AND a.mode='helpdesk' AND k.id=?`,
+    `SELECT k.app_id,k.cipher,a.name workspace FROM identity_keys k JOIN apps a ON a.id=k.app_id WHERE a.slug=? AND a.mode='helpdesk' AND k.id=?`,
     slug,
     h.kid
-  ).first<{ app_id: string; cipher: string }>()
+  ).first<{ app_id: string; cipher: string; workspace: string }>()
   if (!key) return invalid("key")
   const mac = await verifier(c.env, key.app_id, h.kid, key.cipher)
   if (!(await crypto.subtle.verify("HMAC", mac, sig, enc.encode(head + "." + payload)))) return invalid("signature")
@@ -92,7 +93,8 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
     app: key.app_id,
     slug,
     kid: h.kid,
-    sub,
+    sub: sub.trim(),
+    workspace: key.workspace,
     jti,
     exp,
     name: p.name?.trim() ?? null,
@@ -101,7 +103,7 @@ async function verify(c: Ctx, slug: string | null, token: unknown) {
   }
 }
 
-async function identify(c: Ctx, slug: string | null, token: unknown) {
+async function identify(c: Ctx, slug: string | null, token: unknown, claimGuest = false) {
   const v = await verify(c, slug, token),
     raw = secret(),
     at = now(),
@@ -125,7 +127,7 @@ async function identify(c: Ctx, slug: string | null, token: unknown) {
       chosen AS (SELECT coalesce((SELECT id FROM target),?4) id)
       INSERT INTO contacts(id,app_id,external_id,email,unverified_email,name,verified_via,created_at,last_seen_at)
       SELECT id,?1,?2,CASE WHEN NOT EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=?1 AND t.email=?3 AND t.id!=chosen.id) THEN ?3 END,?5,?6,'host',?7,?7 FROM chosen WHERE true
-      ON CONFLICT(id) DO UPDATE SET external_id=excluded.external_id,email=excluded.email,unverified_email=excluded.unverified_email,name=coalesce(excluded.name,contacts.name),verified_via='host',last_seen_at=excluded.last_seen_at
+      ON CONFLICT(id) DO UPDATE SET external_id=excluded.external_id,email=coalesce(excluded.email,contacts.email),unverified_email=coalesce(excluded.unverified_email,contacts.unverified_email),name=coalesce(excluded.name,contacts.name),verified_via='host',last_seen_at=excluded.last_seen_at
       RETURNING id,name,email,external_id,verified_via`,
       v.app,
       v.sub,
@@ -158,7 +160,7 @@ async function identify(c: Ctx, slug: string | null, token: unknown) {
   const contact = result[1]!.results[0]!
   // A forwarded GET link authenticates its subject, not the browser that opened
   // it. Only the origin-checked POST may transfer the browser's private history.
-  if (c.req.method === "POST") await claimContactGuest(c, contact, v.app)
+  if (claimGuest) await claimContactGuest(c, contact, v.app)
   contactCookie(c, v.slug, raw)
   c.set("contact", contact)
 }
@@ -191,22 +193,62 @@ handoff.post("/api/apps/:slug/identify", async (c) => {
   } catch {
     return invalid("body")
   }
-  await identify(c, c.req.param("slug"), b && typeof b === "object" && "token" in b ? b.token : null)
+  await identify(c, c.req.param("slug"), b && typeof b === "object" && "token" in b ? b.token : null, true)
   return c.json(await me(c))
 })
-handoff.get("/identify", async (c) => {
+handoff.use("/identify", async (c, next) => {
   c.header("Referrer-Policy", "no-referrer")
   c.header("Cache-Control", "no-store")
+  c.header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
+  c.header("X-Frame-Options", "DENY")
+  c.header("X-Robots-Tag", "noindex, nofollow")
   await enforce(c, "RL_IP", "identify:" + clientIP(c))
-  firstContact(c)
+  await next()
+})
+function linkError(c: Ctx, e: unknown) {
+  if (!(e instanceof ApiFailure) || e.code !== "invalid_identity") throw e
+  return c.html(
+    "<!doctype html><meta charset=utf-8><title>Sign-in link unavailable</title><p>This sign-in link is no longer valid. Return to the app for a new link.</p>",
+    401
+  )
+}
+handoff.get("/identify", async (c) => {
+  const slug = c.env.APP_DOMAIN ? hostWorkspace(c) : (c.req.query("app") ?? null),
+    token = c.req.query("token")
   try {
-    await identify(c, c.env.APP_DOMAIN ? hostWorkspace(c) : (c.req.query("app") ?? null), c.req.query("token"))
-  } catch (e) {
-    if (!(e instanceof ApiFailure) || e.code !== "invalid_identity") throw e
+    const v = await verify(c, slug, token)
+    if (await sql(c.env, "SELECT 1 FROM identity_uses WHERE app_id=? AND jti=?", v.app, await sha256(v.jti)).first())
+      invalid("replay")
+    // Preview is read-only: activeContact would renew the previous contact cookie.
+    const current = await sql(
+      c.env,
+      `SELECT t.name,t.email,t.external_id FROM contact_sessions s JOIN contacts t ON t.id=s.contact_id AND t.app_id=s.app_id WHERE s.app_id=? AND s.hash=? AND s.expires>unixepoch()`,
+      v.app,
+      await contactHash(c, v.slug)
+    ).first<{ name: string | null; email: string | null; external_id: string | null }>()
+    const who = esc(v.name ?? v.email ?? v.sub),
+      switching =
+        current && !(current.external_id === v.sub || (!current.external_id && v.email && current.email === v.email))
+    const next = destination(c.req.query("next"), new URL(c.req.url).origin)
+    // A no-referrer document can serialize Origin as null on form navigation.
+    // Send only the origin for the self-only form, never the URL containing the token.
     return c.html(
-      "<!doctype html><meta charset=utf-8><title>Sign-in link unavailable</title><p>This sign-in link is no longer valid. Return to the app for a new link.</p>",
-      401
+      `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="referrer" content="strict-origin"><title>Confirm sign-in</title><h1>Continue to ${esc(v.workspace)} as ${who}?</h1>${switching ? `<p>You're signed in as ${esc(current.name ?? current.email ?? current.external_id ?? "another requester")}. Continue as ${who}?</p>` : ""}<form method="post" action="/identify"><input type="hidden" name="token" value="${esc(token!)}"><input type="hidden" name="next" value="${esc(next)}">${c.env.APP_DOMAIN ? "" : `<input type="hidden" name="app" value="${esc(v.slug)}">`}<button type="submit">Continue</button></form></html>`
     )
+  } catch (e) {
+    return linkError(c, e)
   }
-  return c.redirect(destination(c.req.query("next"), new URL(c.req.url).origin), 302)
+})
+handoff.post("/identify", async (c) => {
+  const origin = new URL(c.req.url).origin
+  if (c.req.header("Origin") !== origin) denied()
+  if (c.req.header("Content-Type")?.split(";")[0]?.trim().toLowerCase() !== "application/x-www-form-urlencoded")
+    fail(415, "invalid_form", "Expected a form")
+  const form = new URLSearchParams(await c.req.text())
+  try {
+    await identify(c, c.env.APP_DOMAIN ? hostWorkspace(c) : form.get("app"), form.get("token"))
+  } catch (e) {
+    return linkError(c, e)
+  }
+  return c.redirect(destination(form.get("next") ?? undefined, origin), 302)
 })

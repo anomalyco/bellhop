@@ -49,14 +49,16 @@ export async function issueCode(
     code = generate(),
     address = await sha256(email(x.email)),
     scope = `${x.kind}:${x.app ?? "apex"}:${address}`,
+    issuer = x.kind === "verification" ? actor!.id : x.requester,
     hash = hex(await digest(env, id, code))
   const q = [
-    charge(env, "addr-hour:" + scope, 3600, 5),
-    charge(env, "addr-day:" + scope, 86400, 10),
+    charge(env, `issuer-hour:${scope}:${issuer}`, 3600, 3),
+    charge(env, "delivery-hour:" + address, 3600, 20),
+    charge(env, "delivery-day:" + address, 86400, 40),
     charge(env, "ip-hour:" + (await sha256(ip)), 3600, 30),
     ...(x.app ? [charge(env, "space-hour:" + x.app, 3600, 120), charge(env, "space-day:" + x.app, 86400, 500)] : [])
   ]
-  if (x.app) {
+  if (x.kind === "verification") {
     const recipient = (scope: string) =>
       sql(env, "INSERT OR IGNORE INTO code_recipients VALUES(?,date('now'),?,?)", x.app, scope, address)
     q.push(recipient("workspace"))
@@ -159,10 +161,7 @@ export async function redeemCode(env: Env, x: Challenge, raw: unknown, id?: stri
     JSON.stringify(owners ?? []),
     x.requester ?? null
   ).first<{ state: string }>()
-  if (result?.state !== "verified") {
-    if (x.kind === "account") return null
-    invalid()
-  }
+  if (result?.state !== "verified") invalid()
   return row!.id
 }
 export async function expireCodes(env: Env) {

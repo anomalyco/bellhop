@@ -194,7 +194,7 @@
 //                                                                             or Google instructions for a linked account
 //   POST   /auth/email/verify      { email, code }       -> { ok: true }       use /api/me to read the session. Valid email
 //       codes create/sign in email-only accounts and send a new-sign-in notice. A verified Google sign-in links the
-//       same email; thereafter only Google can sign in. Neither endpoint reveals which sign-in method an address uses.
+//       same email; thereafter only Google can sign in. Wrong, expired or other-browser codes return 400 invalid_code.
 //   Sign-in and verification codes: 6 digits, valid 10 minutes, single use; 5 wrong tries end the code; rate limited
 //   per address, per IP and per workspace (429). The same answer whether or not the address has an account.
 //   POST   /mcp                                          MCP, Streamable HTTP, Authorization: Bearer <token>
@@ -225,10 +225,9 @@
 //   POST   /api/apps/:slug/contact/start  { email }      -> { ok: true }       human; emails a sign-in code
 //   POST   /api/apps/:slug/contact/verify { email, code } -> Me               signs this browser in as that contact
 //   POST   /api/apps/:slug/identify       { token }      -> Me                 an IdentityToken from the host's server
-//   GET    /identify?token=<jwt>&next=<path>             the same as a link (e.g. Console's "Contact support"), on
-//                                                         the workspace's host; then redirects to next (same host).
-//                                                         Only the same-origin POST claims existing guest posts:
-//                                                         a forwarded link must not transfer the clicker's history.
+//   GET    /identify?token=<jwt>&next=<path>             read-only sign-in confirmation on the workspace host
+//   POST   /identify               form: token, next     same-origin consent, then 302 to a safe path. Neither link
+//                                                         step claims guest posts; only the JSON identify route does.
 //   POST   /api/apps/:slug/contact/sign-out              -> Me
 //   GET    /api/apps/:slug/contacts?q=&cursor=           -> ContactPage        team (viewer and up) and agents
 //   GET    /api/apps/:slug/contacts/:id                  -> ContactDetail      team and agents
@@ -432,7 +431,8 @@ export interface ContactPage {
   next_cursor: string | null
 }
 
-/** A secret the host app's server signs identity tokens with. Never shipped to browsers. */
+/** A secret the host app's server signs identity tokens with. Never shipped to browsers.
+ * Revocation rejects future handoffs; it does not end sessions already issued. */
 export interface IdentityKey {
   id: string
   name: string
