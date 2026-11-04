@@ -2,9 +2,9 @@
 
 .feed {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 272px;
+  grid-template-columns: minmax(0, 1fr) 280px;
   align-items: start;
-  gap: 48px;
+  gap: 32px;
 }
 .feed-main {
   min-width: 0;
@@ -80,7 +80,7 @@
 .rail-title {
   margin: 0;
   color: var(--fg-muted);
-  font-family: var(--font-display);
+  font-family: var(--font-accent);
   font-size: 12px;
   font-weight: 400;
   line-height: 16px;

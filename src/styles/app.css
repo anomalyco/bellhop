@@ -41,9 +41,9 @@
 .header-inner {
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: 1280px;
-  height: 52px;
+  gap: 8px;
+  max-width: 1080px;
+  height: 44px;
   margin: 0 auto;
   padding: 0 24px;
 }
@@ -83,10 +83,10 @@
   min-width: 0;
   overflow: hidden;
   font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
   line-height: 20px;
-  letter-spacing: 0;
+  letter-spacing: -0.01em;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
@@ -98,11 +98,9 @@
 .header-crumb {
   flex: none;
   color: var(--fg-muted);
-  font-family: var(--font-display);
-  font-size: 13px;
-  font-weight: 400;
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
   line-height: 20px;
-  letter-spacing: 0;
   white-space: nowrap;
 }
 .header-trail {
@@ -112,7 +110,9 @@
   gap: 8px;
 }
 .header-trail[data-mono] .header-crumb {
-  font-family: var(--font-mono);
+  font-family: var(--font-accent);
+  font-size: 13px;
+  letter-spacing: 0;
 }
 .app-nav {
   display: flex;
@@ -163,14 +163,15 @@
   pointer-events: none;
 }
 
-/* Page */
+/* Page: one centred 1080 px canvas shared with the header, so every page's left edge lines up with the logo. Narrow
+   pages (new issue, agents, sign-in) keep a 720 px reading column, the conversation column's width. */
 .page {
-  max-width: 1280px;
+  max-width: 1080px;
   margin: 0 auto;
-  padding: 28px 24px 64px;
+  padding: 24px 24px 64px;
 }
 .page[data-narrow] {
-  max-width: 800px;
+  max-width: 768px;
 }
 /* The issue page ends at its pinned composer; the slot already reserves the space. */
 .page:has(.composer-slot) {
@@ -184,9 +185,9 @@
   margin: 0 0 20px;
   font-family: var(--font-display);
   font-size: var(--text-heading);
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   line-height: 28px;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
   text-wrap: balance;
 }
@@ -200,7 +201,7 @@
 .section-title {
   margin: 0 0 12px;
   color: var(--fg-muted);
-  font-family: var(--font-display);
+  font-family: var(--font-accent);
   font-size: 12px;
   font-weight: 400;
   line-height: 16px;
@@ -216,10 +217,10 @@
 .blank-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
   line-height: 20px;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
 }
 .blank p {
   max-width: 360px;
@@ -466,9 +467,9 @@ a.box-row:hover {
   margin: 6px 0 10px;
   font-family: var(--font-display);
   font-size: var(--text-heading);
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   line-height: 28px;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   text-wrap: balance;
 }
 .signin-dev {
@@ -505,9 +506,9 @@ a.box-row:hover {
   margin: 0;
   font-family: var(--font-display);
   font-size: var(--text-heading);
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   line-height: 28px;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
   text-wrap: balance;
 }
@@ -1147,6 +1148,9 @@ a.box-row:hover {
 .markdown code {
   padding: 1px 5px;
   font-size: 12.5px;
+  /* Inline code never grows its line (22 px): the line stays the height it had as plain text before the markdown
+     renderer loaded, so the swap moves nothing */
+  line-height: 1;
   background: var(--layer-2);
   border-radius: var(--radius-small);
 }
@@ -1161,6 +1165,7 @@ a.box-row:hover {
 }
 .markdown pre code {
   padding: 0;
+  line-height: inherit;
   background: none;
 }
 .markdown hr {
@@ -1240,8 +1245,8 @@ a.box-row:hover {
    grouped by person and the pinned composer; on the right a quiet sidebar. No surfaces around anything. */
 .issue {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 288px;
-  gap: 56px;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 48px;
   align-items: start;
 }
 .issue-main {
@@ -1265,21 +1270,21 @@ a.box-row:hover {
   margin: 0;
   font-family: var(--font-display);
   font-size: 20px;
-  font-weight: 700;
+  font-weight: var(--weight-semibold);
   line-height: 28px;
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
   text-wrap: balance;
 }
 .report-number {
   color: var(--fg-faint);
+  font-size: 0.9em;
   font-weight: 400;
 }
 .report-actions {
   display: flex;
   flex: none;
   gap: 6px;
-  margin-top: 3px;
 }
 .issue-title-form {
   display: flex;
@@ -1424,7 +1429,7 @@ button.prop:hover,
 .side-toggle {
   margin: 0;
   color: var(--fg-muted);
-  font-family: var(--font-display);
+  font-family: var(--font-accent);
   font-size: 12px;
   font-weight: 400;
   line-height: 16px;
@@ -1730,13 +1735,22 @@ button.prop:hover,
   font-size: var(--text-ui);
   line-height: 20px;
 }
+/* The event's icon sits in a small raised disc, so event lines read as a quiet track between messages */
 .event-icon {
   display: inline-flex;
   flex: none;
+  align-items: center;
   justify-content: center;
   width: 20px;
-  padding-top: 3px;
+  height: 20px;
   color: var(--icon-muted);
+  background: var(--layer-1);
+  border-radius: 50%;
+}
+.event-icon .icon,
+.event-icon svg {
+  width: 12px;
+  height: 12px;
 }
 .event[data-tone="open"] .event-icon,
 .event-icon[data-tone="open"] {
@@ -1815,14 +1829,13 @@ button.prop:hover,
   color: var(--fg-muted);
   background: var(--hover);
 }
+/* The folded events' discs overlap into one capsule */
 .burst-icons {
   display: inline-flex;
   flex: none;
-  gap: 2px;
 }
-.burst-icons .event-icon {
-  width: 14px;
-  padding: 0;
+.burst-icons .event-icon + .event-icon {
+  margin-left: -4px;
 }
 .burst-text {
   min-width: 0;
@@ -1981,10 +1994,10 @@ button.prop:hover,
 .name-prompt-title {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 15px;
+  font-weight: var(--weight-semibold);
   line-height: 20px;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
 }
 .name-prompt-text {
   margin: 0;
@@ -2103,7 +2116,7 @@ button.prop:hover,
 /* Settings */
 .settings {
   display: grid;
-  grid-template-columns: 184px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   gap: 40px;
   align-items: start;
 }
@@ -2133,7 +2146,7 @@ button.prop:hover,
 }
 .settings-main {
   min-width: 0;
-  max-width: 840px;
+  max-width: 720px;
 }
 .settings-main > div > .flash,
 .settings-main > div > .row {
@@ -2150,10 +2163,10 @@ button.prop:hover,
 .settings-heading h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 20px;
-  letter-spacing: 0;
+  font-size: 16px;
+  font-weight: var(--weight-semibold);
+  line-height: 24px;
+  letter-spacing: -0.02em;
 }
 .settings-form,
 .settings-stack {
@@ -2421,7 +2434,6 @@ button.prop:hover,
 @media (max-width: 640px) {
   .header-inner {
     gap: 8px;
-    height: 48px;
     padding: 0 16px;
   }
   .app-nav {
@@ -2442,7 +2454,7 @@ button.prop:hover,
     display: none;
   }
   .page {
-    padding: 20px 16px 48px;
+    padding: 16px 16px 48px;
   }
   .list-toolbar {
     grid-template-columns: auto minmax(0, 1fr) auto;

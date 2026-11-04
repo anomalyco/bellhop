@@ -1,10 +1,12 @@
 /* Bellhop theme, after OpenCode's oc-2 dark tokens: a neutral grey ramp with surfaces one step apart, white-alpha
-   borders and overlays, flat controls with a near-white primary. No gradients or gloss anywhere. OpenTUI Mono for
-   Bellhop's own titles, numbers and code; Inter at -0.01em for everything else. Dark only. */
+   borders and overlays, flat controls with a near-white primary. No gradients or gloss anywhere. Inter for all text:
+   titles at 600 / -0.02em, everything else at -0.01em. OpenTUI Mono only as a small accent: the 12 px section labels,
+   issue numbers and code. Dark only. */
 
 /* Inter is "optional": preloaded, it's almost always there for the first paint; when it isn't (a cold, slow visit),
    the page keeps the system face (SF Pro, Segoe UI) for that visit instead of reflowing body text when it lands.
-   OpenTUI Mono swaps, but behind a fallback with the same advance and line metrics, so a swap moves nothing. */
+   OpenTUI Mono (labels, numbers, code; Regular is preloaded, Bold only loads if bold code appears) swaps, but behind
+   a fallback with the same advance and line metrics, so a swap moves nothing. */
 @font-face {
   font-family: "Inter";
   src: url("/fonts/InterVariable-Latin.woff2") format("woff2");
@@ -224,8 +226,10 @@
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "OpenTUI Mono", "OpenTUI Mono Fallback", "OpenTUI Mono Fallback Consolas", ui-monospace, monospace;
-  /* Bellhop's own titles: issue and page titles, section heads, the header crumb, empty states */
-  --font-display: var(--font-mono);
+  /* Titles (issue, page, settings, empty states, the header name) are Inter; mono is a small accent only: section
+     labels, issue numbers, code */
+  --font-display: var(--font-sans);
+  --font-accent: var(--font-mono);
   --text-small: 12px;
   --text-ui: 13px;
   --text-body: 14px;
