@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from "react"
-import { Link } from "wouter"
-import type { AgentRole, App, AppAgent, AppDetail, AppSettings, AppVisibility, Block, Label as LabelType, Member, Role, Template, TemplateInput } from "../../shared/api"
+import { Link, useLocation } from "wouter"
+import type { AgentRole, App, AppAgent, AppDetail, AppSettings, AppVisibility, Block, Label as LabelType, Member, Role, Template, TemplateInput, WebhookEventType } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { invalidate, setData, useResource } from "../lib/cache"
 import { Time } from "../lib/time"
@@ -11,17 +11,19 @@ import { AppLayout, Page, useMe } from "../ui/Shell"
 import { AgentAvatar, AppIcon, Button, Label } from "../ui/primitives"
 import { RoleBadge, RoleSelect } from "../ui/roles/RoleSelect"
 import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel, roleText, teamRoles } from "../lib/roles"
-import { appLabel, appPath, homeUrl, signInHref } from "../lib/site"
+import { appLabel, appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 import { PublicToggle, VisibilityValue } from "../ui/workspace/Visibility"
 import { ColorField, randomColor } from "../ui/ColorField"
 import { Tiers } from "./settings/Tiers"
+import { ReportKeys } from "./settings/ReportKeys"
+import { WebhookEvents, sameEvents } from "./settings/WebhookEvents"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
 import "../styles/moderation.css"
 
-type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members" | "tiers" | "blocked"
+type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "report-keys" | "members" | "tiers" | "blocked"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 const sections: { id: Section; label: string; min: Role }[] = [
@@ -31,6 +33,7 @@ const sections: { id: Section; label: string; min: Role }[] = [
   { id: "members", label: "Members", min: "member" },
   { id: "agents", label: "Agents", min: "admin" },
   { id: "webhook", label: "Webhook", min: "admin" },
+  { id: "report-keys", label: "Report keys", min: "admin" },
   { id: "tiers", label: "Tiers", min: "member" },
   { id: "blocked", label: "Blocked", min: "member" },
 ]
@@ -102,6 +105,7 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "templates" && <Templates app={app} />}
           {active === "agents" && <Agents app={app} />}
           {active === "webhook" && <Webhook app={app} />}
+          {active === "report-keys" && <ReportKeys app={app} />}
           {active === "members" && <Members app={app} />}
           {active === "tiers" && <Tiers app={app} />}
           {active === "blocked" && <Blocked app={app} />}
@@ -872,12 +876,16 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
 function Webhook({ app }: { app: AppDetail }) {
   const { data: settings, error, reload } = useSettings(app.slug)
   const [url, setUrl] = useState<string | null>(null)
+  const [events, setEvents] = useState<WebhookEventType[] | null>(null)
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
 
   const value = url ?? settings?.webhook.url ?? ""
+  const savedEvents = settings?.webhook.events ?? []
+  const chosen = events ?? savedEvents
+  const changed = value !== (settings?.webhook.url ?? "") || !sameEvents(chosen, savedEvents)
 
   const act = async (name: string, fn: () => Promise<AppSettings | void>, done?: string) => {
     setBusy(name)
@@ -897,8 +905,10 @@ function Webhook({ app }: { app: AppDetail }) {
   const save = (e: FormEvent) => {
     e.preventDefault()
     act("save", async () => {
-      const next = await api.putWebhook(app.slug, value.trim() || null)
+      // The events always go along: leaving them out would reset them to the defaults.
+      const next = await api.putWebhook(app.slug, value.trim() || null, chosen)
       setUrl(null)
+      setEvents(null)
       return next
     }, value.trim() ? "Saved" : "Webhook removed")
   }
@@ -916,17 +926,34 @@ function Webhook({ app }: { app: AppDetail }) {
   return (
     <div className="settings-stack">
       <Heading title="Webhook" />
-      <form className="field" onSubmit={save}>
-        <label className="field-label" htmlFor="hook-url">
-          Payload URL
-        </label>
-        <div className="row">
-          <div className="input" style={{ flex: 1 }}>
+      <form className="settings-stack" onSubmit={save}>
+        <div className="field">
+          <label className="field-label" htmlFor="hook-url">
+            Payload URL
+          </label>
+          <div className="input">
             <input id="hook-url" type="url" value={value} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/bellhop" className="mono" />
           </div>
-          <Button type="submit" variant="primary" disabled={busy === "save" || value === (settings.webhook.url ?? "")}>
-            Save
+        </div>
+        <div className="field">
+          <span className="field-label">Events</span>
+          <WebhookEvents value={chosen} onChange={setEvents} />
+        </div>
+        <div className="row">
+          <Button type="submit" variant="primary" disabled={busy === "save" || !changed}>
+            {busy === "save" ? "Saving…" : "Save"}
           </Button>
+          {changed && (
+            <Button
+              variant="invisible"
+              onClick={() => {
+                setUrl(null)
+                setEvents(null)
+              }}
+            >
+              Discard
+            </Button>
+          )}
         </div>
       </form>
 
@@ -980,6 +1007,7 @@ function Webhook({ app }: { app: AppDetail }) {
                     <th>Response</th>
                     <th>Attempts</th>
                     <th>Sent</th>
+                    <th aria-label="Actions" />
                   </tr>
                 </thead>
                 <tbody>
@@ -996,6 +1024,9 @@ function Webhook({ app }: { app: AppDetail }) {
                       <td>
                         <Time iso={d.created_at} />
                       </td>
+                      <td className="delivery-actions">
+                        <Redeliver slug={app.slug} id={d.id} onDone={() => setTimeout(() => reload().catch(() => {}), 1500)} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -1008,13 +1039,49 @@ function Webhook({ app }: { app: AppDetail }) {
   )
 }
 
+/** Sends a delivery's payload again under a new delivery id. */
+function Redeliver({ slug, id, onDone }: { slug: string; id: string; onDone: () => void }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle")
+  const [error, setError] = useState<string | null>(null)
+  useEffect(() => {
+    if (state !== "done") return
+    const t = setTimeout(() => setState("idle"), 2500)
+    return () => clearTimeout(t)
+  }, [state])
+  return (
+    <>
+      {state === "error" && error && <span className="field-error delivery-note">{error} </span>}
+      <Button
+        size="small"
+        variant="invisible"
+        disabled={state === "busy"}
+        title="Send the same payload again"
+        onClick={async () => {
+          setState("busy")
+          setError(null)
+          try {
+            await api.redeliver(slug, id)
+            setState("done")
+            onDone()
+          } catch (e) {
+            setError(errorMessage(e))
+            setState("error")
+          }
+        }}
+      >
+        {state === "busy" ? "Sending…" : state === "done" ? "Sent" : "Redeliver"}
+      </Button>
+    </>
+  )
+}
+
 /* Members */
 
 const elevated = (role: Role) => role === "owner" || role === "admin"
 
 /** The server's refusals, in plain words: 403 when an admin touches admins or owners, 409 for the last owner. */
 function memberError(e: unknown) {
-  if (e instanceof ApiFailure && e.code === "last_owner") return "A workspace must keep at least one owner who has signed in."
+  if (e instanceof ApiFailure && e.code === "last_owner") return "A workspace must keep at least one owner who has accepted."
   if (e instanceof ApiFailure && e.status === 403) return "Only owners can add, change or remove admins and owners."
   return errorMessage(e)
 }
@@ -1099,7 +1166,7 @@ function Invite({ app, owner }: { app: AppDetail; owner: boolean }) {
           {busy ? "Inviting…" : "Invite"}
         </Button>
       </div>
-      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">They join when they sign in with that email.</p>}
+      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">They join once they accept the invitation, signed in with that email.</p>}
     </form>
   )
 }
@@ -1125,6 +1192,25 @@ function MemberRow({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const who = member.name ?? member.email
+  const [, navigate] = useLocation()
+  // You may always leave (DELETE …/members/me), except as the last owner; admins also manage others from the menu.
+  const canLeave = you && !lastOwner
+  const hasMenu = you ? canLeave : canManage
+
+  const leave = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await api.leaveApp(app.slug)
+      setData<App[]>(keys.apps, (apps) => apps?.filter((a) => a.id !== app.id))
+      const href = homeUrl("/workspaces")
+      if (isAbsolute(href)) window.location.assign(href)
+      else navigate(href)
+    } catch (e) {
+      setError(memberError(e))
+      setBusy(false)
+    }
+  }
 
   const act = async (fn: () => Promise<AppSettings>, done?: string) => {
     setBusy(true)
@@ -1150,7 +1236,7 @@ function MemberRow({
   const confirmText =
     confirm?.kind === "remove"
       ? you
-        ? "Leave this workspace?"
+        ? "Leave this workspace? You'll need a new invitation to come back."
         : `Remove ${who}?`
       : confirm?.kind === "role"
         ? `Become ${roleLabel[confirm.role].toLowerCase()}? You may lose access to these settings.`
@@ -1168,7 +1254,7 @@ function MemberRow({
         </div>
         <div className="issue-meta">
           {member.name ? member.email : ""}
-          {!member.joined && `${member.name ? " · " : ""}Invited, hasn't signed in yet`}
+          {!member.joined && `${member.name ? " · " : ""}Invited · hasn't accepted yet`}
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
@@ -1184,7 +1270,9 @@ function MemberRow({
             disabled={busy}
             onClick={() =>
               confirm.kind === "remove"
-                ? act(() => api.removeMember(app.slug, member.id))
+                ? you
+                  ? leave()
+                  : act(() => api.removeMember(app.slug, member.id))
                 : confirm.kind === "role"
                   ? act(() => api.patchMember(app.slug, member.id, confirm.role))
                   : act(() => api.transfer(app.slug, member.id), `${who} is now an owner too. If you're handing over, change your own role.`)
@@ -1206,7 +1294,7 @@ function MemberRow({
                 return {
                   value: r,
                   label: roleLabel[r],
-                  description: keepOwner ? "A workspace needs an owner who has signed in" : ownerOnly ? "Only owners can grant this" : roleText[r],
+                  description: keepOwner ? "A workspace needs an owner who has accepted" : ownerOnly ? "Only owners can grant this" : roleText[r],
                   disabled: ownerOnly || keepOwner,
                 }
               })}
@@ -1215,7 +1303,7 @@ function MemberRow({
           ) : (
             <RoleBadge role={member.role} />
           )}
-          {canManage && (
+          {hasMenu && (
             <Menu
               align="end"
               width={240}
@@ -1223,7 +1311,7 @@ function MemberRow({
             >
               {(close) => (
                 <>
-                  {owner && member.joined && member.role !== "owner" && (
+                  {canManage && owner && member.joined && member.role !== "owner" && (
                     <MenuItem
                       description="They become an owner too; you stay one"
                       onSelect={() => {
@@ -1234,17 +1322,19 @@ function MemberRow({
                       Transfer ownership
                     </MenuItem>
                   )}
-                  <MenuItem
-                    danger
-                    disabled={lastOwner}
-                    description={lastOwner ? "A workspace needs an owner who has signed in" : undefined}
-                    onSelect={() => {
-                      close()
-                      setConfirm({ kind: "remove" })
-                    }}
-                  >
-                    {you ? "Leave workspace" : "Remove"}
-                  </MenuItem>
+                  {(you ? canLeave : canManage) && (
+                    <MenuItem
+                      danger
+                      disabled={!you && lastOwner}
+                      description={!you && lastOwner ? "A workspace needs an owner who has accepted" : undefined}
+                      onSelect={() => {
+                        close()
+                        setConfirm({ kind: "remove" })
+                      }}
+                    >
+                      {you ? "Leave workspace" : "Remove"}
+                    </MenuItem>
+                  )}
                 </>
               )}
             </Menu>

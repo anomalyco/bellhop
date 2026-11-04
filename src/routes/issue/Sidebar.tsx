@@ -14,6 +14,8 @@ import { AppLink } from "../../ui/SiteLink"
 import { allAttachments, type IssueModel } from "./model"
 import { AssignMenu, LabelMenu, RelationForm, RelationList, StatusMenu, SystemInfoList, statusOptions } from "./Properties"
 import { AttachmentList } from "./Timeline"
+import { NotificationsSection } from "./Notifications"
+import { logIds } from "../../ui/features/Diagnostics"
 
 const statusText = { open: "Open", in_progress: "In progress", waiting: "Waiting on reporter", closed: "Closed", not_planned: "Not planned" }
 
@@ -27,6 +29,7 @@ export function IssueSidebar({ model }: { model: IssueModel }) {
       <AssigneeSection model={model} />
       <LabelsSection model={model} />
       <RelationsSection model={model} />
+      <NotificationsSection model={model} />
       <InfoSections model={model} />
     </aside>
   )
@@ -116,6 +119,7 @@ export function MobileDetails({ model }: { model: IssueModel }) {
       </button>
       {open && (
         <div className="mobile-details-body">
+          <NotificationsSection model={model} />
           <RelationsSection model={model} />
           <InfoSections model={model} />
         </div>
@@ -263,7 +267,9 @@ function RelationsSection({ model }: { model: IssueModel }) {
 function InfoSections({ model }: { model: IssueModel }) {
   const { issue, member } = model
   const [settingTier, setSettingTier] = useState(false)
-  const files = allAttachments(issue)
+  // Logs from report metadata live in the Diagnostics view, not with the files people attached.
+  const logs = logIds(issue.metadata)
+  const files = allAttachments(issue).filter((a) => !logs.has(a.id))
   const people = participants(issue)
   return (
     <>

@@ -18,6 +18,7 @@ import { blocks, entries, type IssueModel } from "./model"
 import { IssueSidebar, MobileDetails, MobileProps } from "./Sidebar"
 import { AttachmentList, EventBurst, EventLine, MessageGroup, TypingLine } from "./Timeline"
 import { EditedMarker, HiddenLine, IssueFlags, reasons, type CommentContext } from "./Moderation"
+import { DiagnosticsBlock, logIds } from "../../ui/features/Diagnostics"
 
 /** The issue page: the report and thread on the left with the pinned composer under them, the sidebar on the right.
  *  Phones get one column with property pills under the title and the sidebar's information folded into "Details". */
@@ -68,7 +69,10 @@ function Report({ model }: { model: IssueModel }) {
   const [deleting, setDeleting] = useState(false)
   const [moving, setMoving] = useState(false)
   const [menuError, setMenuError] = useState<string | null>(null)
-  const loose = issue.attachments.filter((a) => !issue.body.includes(a.url))
+  // Report metadata on the issue itself (not on a comment): shown as Diagnostics, its logs not as loose files.
+  const diagnostics = (issue.metadata ?? []).filter((m) => m.attached_to?.comment_id == null)
+  const logs = logIds(issue.metadata)
+  const loose = issue.attachments.filter((a) => !issue.body.includes(a.url) && !logs.has(a.id))
 
   return (
     <header className="report">
@@ -159,6 +163,7 @@ function Report({ model }: { model: IssueModel }) {
                 Edit description
               </button>
             )}
+            <DiagnosticsBlock metadata={diagnostics} />
           </>
         )}
       </div>

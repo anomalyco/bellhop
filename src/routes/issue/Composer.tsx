@@ -1,8 +1,15 @@
 import { useLayoutEffect, useRef, useState, type CSSProperties } from "react"
-import type { Attachment, CloseReason } from "../../../shared/api"
-import { useWho } from "../../lib/guest"
+import { useLocation, useSearch } from "wouter"
+import type { Attachment, CloseReason, ReportMetadata } from "../../../shared/api"
+import { ApiFailure, api, errorMessage, keys } from "../../lib/api"
+import { load, useResource } from "../../lib/cache"
+import { setGuestNameLocally, useWho } from "../../lib/guest"
+import { ensureHuman } from "../../lib/human"
+import { appendTimeline } from "../../lib/issues"
+import { appPath } from "../../lib/site"
 import { Editor } from "../../ui/Editor"
-import { ChevronDownIcon, LockIcon } from "../../ui/icons"
+import { contentsText, sourceText } from "../../ui/features/Diagnostics"
+import { ChevronDownIcon, LockIcon, PaperclipIcon, XIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { GuestLine, useNamePrompt } from "../../ui/NamePrompt"
 import { Button, StateIcon } from "../../ui/primitives"
@@ -93,9 +100,56 @@ export function Composer({ model }: { model: IssueModel }) {
   const [internal, setInternal] = useState(false)
   const note = member && internal
   const hasText = !!body.trim()
+  // "Add to #34 instead" from a new report lands here with ?metadata=md_…: the next post carries those diagnostics.
+  const [, navigate] = useLocation()
+  const metadataId = new URLSearchParams(useSearch()).get("metadata")
+  const dropMetadata = () => navigate(appPath(app.slug, `/issues/${issue.number}`), { replace: true })
+  const [metadataError, setMetadataError] = useState<string | null>(null)
+  const canSend = hasText || (!!metadataId && !note)
+
+  /** A post with diagnostics goes straight to the API (the shared pending queue doesn't carry them), then the issue
+   *  is refetched so the Diagnostics chip appears on it. */
+  const commentWithMetadata = async (anchor: HTMLElement | null, guestName?: string): Promise<boolean> => {
+    if (!metadataId) return true
+    if (guest && !guest.name && !guestName) {
+      const name = await ask({ anchor, mode: "first", action: "Post" })
+      if (!name) return false
+      guestName = name
+    }
+    setWorking(true)
+    setMetadataError(null)
+    try {
+      await ensureHuman(member || !!me?.user)
+      const posted = await api.comment(app.slug, issue.number, {
+        body,
+        metadata_id: metadataId,
+        attachment_ids: attachments.filter((a) => body.includes(a.url)).map((a) => a.id),
+        guest_name: guestName,
+      })
+      if (guestName) setGuestNameLocally(guestName)
+      appendTimeline(app.slug, issue.number, { kind: "comment", comment: posted })
+      setBody("")
+      setAttachments([])
+      dropMetadata()
+      load(keys.issue(app.slug, issue.number), () => api.issue(app.slug, issue.number)).catch(() => {})
+      return true
+    } catch (e) {
+      if (e instanceof ApiFailure && e.code === "name_required" && !guestName) {
+        setGuestNameLocally(null)
+        setWorking(false)
+        const name = await ask({ anchor, mode: "first", action: "Post" })
+        return name ? commentWithMetadata(anchor, name) : false
+      }
+      setMetadataError(e instanceof ApiFailure && e.status === 410 ? "These diagnostics expired. Remove them to post without." : errorMessage(e))
+      return false
+    } finally {
+      setWorking(false)
+    }
+  }
 
   /** Posts the draft; `anchor` is the button pressed, where the name prompt grows from if one is needed. */
   const comment = async (anchor: HTMLElement | null = sendButton.current) => {
+    if (metadataId && !note) return busy ? true : commentWithMetadata(anchor)
     if (!hasText || busy) return true
     let guestName: string | undefined
     if (guest && !guest.name) {
@@ -230,23 +284,28 @@ export function Composer({ model }: { model: IssueModel }) {
           placeholder={note ? "Add an internal note for the team…" : undefined}
           minHeight={40}
           extra={
-            duplicating && (
-              <div className="dup-form">
-                <label className="field-label" htmlFor="dup-of">
-                  Duplicate of
-                </label>
-                <div className="input" data-size="small">
-                  <span className="input-prefix mono">#</span>
-                  <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
-                </div>
-                {dupError && <span className="field-error">{dupError}</span>}
-              </div>
+            (duplicating || (metadataId && !note)) && (
+              <>
+                {metadataId && !note && <MetadataChip slug={app.slug} id={metadataId} error={metadataError} onRemove={dropMetadata} />}
+                {duplicating && (
+                  <div className="dup-form">
+                    <label className="field-label" htmlFor="dup-of">
+                      Duplicate of
+                    </label>
+                    <div className="input" data-size="small">
+                      <span className="input-prefix mono">#</span>
+                      <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
+                    </div>
+                    {dupError && <span className="field-error">{dupError}</span>}
+                  </div>
+                )}
+              </>
             )
           }
           actions={
             <>
               {splitControl}
-              <Button ref={sendButton} variant="primary" onClick={(e) => void comment(e.currentTarget)} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
+              <Button ref={sendButton} variant="primary" onClick={(e) => void comment(e.currentTarget)} disabled={!canSend || busy || working} trailing={<kbd className="kbd">{sendKey}</kbd>}>
                 {busy ? "Uploading…" : note ? "Add note" : "Send"}
               </Button>
             </>
@@ -254,6 +313,29 @@ export function Composer({ model }: { model: IssueModel }) {
         />
       </div>
       {prompt}
+    </div>
+  )
+}
+
+/** "Diagnostics attached" in the composer: what the next post carries, with a way to leave it out. */
+function MetadataChip({ slug, id, error, onRemove }: { slug: string; id: string; error: string | null; onRemove: () => void }) {
+  const { data, error: loadError } = useResource<ReportMetadata>(keys.metadata(slug, id), () => api.metadata(slug, id), 60_000)
+  const gone = loadError instanceof ApiFailure && (loadError.status === 410 || loadError.status === 404)
+  const used = !!data?.attached_to
+  const detail = data ? [sourceText(data), contentsText(data)].filter(Boolean).join(" · ") : ""
+  return (
+    <div className="composer-diag">
+      <span className="composer-diag-chip" data-problem={gone || used || undefined}>
+        <PaperclipIcon size={12} />
+        <span className="composer-diag-text">
+          {gone ? "Diagnostics expired" : used ? "Diagnostics already sent" : "Diagnostics attached"}
+          {detail && !gone && !used && <span className="composer-diag-meta"> · {detail}</span>}
+        </span>
+        <button type="button" className="composer-diag-remove" aria-label="Don't attach diagnostics" title="Don't attach" onClick={onRemove}>
+          <XIcon size={12} />
+        </button>
+      </span>
+      {error && <span className="field-error">{error}</span>}
     </div>
   )
 }

@@ -1,0 +1,1008 @@
+/* Email follow, report metadata (diagnostics), similar issues, report keys, webhook events, your reports and
+   notification settings. Same tokens and quiet layers as the rest: flat, hairlines, no side rules. */
+
+/* Log viewer: a centred panel on wide screens, a bottom sheet on phones */
+.log-scrim {
+  z-index: 109;
+}
+.log-sheet {
+  position: fixed;
+  z-index: 110;
+  top: 50%;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  width: min(920px, calc(100vw - 48px));
+  height: min(720px, calc(100dvh - 96px));
+  background: var(--layer-1);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elevation-overlay);
+  transform: translate(-50%, -50%);
+  animation: log-in 160ms var(--ease-out);
+  overflow: hidden;
+}
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.98);
+  }
+}
+.log-head {
+  display: grid;
+  gap: 10px;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 0.5px solid var(--border);
+}
+.log-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.log-title {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.log-size {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+.log-download {
+  flex: none;
+}
+.log-download:hover {
+  text-decoration: none;
+}
+.log-search-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 4px;
+}
+.log-search {
+  flex: 1;
+  max-width: 420px;
+}
+.log-search input::-webkit-search-cancel-button {
+  filter: invert(1) opacity(0.5);
+}
+.log-count {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-variant-numeric: tabular-nums;
+}
+.log-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--bg-deep);
+}
+.log-body:focus-visible {
+  outline-offset: -2px;
+}
+.log-text {
+  margin: 0;
+  padding: 10px 0 16px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--fg);
+  tab-size: 4;
+}
+.log-line {
+  display: grid;
+  grid-template-columns: var(--gutter, 4ch) minmax(0, 1fr);
+  gap: 14px;
+  padding: 0 16px 0 12px;
+}
+.log-line:hover {
+  background: var(--hover);
+}
+.log-n {
+  color: var(--fg-faint);
+  text-align: right;
+  user-select: none;
+}
+.log-l {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.log-text mark {
+  color: var(--grey-1100);
+  background: var(--progress);
+  border-radius: 2px;
+}
+.log-note {
+  margin: 0;
+  padding: 16px;
+  color: var(--fg-faint);
+  font-size: var(--text-ui);
+}
+@media (max-width: 640px) {
+  .log-sheet {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 88dvh;
+    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    transform: none;
+    animation: sheet-in 180ms var(--ease);
+  }
+  .log-search {
+    max-width: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .log-sheet {
+    animation: none;
+  }
+}
+
+/* Diagnostics: the app's message, specs, logs and context, in quiet groups under small mono labels */
+.diag {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+  font-size: var(--text-ui);
+}
+.diag-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.diag-label {
+  margin: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-accent);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+.diag-message {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: 160px;
+  overflow: auto;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--bg-deep);
+  border-radius: var(--radius);
+  box-shadow: inset 0 0 0 0.5px var(--border);
+}
+.diag-kv {
+  display: grid;
+  margin: 0;
+}
+.diag-row {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 12px;
+  min-height: 26px;
+  padding: 3px 0;
+}
+.diag-row + .diag-row {
+  border-top: 0.5px solid var(--border-muted);
+}
+.diag-key {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+}
+.diag-value {
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 18px;
+  overflow-wrap: anywhere;
+}
+.diag-row[data-busy],
+.diag-log[data-busy] {
+  opacity: 0.5;
+}
+.diag-remove {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  align-self: center;
+  width: 24px;
+  height: 24px;
+  color: var(--fg-faint);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+.diag-remove:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--hover);
+}
+.diag-logs {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.diag-log {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.diag-log + .diag-log {
+  border-top: 0.5px solid var(--border-muted);
+}
+.diag-log-open {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 30px;
+  margin-left: -6px;
+  padding: 0 6px;
+  font: inherit;
+  font-size: var(--text-ui);
+  text-align: left;
+  color: var(--fg);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+.diag-log-open:hover {
+  background: var(--hover);
+}
+.diag-log-open:hover .diag-log-view {
+  color: var(--fg-link-hover);
+}
+.diag-log-open .icon {
+  flex: none;
+  color: var(--icon-muted);
+}
+.diag-log-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.diag-log-size {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+.diag-log-view {
+  flex: none;
+  margin-left: auto;
+  color: var(--fg-link);
+  font-size: var(--text-small);
+}
+.diag-empty {
+  margin: 0;
+  color: var(--fg-faint);
+}
+
+/* Under the report: one folded line that opens the diagnostics in place */
+/* Size containment: the one-line summaries truncate instead of lending the report their full width on phones */
+.diag-block,
+.diag-chip-wrap {
+  contain: inline-size;
+}
+.diag-block {
+  margin-top: 14px;
+}
+.diag-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: max-content;
+  max-width: calc(100% + 8px);
+  margin-left: -8px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  text-align: left;
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.diag-toggle:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+.diag-toggle-title {
+  flex: none;
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.diag-toggle-meta {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.diag-toggle-note {
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.diag-toggle-note::before {
+  content: "· ";
+}
+.diag-toggle > .icon {
+  flex: none;
+  color: var(--icon-muted);
+}
+.diag-block[data-open] .diag-toggle > .icon,
+.diag-chip-wrap[data-open] .diag-chip > .icon:last-child {
+  transform: rotate(180deg);
+}
+.diag-block-body {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+  padding: 14px 16px 16px;
+  background: rgb(255 255 255 / 0.03);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
+}
+.diag-block-item + .diag-block-item {
+  padding-top: 16px;
+  border-top: 0.5px solid var(--border);
+}
+.diag-item-head {
+  margin: 0 0 10px;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+}
+
+/* On a comment: a small chip that opens its diagnostics */
+.diag-chip-wrap {
+  margin-top: 8px;
+}
+.btn.diag-chip {
+  width: max-content;
+  min-width: 0;
+  max-width: 100%;
+  gap: 6px;
+}
+.diag-chip-meta {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-faint);
+  font-weight: var(--weight-regular);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.diag-chip-body {
+  margin-top: 8px;
+  padding: 12px 14px 14px;
+  background: rgb(255 255 255 / 0.03);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
+}
+
+/* New issue: the attached metadata panel */
+.md-panel {
+  display: grid;
+  gap: 14px;
+  padding: 14px 16px 16px;
+  background: rgb(255 255 255 / 0.03);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
+}
+.md-panel-head {
+  display: grid;
+  gap: 2px;
+}
+.md-panel-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  line-height: 20px;
+}
+.md-panel-source {
+  font-weight: var(--weight-semibold);
+}
+.md-panel-hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.md-panel-error {
+  margin-top: -6px;
+}
+
+/* New issue: matching open issues by fingerprint, above the form */
+.md-matches {
+  display: grid;
+  margin: -4px 0 20px;
+  background: rgb(255 255 255 / 0.03);
+  border-radius: var(--radius-large);
+  box-shadow: inset 0 0 0 0.5px var(--border-muted);
+}
+.md-match {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.md-match + .md-match {
+  border-top: 0.5px solid var(--border);
+}
+.md-match > .state-icon {
+  flex: none;
+  margin-top: 2px;
+}
+.md-match-main {
+  display: grid;
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+}
+.md-match-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  overflow-wrap: anywhere;
+}
+.md-match-link {
+  color: var(--fg);
+  font-weight: var(--weight-medium);
+}
+.md-match-link .mono {
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+.md-match-hint {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.md-match-add {
+  flex: none;
+}
+.md-match-add:hover {
+  text-decoration: none;
+}
+.md-blocked-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+.md-blocked .btn:hover {
+  text-decoration: none;
+}
+@media (max-width: 640px) {
+  .diag-toggle-note {
+    display: none;
+  }
+  .diag-row {
+    grid-template-columns: 84px minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+  .md-match {
+    flex-wrap: wrap;
+  }
+  .md-match-add {
+    margin-left: 26px;
+  }
+}
+
+/* Similar issues: floats under the title field, over the form */
+.similar {
+  position: relative;
+}
+.similar-pop {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  padding: 4px;
+  background: var(--layer-1);
+  border-radius: var(--radius);
+  box-shadow: var(--elevation-floating);
+  animation: menu-in 120ms ease-out;
+  transform-origin: top center;
+}
+.similar-head {
+  margin: 0;
+  padding: 4px 8px 2px;
+  color: var(--fg-muted);
+  font-family: var(--font-accent);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0;
+}
+.similar-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.similar-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  color: var(--fg);
+  font-size: var(--text-ui);
+  border-radius: var(--radius-small);
+}
+.similar-row:hover,
+.similar-row:focus-visible {
+  color: var(--fg);
+  text-decoration: none;
+  background: var(--hover);
+}
+.similar-row .state-icon {
+  flex: none;
+}
+.similar-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.similar-number {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .similar-pop {
+    animation: none;
+  }
+}
+
+/* Issue sidebar: Notifications. One fixed-height slot for every state, so nothing below it moves. */
+.notify-body {
+  display: grid;
+  align-content: start;
+  justify-items: start;
+  gap: 6px;
+  min-height: 62px;
+}
+.btn.notify-button {
+  min-width: 0;
+  max-width: 100%;
+}
+.notify-text {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+.notify-text .link-button {
+  font-size: inherit;
+}
+.notify-status {
+  margin: 0;
+  min-height: 24px;
+  padding-top: 2px;
+  font-weight: var(--weight-medium);
+}
+.notify-address {
+  color: var(--fg-muted);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0;
+}
+.notify-form {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+.notify-form-row {
+  display: flex;
+  gap: 6px;
+}
+.notify-form-row .input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-small);
+}
+.notify-skeleton-button {
+  width: 92px;
+  height: var(--control-small);
+}
+.notify-skeleton-line {
+  width: 80%;
+  height: 12px;
+  margin-top: 2px;
+}
+.notify-error {
+  margin-top: -2px;
+}
+.mobile-details-body .notify {
+  padding-bottom: 4px;
+}
+
+/* A comment written by replying to an email */
+.via-email {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.group-time + .via-email {
+  margin-left: -4px;
+}
+.group-time + .via-email::before {
+  content: "· ";
+}
+.msg > .via-email,
+.group-msg > .via-email {
+  display: block;
+  margin-bottom: -2px;
+  line-height: 16px;
+}
+
+/* The composer carrying diagnostics to the next post */
+.composer-diag {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 0 12px 6px;
+}
+.composer-diag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 2px 0 8px;
+  font-size: var(--text-small);
+  color: var(--fg);
+  background: var(--bg-neutral);
+  border-radius: var(--radius);
+  box-shadow: var(--elevation-neutral);
+}
+.composer-diag-chip > .icon {
+  flex: none;
+  color: var(--icon-muted);
+}
+.composer-diag-chip[data-problem] {
+  color: var(--danger);
+}
+.composer-diag-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.composer-diag-meta {
+  color: var(--fg-faint);
+}
+.composer-diag-remove {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--fg-faint);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-small);
+  cursor: pointer;
+}
+.composer-diag-remove:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+
+/* Settings: report keys */
+.key-create {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.key-create-row {
+  display: flex;
+  gap: 8px;
+}
+.key-create-row .input {
+  flex: 1;
+  max-width: 360px;
+}
+.key-row-name {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-weight: var(--weight-medium);
+}
+.key-preview {
+  color: var(--fg-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.key-snippets {
+  display: grid;
+  gap: 14px;
+}
+.key-docs {
+  margin: -6px 0 16px;
+  max-width: 620px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 18px;
+}
+.key-docs code {
+  font-size: 11.5px;
+  color: var(--fg-muted);
+}
+
+/* Settings: webhook events */
+.events {
+  display: grid;
+  gap: 14px;
+}
+.events-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px 24px;
+}
+.events-group {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.events-group legend {
+  margin-bottom: 4px;
+  padding: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-accent);
+  font-size: 12px;
+  line-height: 16px;
+}
+.events-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-size: var(--text-ui);
+  cursor: pointer;
+}
+.events-option .mono {
+  font-size: 12px;
+}
+.events-default {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.events-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+.events-foot .link-button {
+  font-size: inherit;
+}
+.delivery-actions {
+  text-align: right;
+  white-space: nowrap;
+}
+.delivery-note {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+}
+
+/* Notification settings (account): rows with a switch on the right */
+.switch-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+}
+.switch-row .settings-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.switch-title {
+  font-weight: var(--weight-medium);
+}
+input[type="checkbox"].switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  background: var(--layer-3);
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: inset 0 0 0 0.5px var(--border-strong);
+}
+input[type="checkbox"].switch::before {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--grey-400);
+  border-radius: 50%;
+  mask: none;
+  opacity: 1;
+  transform: none;
+  transition:
+    transform 160ms var(--ease-out),
+    background-color 85ms ease-out;
+}
+input[type="checkbox"].switch:checked {
+  background: var(--fg);
+}
+input[type="checkbox"].switch:checked::before {
+  background: var(--grey-1100);
+  transform: translateX(12px);
+}
+input[type="checkbox"].switch:hover:not(:disabled) {
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.4);
+}
+.notify-page-lede {
+  margin: -8px 0 20px;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.notify-page-note {
+  margin: 12px 0 0;
+  min-height: 16px;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+@media (prefers-reduced-motion: reduce) {
+  input[type="checkbox"].switch::before {
+    transition: none;
+  }
+}
+
+/* Your reports */
+.reports-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.reports-head .page-title {
+  margin: 0;
+}
+.reports-lede {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+.reports-toolbar {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.reports-toolbar[data-loading] .segmented-count {
+  visibility: hidden;
+}
+
+/* The feed rail's link to your reports */
+.rail-reports .rail-row .icon {
+  flex: none;
+  color: var(--icon-muted);
+}
+
+/* /workspaces: invitations waiting for an answer, above the list */
+.invites {
+  margin-bottom: 24px;
+}
+.invite-row {
+  align-items: center;
+}
+.invite-main {
+  flex: 1;
+  min-width: 0;
+}
+.invite-actions {
+  display: flex;
+  flex: none;
+  gap: 6px;
+}
+@media (max-width: 640px) {
+  .invite-row {
+    flex-wrap: wrap;
+  }
+  .invite-main {
+    flex-basis: calc(100% - 40px);
+  }
+  .invite-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+/* On the account avatar in the header */
+.header-avatar:has(.invite-dot) {
+  position: relative;
+}
+.invite-dot {
+  position: absolute;
+  top: -1px;
+  right: -1px;
+  width: 8px;
+  height: 8px;
+  background: var(--fg);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--bg);
+  pointer-events: none;
+}
+
+/* Touch screens: 40 px hit areas on the small controls above, 16 px text in their fields */
+@media (pointer: coarse) {
+  .diag-remove::after,
+  .composer-diag-remove::after,
+  .notify .link-button::after,
+  .similar-row::after,
+  .diag-toggle::after,
+  .events-option::after,
+  .switch-row input::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - 20px));
+    right: min(0px, calc(50% - 20px));
+    bottom: min(0px, calc(50% - 20px));
+    left: min(0px, calc(50% - 20px));
+  }
+  .similar-row,
+  .diag-toggle,
+  .events-option {
+    position: relative;
+  }
+  .similar-row {
+    min-height: 40px;
+  }
+  .notify .link-button {
+    position: relative;
+  }
+  .diag-row {
+    align-items: center;
+    min-height: 40px;
+  }
+  .diag-log-open {
+    height: 40px;
+  }
+  .events-option {
+    min-height: 40px;
+  }
+  .log-search input,
+  .notify-form input,
+  .key-create input {
+    font-size: 16px;
+  }
+}

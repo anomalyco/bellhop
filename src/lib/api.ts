@@ -12,9 +12,12 @@ import type {
   ConnectedAgent,
   FeedApp,
   FeedList,
+  Invitation,
   Issue,
   IssueList,
   IssuePatch,
+  IssueRef,
+  IssueSubscription,
   LabelInput,
   Label,
   IssueSort,
@@ -25,16 +28,21 @@ import type {
   NewComment,
   NewAgentToken,
   NewIssue,
+  NewReportKey,
+  NotificationSettings,
   OAuthApproval,
   OAuthRequest,
   Role,
   RelationType,
+  ReportKey,
+  ReportMetadata,
   Revision,
   Person,
   Template,
   TemplateInput,
   Tier,
   TierInput,
+  WebhookEventType,
 } from "../../shared/api"
 import { load, peek } from "./cache"
 import { runHumanCheck } from "./human"
@@ -147,7 +155,8 @@ export const api = {
   app: (slug: string) => get<AppDetail>(app(slug)),
   patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility }) => request<AppDetail>("PATCH", app(slug), input),
   settings: (slug: string) => get<AppSettings>(`${app(slug)}/settings`),
-  putWebhook: (slug: string, url: string | null) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url }),
+  putWebhook: (slug: string, url: string | null, events?: WebhookEventType[]) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url, events }),
+  redeliver: (slug: string, id: string) => request<{ delivery_id: string }>("POST", `${app(slug)}/webhook/deliveries/${enc(id)}/redeliver`),
   rotateWebhook: (slug: string) => request<AppSettings>("POST", `${app(slug)}/webhook/rotate`),
   testWebhook: (slug: string) => request<{ delivery_id: string }>("POST", `${app(slug)}/webhook/test`),
   addMember: (slug: string, email: string, role?: Role) => request<AppSettings>("POST", `${app(slug)}/members`, { email, role }),
@@ -232,6 +241,29 @@ export const api = {
   patchAgent: (id: string, input: Partial<AgentAccess> & { name?: string }) => request<ConnectedAgent>("PATCH", `/api/me/agents/${enc(id)}`, input),
   rotateAgent: (id: string) => request<NewAgentToken>("POST", `/api/me/agents/${enc(id)}/rotate`),
   disconnectAgent: (id: string) => request<{ ok: true }>("DELETE", `/api/me/agents/${enc(id)}`),
+  myReports: (params: { state: "open" | "closed"; cursor?: string }) => {
+    const qs = new URLSearchParams({ state: params.state })
+    if (params.cursor) qs.set("cursor", params.cursor)
+    return get<FeedList>(`/api/me/reports?${qs}`)
+  },
+  notifications: () => get<NotificationSettings>("/api/me/notifications"),
+  patchNotifications: (patch: Partial<Omit<NotificationSettings, "email">>) => request<NotificationSettings>("PATCH", "/api/me/notifications", patch),
+  subscription: (slug: string, number: number) => get<IssueSubscription>(`${app(slug)}/issues/${number}/subscription`),
+  /** Guests send `email` the first time; it stays pending until they confirm the link. */
+  subscribe: (slug: string, number: number, subscribed: boolean, email?: string) =>
+    request<IssueSubscription>("PUT", `${app(slug)}/issues/${number}/subscription`, { subscribed, email }),
+  similar: (slug: string, title: string) => get<IssueRef[]>(`${app(slug)}/issues/similar?title=${enc(title)}`),
+  metadata: (slug: string, id: string) => get<ReportMetadata>(`${app(slug)}/metadata/${enc(id)}`),
+  removeMetadataItems: (slug: string, id: string, items: { logs?: string[]; system?: string[]; context?: string[] }) =>
+    request<ReportMetadata>("DELETE", `${app(slug)}/metadata/${enc(id)}/items`, items),
+  reportKeys: (slug: string) => get<ReportKey[]>(`${app(slug)}/report-keys`),
+  createReportKey: (slug: string, name: string) => request<NewReportKey>("POST", `${app(slug)}/report-keys`, { name }),
+  deleteReportKey: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/report-keys/${enc(id)}`),
+  invitations: () => get<Invitation[]>("/api/me/invitations"),
+  acceptInvitation: (id: string) => request<App>("POST", `/api/me/invitations/${enc(id)}/accept`),
+  declineInvitation: (id: string) => request<{ ok: true }>("POST", `/api/me/invitations/${enc(id)}/decline`),
+  /** Leave a workspace you're on (not as its last owner). */
+  leaveApp: (slug: string) => request<{ ok: true }>("DELETE", `${app(slug)}/members/me`),
 }
 
 // Cache keys, so every page agrees on where a resource lives.
@@ -256,6 +288,14 @@ export const keys = {
   people: (slug: string, tier = "") => `people:${slug}:${tier}`,
   /** All list pages of one app share this prefix; the rest of the key is the filter. */
   lists: (slug: string) => `issues:${slug}:`,
+  /** "Your reports" pages share this prefix; then the state. */
+  reports: "reports:",
+  notifications: "notifications",
+  subscription: (slug: string, number: number) => `subscription:${slug}:${number}`,
+  metadata: (slug: string, id: string) => `metadata:${slug}:${id}`,
+  reportKeys: (slug: string) => `report-keys:${slug}`,
+  similar: (slug: string, title: string) => `similar:${slug}:${title}`,
+  invitations: "invitations",
 }
 
 export const loadConfig = () => load(keys.config, api.config)

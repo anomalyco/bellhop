@@ -298,7 +298,7 @@ function InviteStep({ slug }: { slug: string }) {
         <p className="field-error">{error}</p>
       ) : (
         <p className="setup-hint">
-          {invited.length ? `Invited ${invited.join(", ")}. They join when they sign in with that email.` : "They join as members when they sign in with that email."}
+          {invited.length ? `Invited ${invited.join(", ")}. They join once they accept the invitation.` : "They'll get an invitation to join as members."}
         </p>
       )}
     </form>

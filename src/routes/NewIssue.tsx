@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent } from "react"
 import { useLocation, useSearch } from "wouter"
-import type { AppDetail, Attachment, SystemInfo, Template } from "../../shared/api"
-import { ApiFailure, api, errorMessage } from "../lib/api"
+import type { AppDetail, Attachment, ReportMetadata, SystemInfo, Template } from "../../shared/api"
+import { ApiFailure, api, errorMessage, keys } from "../lib/api"
+import { setData, useResource } from "../lib/cache"
 import { setGuestNameLocally, useWho } from "../lib/guest"
 import { ensureHuman } from "../lib/human"
 import { storeIssue } from "../lib/issues"
@@ -16,6 +17,8 @@ import { GuestLine, useNamePrompt } from "../ui/NamePrompt"
 import { Button, Label } from "../ui/primitives"
 import { AppLayout, Page, useMe } from "../ui/Shell"
 import { AppLink } from "../ui/SiteLink"
+import { MetadataBlocked, MetadataPanel, MetadataMatches } from "../ui/features/ReportMetadata"
+import { SimilarIssues } from "../ui/features/SimilarIssues"
 
 export function NewIssue({ slug }: { slug: string }) {
   useEffect(() => {
@@ -39,13 +42,40 @@ export function NewIssue({ slug }: { slug: string }) {
 }
 
 function NewIssueBody({ app }: { app: AppDetail }) {
+  const metadataId = new URLSearchParams(useSearch()).get("metadata")
+  if (metadataId) return <WithMetadata app={app} id={metadataId} />
+  return <Form app={app} />
+}
+
+/** Opened from an app with report metadata (/new?metadata=md_…): the form waits for it, so the suggested title and
+ *  the attached panel arrive with the first paint instead of pushing the form around. */
+function WithMetadata({ app, id }: { app: AppDetail; id: string }) {
+  const { data, error } = useResource<ReportMetadata>(keys.metadata(app.slug, id), () => api.metadata(app.slug, id), 1_000)
+  if (!data && error) return <MetadataBlocked app={app} error={error} />
+  if (!data) return <FormLoading />
+  if (data.attached_to) return <MetadataBlocked app={app} attachedTo={data.attached_to} />
+  return <Form app={app} metadata={data} />
+}
+
+function FormLoading() {
+  return (
+    <Page narrow>
+      <h1 className="page-title">New issue</h1>
+      <div className="skeleton" style={{ width: "100%", height: 180 }} />
+    </Page>
+  )
+}
+
+function Form({ app, metadata }: { app: AppDetail; metadata?: ReportMetadata }) {
   const search = useSearch()
   const chosen = new URLSearchParams(search).get("template")
   const templates = [...app.templates].sort((a, b) => a.position - b.position)
 
-  if (templates.length > 1 && chosen === null) return <TemplatePicker app={app} templates={templates} />
-  const template = chosen ? templates.find((t) => t.id === chosen) : templates.length === 1 ? templates[0] : undefined
-  return <IssueForm key={template?.id ?? "blank"} app={app} template={template} />
+  // From an app's crash report, skip the picker: the bug-report kind of template (one that asks for system info).
+  const fallback = (metadata && templates.find((t) => t.ask_system_info)) || (templates.length === 1 ? templates[0] : undefined)
+  if (templates.length > 1 && chosen === null && !metadata) return <TemplatePicker app={app} templates={templates} />
+  const template = chosen ? templates.find((t) => t.id === chosen) : fallback
+  return <IssueForm key={template?.id ?? "blank"} app={app} template={template} metadata={metadata} />
 }
 
 function TemplatePicker({ app, templates }: { app: AppDetail; templates: Template[] }) {
@@ -72,7 +102,7 @@ function TemplatePicker({ app, templates }: { app: AppDetail; templates: Templat
   )
 }
 
-function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
+function IssueForm({ app, template, metadata: initialMetadata }: { app: AppDetail; template?: Template; metadata?: ReportMetadata }) {
   const [, navigate] = useLocation()
   const member = !!app.role
   const { data: me } = useMe()
@@ -80,13 +110,16 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
   const who = useWho(me)
   const { ask, prompt } = useNamePrompt()
   const submitButton = useRef<HTMLButtonElement>(null)
-  const [title, setTitle] = useState(template?.title ?? "")
+  // Report metadata from an app: reviewed (items removed) here, and kept in the cache so a reload shows the same.
+  const [metadata, setMetadata] = useState(initialMetadata)
+  const [title, setTitle] = useState(initialMetadata?.title?.slice(0, 256) || template?.title || "")
   const [body, setBody] = useState(template?.body ?? "")
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [busy, setBusy] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const askInfo = !!template?.ask_system_info
+  // The app's own specs come with the metadata; the browser's would only muddle them.
+  const askInfo = !!template?.ask_system_info && !metadata
   const [sendInfo, setSendInfo] = useState(askInfo)
   const [info, setInfo] = useState<SystemInfo | null>(null)
   const [showInfo, setShowInfo] = useState(false)
@@ -124,6 +157,7 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         system_info: askInfo && sendInfo && info && Object.keys(info).length ? info : undefined,
         guest_name: guestName,
         private: canChoose ? isPrivate : undefined,
+        metadata_id: metadata?.id,
       })
       if (guestName) setGuestNameLocally(guestName)
       storeIssue(app.slug, issue)
@@ -145,22 +179,26 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
         New issue
         {template && <span className="page-title-sub">{template.name}</span>}
       </h1>
+      {metadata && metadata.matches.length > 0 && <MetadataMatches app={app} metadata={metadata} />}
       <form className="issue-form" onSubmit={submit}>
         <div className="field">
           <label className="field-label" htmlFor="issue-title">
             Title
           </label>
-          <div className="input" data-size="large">
-            <input
-              id="issue-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Title"
-              autoFocus={!template?.title}
-              required
-              maxLength={256}
-            />
-          </div>
+          <SimilarIssues slug={app.slug} title={title} exclude={metadata?.matches.map((m) => m.number)}>
+            <div className="input" data-size="large">
+              <input
+                id="issue-title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="Title"
+                autoFocus={!template?.title && !metadata?.title}
+                required
+                maxLength={256}
+                autoComplete="off"
+              />
+            </div>
+          </SimilarIssues>
         </div>
         <div className="field">
           <span className="field-label">Description</span>
@@ -186,6 +224,17 @@ function IssueForm({ app, template }: { app: AppDetail; template?: Template }) {
               <Label key={l.id} name={l.name} color={l.color} />
             ))}
           </div>
+        )}
+
+        {metadata && (
+          <MetadataPanel
+            app={app}
+            metadata={metadata}
+            onChange={(next) => {
+              setMetadata(next)
+              setData(keys.metadata(app.slug, next.id), next)
+            }}
+          />
         )}
 
         {askInfo && (

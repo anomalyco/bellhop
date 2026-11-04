@@ -11,6 +11,7 @@ import { SiteLink } from "../ui/SiteLink"
 import { AgentSetup } from "../ui/onboarding/AgentSetup"
 import { accessSummary } from "../ui/agents/access"
 import { RoleBadge } from "../ui/roles/RoleSelect"
+import { InvitationsSection, useInvitations } from "../ui/features/Invitations"
 import "../styles/agents.css"
 import { CreateWorkspace } from "./home/CreateWorkspace"
 import { SignIn } from "./home/SignIn"
@@ -54,9 +55,14 @@ function NewWorkspace() {
 }
 
 function Workspaces() {
-  const { data: apps, error } = useResource<App[]>(keys.apps, api.apps, 5_000)
+  const { data: fetched, error: appsError } = useResource<App[]>(keys.apps, api.apps, 5_000)
+  // Invitations sit above the list; it waits for them (an error reads as none) so they never push it down.
+  const { data: invitations, error: invitationsError } = useInvitations()
+  const settled = !!invitations || !!invitationsError
+  const apps = settled ? fetched : undefined
+  const error = settled ? appsError : undefined
 
-  if (apps && apps.length === 0)
+  if (apps && apps.length === 0 && !invitations?.length)
     return (
       <>
         <Header />
@@ -77,9 +83,11 @@ function Workspaces() {
             New workspace
           </SiteLink>
         </div>
+        {invitations && <InvitationsSection invitations={invitations} />}
         <div className="box home-apps">
           {!apps && !error && <div className="box-row skeleton-row" />}
           {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
+          {apps?.length === 0 && <div className="box-empty">No workspaces yet. Accept an invitation above, or create one.</div>}
           {apps?.map((app) => (
             <SiteLink key={app.id} href={appPath(app.slug)} className="box-row app-row">
               <AppIcon src={app.icon_url} size={28} />
