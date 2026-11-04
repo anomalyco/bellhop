@@ -1,6 +1,7 @@
 import type { Attachment, IssueRef, ReportMetadata } from "../shared/api"
 import { fail, missing, now, sql, str } from "./core"
 import { actorIds, type Viewer } from "./visibility"
+import { firstRow, type Read } from "./read-scope"
 
 const members = `viewer AS (SELECT ? team,? ids)`
 const owned = (actor: string) =>
@@ -70,8 +71,8 @@ export function decodeReport(r: Row): ReportMetadata {
     matches: JSON.parse(r.matches) as IssueRef[]
   }
 }
-export async function getReport(env: Env, app: string, id: string, v: Viewer) {
-  const row = await reportQuery(env, app, v, "id", id).first<Row>()
+export async function getReport(env: Env, app: string, id: string, v: Viewer, read?: Read) {
+  const row = await firstRow<Row>(reportQuery(env, app, v, "id", id), read)
   if (row) {
     if (row.expires_at && row.expires_at <= now()) fail(410, "expired", "Report metadata expired")
     return decodeReport(row)

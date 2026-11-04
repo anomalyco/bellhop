@@ -1,6 +1,7 @@
 import MarkdownIt from "markdown-it"
 import type { IssueStatus, CloseReason } from "../shared/api"
 import { sha256, sql } from "./core"
+import { firstRow, type Read } from "./read-scope"
 
 const OG_DESIGN_VERSION = "b5a-3"
 export const homeTitle = "Bellhop: live support for your product"
@@ -85,7 +86,7 @@ export function snippet(body: string, limit = 160) {
 
 // No cookies, membership, session, or user-supplied v. Both the HTML and the PNG use this
 // projection before consulting any image cache. A hidden row cannot supply a single field.
-export async function preview(env: Env, slug: string | null, number: string | null, html: boolean) {
+export async function preview(env: Env, slug: string | null, number: string | null, html: boolean, read?: Read) {
   const cols = "a.id app_id,a.name,a.slug,a.icon_version,a.public,a.description"
   let card = home,
     code: 200 | 404 | 410 = 200,
@@ -96,18 +97,21 @@ export async function preview(env: Env, slug: string | null, number: string | nu
   if (slug !== null) {
     const row =
       number === null
-        ? await sql(env, `SELECT ${cols} FROM apps a WHERE a.slug=?`, slug).first<AppRow>()
-        : await sql(
-            env,
-            `SELECT ${cols},i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,
+        ? await firstRow<AppRow>(sql(env, `SELECT ${cols} FROM apps a WHERE a.slug=?`, slug), read)
+        : await firstRow<Row>(
+            sql(
+              env,
+              `SELECT ${cols},i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,
         ${html ? "i.body,coalesce(json_extract(i.author,'$.name'),json_extract(i.author,'$.handle'),'Guest') reporter,(SELECT count(*) FROM comments WHERE issue_id=i.id AND internal=0 AND hidden IS NULL) replies," : ""}
         (SELECT author FROM comments WHERE issue_id=i.id AND internal=0 AND hidden IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1) latest,
         (SELECT json_group_array(json_object('name',l.name,'color',l.color) ORDER BY l.name,l.id) FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id) labels,
         t.number tombstone FROM apps a LEFT JOIN issues i ON i.app_id=a.id AND i.number=?1 AND i.private=0 AND i.hidden IS NULL
         LEFT JOIN public_issue_tombstones t ON t.app_id=a.id AND t.number=?1 WHERE a.slug=?2`,
-            number,
-            slug
-          ).first<Row>()
+              number,
+              slug
+            ),
+            read
+          )
     if (!row) {
       code = 404
       listed = false

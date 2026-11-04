@@ -23,7 +23,7 @@ import { mailQueue, enqueueDue } from "./mail-delivery"
 import { pollInbound } from "./mail-inbound"
 import { pollFeedback } from "./mail-feedback"
 import { secrets } from "./mail-provider"
-import { atom, ogImage, page, robots, sitemap } from "./pages"
+import { atom, ogImage, page, pageApi, robots, sitemap } from "./pages"
 import { similar } from "./similar"
 import { teamTools } from "./team-tools"
 import { pruneAudit } from "./audit"
@@ -69,7 +69,7 @@ api.use("*", async (c, next) => {
     denied()
   if (
     (c.req.path.startsWith("/api/") &&
-      !/^\/api\/(live\/|feed(?:\/|$))/.test(c.req.path) &&
+      !/^\/api\/(live\/|feed(?:\/|$)|page$)/.test(c.req.path) &&
       !(c.req.method === "GET" && /^\/api\/apps\/[^/]+(?:\/issues(?:\/(?:\d+|similar))?)?$/.test(c.req.path))) ||
     c.req.path === "/oauth/authorize"
   )
@@ -114,6 +114,7 @@ api.get("/api/apps/:slug", async (c) => {
   const { app, viewer } = await viewerApp(c, c.req.param("slug"))
   return c.json(await detail(c, app, viewer))
 })
+api.get("/api/page", pageApi)
 async function feedViewer(c: Ctx) {
   await currentUser(c)
   const cookie = browserGuest(c)

@@ -34,7 +34,7 @@ import {
 import { mentionables, voteCount } from "./conversation"
 import { parseSearch, sorts } from "./search"
 import { projectTiers, tierBag } from "./tier-actors"
-import { appIdSQL, appKey, readBatch } from "./read-scope"
+import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
 import { can } from "./permissions"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
@@ -283,7 +283,8 @@ export async function listIssues(
     allStates?: boolean
     sort?: unknown
   },
-  viewer: Viewer = outsider
+  viewer: Viewer = outsider,
+  read?: Read
 ): Promise<IssueList> {
   const parsed = parseSearch(options.query),
     mine = parsed.terms.some((t) => t.key === "author" && t.value === "@me"),
@@ -342,19 +343,24 @@ export async function listIssues(
   )
   const {
     data: [items, counts, team, pins]
-  } = await readBatch<[StoredSummary, IssueList["counts"], TeamRow, StoredSummary]>(env, scope, [
-    list,
-    totals,
-    teamQuery(env, scope),
-    sql(
-      env,
-      `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
-      ...viewerArgs(viewer),
-      appKey(scope),
-      ...(mine ? filter.values : actorBindings(viewer)),
-      options.cursor === undefined ? 3 : 0
-    )
-  ])
+  } = await readBatch<[StoredSummary, IssueList["counts"], TeamRow, StoredSummary]>(
+    env,
+    scope,
+    [
+      list,
+      totals,
+      teamQuery(env, scope),
+      sql(
+        env,
+        `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
+        ...viewerArgs(viewer),
+        appKey(scope),
+        ...(mine ? filter.values : actorBindings(viewer)),
+        options.cursor === undefined ? 3 : 0
+      )
+    ],
+    read
+  )
   const roles = roleMap(team)
   return {
     issues: items.slice(0, limit).map((r) => summary(r, roles)),
@@ -391,15 +397,28 @@ export async function publicFeedIssue(env: Env, id: string) {
 export async function feed(
   env: Env,
   options: { state?: string; q?: string; cursor?: string },
-  voter: string | null = null,
+  voter: string | null | { sessionHash: string; guest: string; user: Promise<{ id: string } | null> } = null,
   reportIds?: string[],
-  guestCookie?: string | null
+  guestCookie?: string | null,
+  read?: Read
 ): Promise<FeedList> {
   const parsed = parseSearch(options.q, true),
     sort = parsed.sort ?? "updated",
-    user = voter && !voter.startsWith("g:") ? voter : null,
+    // A page already has a session lookup in flight. Ordinary feed rows only need
+    // its voter ID, so resolve it in the same SELECT rather than waiting a D1 trip.
+    // The metadata filter also needs scoped actor IDs; use the verified user there.
+    deferred = voter && typeof voter === "object" ? voter : null,
+    metadata = parsed.terms.some((t) => t.key === "has"),
+    voterId =
+      typeof voter === "string"
+        ? voter
+        : deferred
+          ? ((metadata ? (await deferred.user)?.id : null) ?? deferred.guest)
+          : null,
+    lookup = deferred && !metadata,
+    user = voterId && !voterId.startsWith("g:") ? voterId : null,
     ids = user ? [user] : []
-  if (!user && guestCookie && parsed.terms.some((t) => t.key === "has")) {
+  if (!user && guestCookie && metadata) {
     // Derive scoped IDs only for publishable report-bearing guest posts, including moved
     // issues. Never widen the feed's public issue gate, even for team/account viewers.
     const origins = await rows<{ id: string }>(
@@ -452,13 +471,14 @@ export async function feed(
         : `SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
       WHERE a.public=1 AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
         ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?`
-  const [page, totals] = await env.DB.batch<unknown>([
+  const queries = [
     sql(
       env,
-      `WITH ${viewerCTE}, page AS MATERIALIZED (${candidates})
+      `WITH ${lookup ? "viewer AS (SELECT coalesce((SELECT user_id FROM sessions WHERE token_hash=? AND expires_at>?),?) voter,? ids)" : viewerCTE}, page AS MATERIALIZED (${candidates})
       SELECT ${feedFields(true)}${sort === "updated" ? "" : ",p.sort_key"} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
       ORDER BY p.${sort === "updated" ? "updated_at" : "sort_key"} ${direction},p.id ${direction}`,
-      voter,
+      ...(lookup ? [deferred.sessionHash, now()] : []),
+      voterId,
       JSON.stringify(reportIds ?? []),
       ...filter.values,
       closed,
@@ -472,7 +492,8 @@ export async function feed(
       FROM ${reportIds ? "issues i WHERE" : "apps a CROSS JOIN issues i WHERE a.public=1 AND"} ${filter.where}`,
       ...filter.values
     )
-  ])
+  ]
+  const [page, totals] = await (read ? read(queries) : env.DB.batch(queries))
   const items = page!.results as (FeedRow & { sort_key?: number | string })[],
     last = items[pageSize - 1]
   return {
@@ -487,15 +508,14 @@ export async function feed(
 const latest = (closed: number) =>
   `(SELECT i.updated_at FROM issues i WHERE ${visibleIssues("a.id")} AND (i.status='closed')=${closed} ORDER BY i.updated_at DESC,i.id DESC LIMIT 1)`
 export const workspaceActivitySQL = `max(a.created_at,coalesce(${latest(0)},''),coalesce(${latest(1)},''))`
-export function feedApps(env: Env) {
-  return rows<FeedApp>(
-    sql(
-      env,
-      `SELECT a.slug,a.name,a.description,'/icon/'||a.slug||'/'||a.icon_version icon_url,
+export async function feedApps(env: Env, read?: Read) {
+  const q = sql(
+    env,
+    `SELECT a.slug,a.name,a.description,'/icon/'||a.slug||'/'||a.icon_version icon_url,
     (SELECT count(*) FROM issues i WHERE ${visibleIssues("a.id")} AND (i.status='closed')=0) open_count
     FROM apps a WHERE a.public=1 ORDER BY ${workspaceActivitySQL} DESC,a.slug`
-    )
   )
+  return read ? ((await read([q]))[0]!.results as FeedApp[]) : rows<FeedApp>(q)
 }
 export type AttachmentRow = Omit<Attachment, "url">
 export function attachment(a: AttachmentRow): Attachment {
@@ -507,7 +527,8 @@ export async function getIssue(
   scope: string,
   number: number,
   v: Viewer = outsider,
-  moved?: { origin: string; viewer: (slug: string) => Promise<Viewer | null> }
+  moved?: { origin: string; viewer: (slug: string) => Promise<Viewer | null> },
+  read?: Read
 ): Promise<Issue> {
   const where = `app_id=${appIdSQL(scope)} AND number=?`,
     target = `SELECT id FROM issues WHERE ${where}`,
@@ -552,35 +573,38 @@ export async function getIssue(
       },
       ReportRow
     ]
-  >(env, scope, [
-    sql(
-      env,
-      `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
-      ...viewerArgs(v),
-      key,
-      number
-    ),
-    teamQuery(env, scope),
-    sql(
-      env,
-      `SELECT a.id,a.name,a.mime,a.size,a.kind,l.comment_id FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id
+  >(
+    env,
+    scope,
+    [
+      sql(
+        env,
+        `WITH ${viewerCTE} SELECT ${fields(v.team, true, true)},i.body,i.template_id,i.system_info,i.edited_at,i.mentions FROM issues i WHERE ${where}`,
+        ...viewerArgs(v),
+        key,
+        number
+      ),
+      teamQuery(env, scope),
+      sql(
+        env,
+        `SELECT a.id,a.name,a.mime,a.size,a.kind,l.comment_id FROM attachment_links l JOIN attachments a ON a.id=l.attachment_id
       WHERE l.issue_id=(${target}) ORDER BY l.rowid`,
-      key,
-      number
-    ),
-    sql(
-      env,
-      `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,c.via,
+        key,
+        number
+      ),
+      sql(
+        env,
+        `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,c.via,
         ${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=c.issue_id)", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,
        (SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,EXISTS(SELECT 1 FROM comment_helpful WHERE comment_id=c.id AND voter=?) viewer_helpful
        FROM comments c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.rowid`,
-      v.voter ?? v.actorId,
-      key,
-      number
-    ),
-    sql(
-      env,
-      `SELECT e.id,e.type,e.actor,e.data,e.created_at,${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=e.issue_id)", ["e.actor", "json_extract(e.data,'$.assignee')"]) : "NULL"} tier_bag,
+        v.voter ?? v.actorId,
+        key,
+        number
+      ),
+      sql(
+        env,
+        `SELECT e.id,e.type,e.actor,e.data,e.created_at,${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=e.issue_id)", ["e.actor", "json_extract(e.data,'$.assignee')"]) : "NULL"} tier_bag,
         json_extract(other.author,'$.id') ref_author,other.private ref_private,other.hidden ref_hidden
        FROM issue_events e LEFT JOIN issues other ON other.id=json_extract(e.data,'$.relation.issue.id') AND other.app_id=(SELECT app_id FROM issues WHERE id=e.issue_id) WHERE e.issue_id=(${target})
        ${
@@ -589,20 +613,22 @@ export async function getIssue(
          FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target}) ORDER BY created_at`
            : "ORDER BY e.created_at,e.rowid"
        }`,
-      key,
-      number,
-      ...(v.team ? [key, number] : [])
-    ),
-    sql(
-      env,
-      `WITH target AS (${target}) SELECT rel.id relation_id,rel.type,CASE WHEN rel.source_id=t.id THEN 'outgoing' ELSE 'incoming' END direction,
+        key,
+        number,
+        ...(v.team ? [key, number] : [])
+      ),
+      sql(
+        env,
+        `WITH target AS (${target}) SELECT rel.id relation_id,rel.type,CASE WHEN rel.source_id=t.id THEN 'outgoing' ELSE 'incoming' END direction,
       i.id,i.number,i.title,i.status,i.close_reason,json_extract(i.author,'$.id') ref_author,i.private ref_private,i.hidden ref_hidden FROM target t JOIN relations rel ON rel.source_id=t.id OR rel.target_id=t.id
       JOIN issues i ON i.id=CASE WHEN rel.source_id=t.id THEN rel.target_id ELSE rel.source_id END ORDER BY rel.rowid`,
-      key,
-      number
-    ),
-    reportQuery(env, scope, v, "issue", number)
-  ])
+        key,
+        number
+      ),
+      reportQuery(env, scope, v, "issue", number)
+    ],
+    read
+  )
   const r = items[0],
     roles = roleMap(team)
   if (!r) {

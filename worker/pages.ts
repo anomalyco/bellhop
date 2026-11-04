@@ -1,5 +1,7 @@
 import type { Ctx } from "./core"
-import { appUrl, rows, sql } from "./core"
+import { appUrl, bad, rows, sql } from "./core"
+import { pageContext, pagePayload } from "./page-payload"
+import type { PagePayload } from "../shared/api"
 import { visibleIssues, workspaceActivitySQL } from "./issues"
 import { preview, snippet, statuses } from "./previews"
 import type { Actor, IssueStatus } from "../shared/api"
@@ -7,21 +9,25 @@ import type { Actor, IssueStatus } from "../shared/api"
 // Dev serves workspaces under /<slug>. The apex also understands these old page links;
 // the production sitemap always points to the canonical workspace subdomain instead.
 const homePages = new Set([
-  "",
-  "index.html",
-  "signin",
-  "workspaces",
-  "agents",
-  "new",
-  "oauth",
-  "device",
-  "_design",
-  "robots.txt",
-  "sitemap.xml"
+  "/",
+  "/signin",
+  "/workspaces",
+  "/agents",
+  "/reports",
+  "/settings/notifications",
+  "/new",
+  "/oauth/consent",
+  "/device",
+  "/_design"
 ])
-function workspace(c: Ctx): string | null {
-  const url = new URL(c.req.url),
-    domain = c.env.APP_DOMAIN
+const homeSegments = new Set([
+  "index.html",
+  "robots.txt",
+  "sitemap.xml",
+  ...Array.from(homePages, (p) => p.split("/")[1]!)
+])
+function workspace(c: Ctx, url = new URL(c.req.url)): string | null {
+  const domain = c.env.APP_DOMAIN
   if (domain && url.hostname !== domain) {
     if (!url.hostname.endsWith(`.${domain}`)) return "" // unknown host, never the apex
     return url.hostname.slice(0, -domain.length - 1)
@@ -32,7 +38,7 @@ function workspace(c: Ctx): string | null {
   } catch {
     return ""
   }
-  return homePages.has(first) ? null : first
+  return homeSegments.has(first) ? null : first
 }
 const origin = (c: Ctx) =>
   c.env.APP_DOMAIN ? `https://${c.env.APP_DOMAIN}` : new URL(c.env.PUBLIC_ORIGIN || c.req.url).origin
@@ -42,9 +48,30 @@ const notFound = (c: Ctx) => c.text("Workspace not found", 404, { "X-Robots-Tag"
 async function visibility(c: Ctx, slug: string) {
   return sql(c.env, "SELECT public FROM apps WHERE slug=?", slug).first<number>("public")
 }
+function location(c: Ctx, url: URL) {
+  const slug = workspace(c, url),
+    subdomain = c.env.APP_DOMAIN && url.hostname.endsWith(`.${c.env.APP_DOMAIN}`)
+  const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
+  return { slug, path, homePage: homePages.has(path.replace(/\/$/, "") || "/") }
+}
+export async function pageApi(c: Ctx) {
+  const input = c.req.query("path")
+  if (!input || !input.startsWith("/") || input.startsWith("//") || /[\\\u0000-\u001f]/.test(input))
+    bad("Expected a local page path")
+  const url = new URL(input, c.req.url),
+    target = location(c, url)
+  const { payload, status } = await pagePayload(c, target, url.searchParams, await pageContext(c))
+  return c.json(payload, status, { "Cache-Control": "private, no-store", Vary: "Cookie" })
+}
+const bootScript = (payload: PagePayload) =>
+  `<script id="bh-boot" type="application/json">${JSON.stringify(payload)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029")}</script>`
 export async function page(c: Ctx) {
-  const slug = workspace(c),
-    url = new URL(c.req.url)
+  const url = new URL(c.req.url),
+    target = location(c, url),
+    { slug, path } = target
   const vite = c.env.DEV_LOGIN === "1" && !c.env.APP_DOMAIN,
     nonce = vite ? crypto.randomUUID() : null
   const wsHost = new URL(c.env.PUBLIC_ORIGIN && !c.env.APP_DOMAIN ? c.env.PUBLIC_ORIGIN : url).host
@@ -62,36 +89,35 @@ export async function page(c: Ctx) {
     "object-src 'none'"
   ].join("; ")
   c.header("Content-Security-Policy", policy)
-  const subdomain = c.env.APP_DOMAIN && url.hostname.endsWith(`.${c.env.APP_DOMAIN}`)
-  const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
   const capability = /^\/new\/?$/.test(path) ? url.searchParams.get("metadata") : null
-  if (capability !== null) {
+  const ctx = await pageContext(c)
+  c.header("Cache-Control", "private, no-store")
+  c.header("Vary", "Cookie")
+  if (capability !== null) c.header("Referrer-Policy", "no-referrer")
+  if (capability !== null && slug === null) {
     const result = await sql(
       c.env,
-      `SELECT a.slug,m.expires_at FROM report_metadata m JOIN apps a ON a.id=m.app_id WHERE m.id=?1 AND m.ready=1 AND m.issue_id IS NULL AND (?2 IS NULL OR a.slug=?2)
-      UNION ALL SELECT a.slug,'expired' FROM expired_reports e JOIN apps a ON a.id=e.app_id WHERE e.id=?1 AND (?2 IS NULL OR a.slug=?2)`,
-      capability,
-      slug
+      `SELECT a.slug,m.expires_at FROM report_metadata m JOIN apps a ON a.id=m.app_id WHERE m.id=?1 AND m.ready=1 AND m.issue_id IS NULL
+      UNION ALL SELECT a.slug,'expired' FROM expired_reports e JOIN apps a ON a.id=e.app_id WHERE e.id=?1`,
+      capability
     ).first<{ slug: string; expires_at: string }>()
-    c.header("Referrer-Policy", "no-referrer")
-    c.header("Cache-Control", "no-store")
     if (!result || result.expires_at === "expired" || result.expires_at <= new Date().toISOString()) {
       const title = result ? "This report has expired" : "Report not found"
       return c.html(
-        `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · Bellhop</title><meta name="robots" content="noindex"></head><body><h1>${title}</h1><p>Return to the app to start a new report.</p></body></html>`,
+        `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title} · Bellhop</title><meta name="robots" content="noindex"></head><body><h1>${title}</h1><p>Return to the app to start a new report.</p>${bootScript((await pagePayload(c, target, url.searchParams, ctx)).payload)}</body></html>`,
         result ? 410 : 404,
         { "X-Robots-Tag": "noindex" }
       )
     }
-    if (slug === null)
-      return c.redirect(appUrl(c.env, origin(c), result.slug, `/new?metadata=${encodeURIComponent(capability)}`), 302)
+    return c.redirect(appUrl(c.env, origin(c), result.slug, `/new?metadata=${encodeURIComponent(capability)}`), 302)
   }
   const segment = /^\/issues\/([^/]+)\/?$/.exec(path)?.[1]
   // SQLite's numeric affinity would otherwise resolve e.g. /issues/1e1 as issue 10.
   const number =
     segment === undefined ? null : /^[1-9]\d*$/.test(segment) && Number.isSafeInteger(Number(segment)) ? segment : "0"
-  const [p, asset] = await Promise.all([
-    preview(c.env, slug, number, true),
+  const [p, { payload, status }, asset] = await Promise.all([
+    preview(c.env, slug, number, true, ctx.read),
+    pagePayload(c, target, url.searchParams, ctx),
     c.env.ASSETS.fetch(new Request(new URL("/", url), { headers: { Accept: "text/html" } }))
   ])
   if (!asset.ok) return asset
@@ -149,9 +175,9 @@ export async function page(c: Ctx) {
   const headers = new Headers(asset.headers)
   headers.set("Content-Security-Policy", policy)
   for (const h of ["etag", "last-modified", "content-length", "content-range"]) headers.delete(h)
-  headers.set("Cache-Control", "public, max-age=0, must-revalidate")
+  headers.set("Cache-Control", "private, no-store")
+  headers.append("Vary", "Cookie")
   if (capability !== null) {
-    headers.set("Cache-Control", "no-store")
     headers.set("Referrer-Policy", "no-referrer")
   }
   if (noindex) headers.set("X-Robots-Tag", "noindex")
@@ -179,7 +205,12 @@ export async function page(c: Ctx) {
         e.append(tags.join("\n"), { html: true })
       }
     })
-    .transform(new Response(asset.body, { status: p.code, headers }))
+    .on("body", {
+      element: (e) => {
+        e.append(bootScript(payload), { html: true })
+      }
+    })
+    .transform(c.newResponse(asset.body, { status, headers }))
 }
 
 type AtomEntry = { id: string; title: string; href: string; author: string; updated: string; summary: string }

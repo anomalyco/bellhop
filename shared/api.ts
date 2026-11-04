@@ -33,6 +33,10 @@
 //   GET    /api/feed?state=open|closed&q=<text>&cursor=  -> FeedList           public: issues in public workspaces,
 //                                                                             most recently active first (blhp.app home)
 //   GET    /api/feed/apps                                -> FeedApp[]          public: the public workspaces
+//   GET    /api/page?path=<path and query>               -> PagePayload        everything one page needs, for the
+//          viewer, in one round trip (client navigation and prefetch). The Worker also embeds the same payload in
+//          every page's HTML as <script id="bh-boot" type="application/json">, so the first paint needs no API calls;
+//          those page responses are then private, no-store.
 //   GET    /api/me/reports?state=open|closed&cursor=     -> FeedList           issues this browser (any guest id it
 //          has used) or the signed-in account opened, across workspaces, newest activity first; includes their own
 //          private issues, never hidden or deleted ones
@@ -280,6 +284,23 @@ export interface NewApp {
   description?: string
   /** Defaults to false (private). */
   public?: boolean
+}
+
+/** One page's data. `route` mirrors the page the path resolves to on this host. */
+export interface PagePayload {
+  /** Server time, so relative times render the same as on the server. */
+  now: string
+  me: Me
+  config: Config
+  /** The workspace this page belongs to (null on the home domain). */
+  app: AppDetail | null
+  route:
+    | { kind: "feed"; list: FeedList; apps: FeedApp[] }
+    | { kind: "list"; list: IssueList }
+    | { kind: "issue"; issue: Issue }
+    | { kind: "new"; metadata: ReportMetadata | null }
+    | { kind: "other" }
+    | { kind: "not_found" }
 }
 
 /** A public workspace, for the home feed. */

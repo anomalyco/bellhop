@@ -251,13 +251,16 @@ reports.delete(`${base}/report-keys/:id`, async (c) => {
   if (!r!.meta.changes) missing()
   return c.json({ ok: true })
 })
-async function viewer(c: Ctx): Promise<Viewer> {
+export async function reportViewer(c: Ctx, app: string, browser: Viewer): Promise<Viewer> {
   if (c.req.header("Authorization")) {
     const agent = await authenticate(c)
-    if (!agent?.apps.some((a) => a.id === c.var.app.id)) missing()
+    if (!agent?.apps.some((a) => a.id === app)) missing()
     return { actorId: agent.actor.id, team: true }
   }
-  return { actorId: c.var.actor.id, aliases: c.var.aliases, team: !!c.var.app.role }
+  return browser
+}
+function viewer(c: Ctx) {
+  return reportViewer(c, c.var.app.id, { actorId: c.var.actor.id, aliases: c.var.aliases, team: !!c.var.app.role })
 }
 reports.get(`${base}/metadata/:id`, async (c) =>
   c.json(await getReport(c.env, c.var.app.id, c.req.param("id"), await viewer(c)))

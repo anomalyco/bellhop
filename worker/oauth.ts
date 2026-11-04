@@ -123,7 +123,7 @@ oauth.on("GET", ["/oauth/consent", "/oauth/consent/", "/device", "/device/"], as
   res.headers.append("Content-Security-Policy", "frame-ancestors 'none'")
   res.headers.set("X-Frame-Options", "DENY")
   res.headers.set("Referrer-Policy", "no-referrer")
-  res.headers.set("Cache-Control", "no-store")
+  res.headers.set("Cache-Control", "private, no-store")
   return res
 })
 oauth.on("GET", ["/.well-known/oauth-protected-resource", "/.well-known/oauth-protected-resource/mcp"], (c) =>

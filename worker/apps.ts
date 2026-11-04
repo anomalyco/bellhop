@@ -36,7 +36,17 @@ import { visibleSQL, actorBindings, type Viewer } from "./visibility"
 import { can, requireTeam, teamRole } from "./permissions"
 import { changeMember, invite, roster } from "./members"
 import { configureWebhook, redeliver, rotateWebhook, testWebhook } from "./webhooks"
-import { appCols, appIdSQL, appKey, appStatement, bySlug, fromAppRow, readBatch } from "./read-scope"
+import {
+  appCols,
+  appIdSQL,
+  appKey,
+  appStatement,
+  bySlug,
+  fromAppRow,
+  readBatch,
+  firstRow,
+  type Read
+} from "./read-scope"
 import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
 import { mentionables } from "./conversation"
@@ -45,34 +55,47 @@ const aliasesFor = (cookie: string | null, origins: string) =>
   Promise.all((cookie ? (JSON.parse(origins) as string[]) : []).map((id) => scopedGuestId(cookie!, id)))
 
 // One authenticated scope lookup for reporter-aware counts/lists, restricted media and sockets.
-export async function viewerApp(c: Ctx, slug: string, ownCookies?: string[]) {
-  const hash = await sessionHash(c),
-    row = await sql(
-      c.env,
-      `SELECT ${appCols},m.role,s.user_id,CASE WHEN ${ownCookies?.length ? "1" : "s.user_id IS NULL"} THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
+export async function viewerApp(
+  c: Ctx,
+  slug: string,
+  ownCookies?: string[],
+  page?: { hash: string | null; cookie: string; read: Read }
+) {
+  const hash = page ? page.hash : await sessionHash(c),
+    row = await firstRow<AppRow & { user_id: string | null; origins: string }>(
+      sql(
+        c.env,
+        `SELECT ${appCols},m.role,s.user_id,CASE WHEN ${ownCookies?.length ? "1" : "s.user_id IS NULL"} THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
-      hash,
-      now(),
-      slug
-    ).first<AppRow & { user_id: string | null; origins: string }>()
+        hash,
+        now(),
+        slug
+      ),
+      page?.read
+    )
   if (!row) missing()
   const { user_id, origins, ...rest } = row,
     app = fromAppRow(rest),
-    cookie = browserGuest(c)
+    cookie = page?.cookie ?? browserGuest(c)
   const actorId = user_id ?? (cookie ? await scopedGuestId(cookie, app.id) : null)
+  const baseViewer = {
+    team: can(app.role, "read"),
+    actorId,
+    aliases: await aliasesFor(user_id ? null : cookie, origins),
+    voter: user_id ?? (cookie ? "g:" + (await sha256(cookie)) : null)
+  }
   return {
     app,
+    baseViewer,
     viewer: {
-      team: can(app.role, "read"),
-      actorId,
+      ...baseViewer,
       aliases: ownCookies?.length
         ? (
             await Promise.all(
               ownCookies.map(async (raw) => [await scopedGuestId(raw, app.id), ...(await aliasesFor(raw, origins))])
             )
           ).flat()
-        : await aliasesFor(user_id ? null : cookie, origins),
-      voter: user_id ?? (cookie ? "g:" + (await sha256(cookie)) : null)
+        : baseViewer.aliases
     },
     user: user_id,
     session: user_id ? hash : null
@@ -125,25 +148,31 @@ export async function templates(env: Env, appId: string) {
 export async function detail(
   c: Ctx,
   target: App = c.var.app,
-  viewer: Viewer = { team: can(target.role, "read"), actorId: c.var.actor?.id ?? null }
+  viewer: Viewer = { team: can(target.role, "read"), actorId: c.var.actor?.id ?? null },
+  read?: Read
 ): Promise<AppDetail> {
   const scope = target.id
   const {
     data: [ls, ts, totals, settings]
   } = await readBatch<
     [Label, StoredTemplate, AppDetail["counts"], { default_private: number; reporter_can_choose: number }]
-  >(c.env, scope, [
-    labelQuery(c.env, scope),
-    templateQuery(c.env, scope),
-    sql(
-      c.env,
-      `SELECT count(*) FILTER (WHERE status!='closed') AS open,
+  >(
+    c.env,
+    scope,
+    [
+      labelQuery(c.env, scope),
+      templateQuery(c.env, scope),
+      sql(
+        c.env,
+        `SELECT count(*) FILTER (WHERE status!='closed') AS open,
        count(*) FILTER (WHERE status='closed') AS closed FROM issues i WHERE i.app_id=? AND ${visibleSQL(viewer)}`,
-      scope,
-      ...actorBindings(viewer)
-    ),
-    sql(c.env, "SELECT default_private,reporter_can_choose FROM apps WHERE id=?", scope)
-  ])
+        scope,
+        ...actorBindings(viewer)
+      ),
+      sql(c.env, "SELECT default_private,reporter_can_choose FROM apps WHERE id=?", scope)
+    ],
+    read
+  )
   const v = settings[0] ?? missing()
   return {
     ...target,

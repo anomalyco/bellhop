@@ -4,6 +4,7 @@ import type { Actor, Config, Me } from "../shared/api"
 import { bad, body, denied, email, fail, hex, missing, now, scopedGuestId, secret, sha256, sql, str, uid } from "./core"
 import type { Bindings, Ctx, User } from "./core"
 import { claimGuest, renameGuest } from "./guest-history"
+import { firstRow, type Read } from "./read-scope"
 
 const month = 30 * 86400
 /** Shared cookies cover APP_DOMAIN and every app subdomain. Browsers refuse a Domain without a dot. */
@@ -41,10 +42,13 @@ export function firstContact(c: Ctx) {
   } else c.set("existingGuest", true)
   c.set("guestId", id)
 }
-async function guestName(c: Ctx) {
+export async function guestName(c: Ctx, read?: Read) {
   const hash = c.var.guestHash ?? (await sha256(c.var.guestId))
   c.set("guestHash", hash)
-  return sql(c.env, "SELECT name FROM guest_names WHERE guest_hash=?", hash).first<string>("name")
+  return (
+    (await firstRow<{ name: string }>(sql(c.env, "SELECT name FROM guest_names WHERE guest_hash=?", hash), read))
+      ?.name ?? null
+  )
 }
 export async function guestActor(c: Ctx, scope: string, withName = true): Promise<Extract<Actor, { type: "guest" }>> {
   const [id, name] = await Promise.all([scopedGuestId(c.var.guestId, scope), withName ? guestName(c) : null])
@@ -70,20 +74,22 @@ export async function sessionHash(c: Ctx) {
   const token = getCookie(c, "bh_session")
   return token && /^[a-f0-9]{64}$/.test(token) ? sha256(token) : null
 }
-export async function currentUser(c: Ctx) {
-  const hash = await sessionHash(c)
-  c.set(
-    "user",
-    hash
-      ? await sql(
+export function userBySession(c: Ctx, hash: string | null, read?: Read) {
+  return hash
+    ? firstRow<User>(
+        sql(
           c.env,
           `SELECT u.id,u.email,u.name,u.avatar_url FROM sessions s JOIN users u ON s.user_id=u.id
     WHERE s.token_hash=? AND s.expires_at>?`,
           hash,
           now()
-        ).first<User>()
-      : null
-  )
+        ),
+        read
+      )
+    : null
+}
+export async function currentUser(c: Ctx) {
+  c.set("user", await userBySession(c, await sessionHash(c)))
 }
 async function signingKey(c: Ctx) {
   if (!c.env.COOKIE_SECRET || c.env.COOKIE_SECRET.length < 32) fail(503, "misconfigured", "Cookie signing unavailable")
@@ -179,22 +185,23 @@ function callbackUrl(c: Ctx) {
   return new URL("/auth/google/callback", c.env.PUBLIC_ORIGIN || c.req.url).href
 }
 /** Sessions from before app subdomains were host-only on APP_DOMAIN; re-issue them for the whole site. */
-function shareSession(c: Ctx) {
+export function shareSession(c: Ctx) {
   const token = getCookie(c, "bh_session")
   const site = c.env.APP_DOMAIN
   if (c.var.user && token && site?.includes(".") && new URL(c.req.url).hostname === site)
     cookie(c, "bh_session", token, month, true)
 }
 export const auth = new Hono<Bindings>()
-auth.get("/api/config", (c) =>
-  c.json({
+export function config(c: Ctx): Config {
+  return {
     turnstile_site_key: c.env.TURNSTILE_SITE_KEY,
     google_enabled: !!(c.env.GOOGLE_CLIENT_ID && c.env.GOOGLE_CLIENT_SECRET),
     dev_login: c.env.DEV_LOGIN === "1"
-  } satisfies Config)
-)
-async function me(c: Ctx): Promise<Me> {
-  const [{ id, handle, name }, verified] = await Promise.all([guestActor(c, "me"), human(c)])
+  }
+}
+auth.get("/api/config", (c) => c.json(config(c)))
+export async function me(c: Ctx, guest: string | null | Promise<string | null> = guestName(c)): Promise<Me> {
+  const [{ id, handle }, name, verified] = await Promise.all([guestActor(c, "me", false), guest, human(c)])
   return { user: c.var.user, guest: { id, handle, name }, human: verified }
 }
 auth.get("/api/me", async (c) => {
