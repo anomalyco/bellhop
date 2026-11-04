@@ -9,125 +9,114 @@ import { ChevronDownIcon } from "../../ui/icons"
 import { Menu, MenuHeader, MenuItem } from "../../ui/Menu"
 import { Button } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
+import { t, tr, tKey, useT, type PlainKey } from "../../i18n/settings"
+import { t as tc } from "../../i18n/core"
+import { formatList } from "../../i18n"
 import "../../styles/insights.css"
 
-/** What each action reads as after the actor's name; `t` is the target as words, `d` the entry's data. */
+/** Each action as a whole sentence in the active language: `a` is the actor's name, `t` the target as words, `d` the
+ *  entry's data. */
 type Raw = Record<string, unknown> | null
+type Sentence = (a: ReactNode, t: ReactNode, d: Record<string, unknown>, n: Names, raw: Raw) => ReactNode
 const known = (n: Names, raw: Raw) => !!raw && (typeof raw.email === "string" || !!n.of(String(raw.type), raw.id))
-const sentences: Record<string, (t: ReactNode, d: Record<string, unknown>, n: Names, raw: Raw) => ReactNode> = {
-  "member.invited": (t, d, n, raw) => <>{known(n, raw) ? <>invited {t}</> : "sent an invitation"}{d.role ? ` as ${d.role}` : ""}</>,
-  "member.accepted": (_t, d) => <>accepted an invitation{d.role ? ` as ${d.role}` : ""}</>,
-  "member.declined": () => <>declined an invitation</>,
-  "member.role_changed": (t, d) => <>changed {t}'s role{change(d)}</>,
-  "member.removed": (t, _d, n, raw) => (raw?.type === "invitation" && !known(n, raw) ? <>withdrew an invitation</> : <>removed {t}</>),
-  "member.left": () => <>left the workspace</>,
-  "app.updated": (_t, d) => <>updated the workspace{fields(d)}</>,
-  "app.created": () => <>created the workspace</>,
-  "app.ownership_transferred": (t) => <>made {t} an owner</>,
-  "agent.created": (t, d) => <>gave {t} access{d.to ? ` as ${d.to}` : ""}</>,
-  "agent.access_changed": (t, d) => <>changed {t}'s access{change(d)}</>,
-  "agent.updated": (t) => <>updated {t}</>,
-  "agent.rotated": (t) => <>rotated {t}'s secret</>,
-  "agent.revoked": (t) => <>revoked {t}</>,
-  "webhook.updated": (_t, d) => <>{d.enabled === false ? "removed the webhook" : "updated the webhook"}</>,
-  "webhook.rotated": () => <>rotated the webhook secret</>,
-  "webhook.tested": () => <>sent a test ping</>,
-  "webhook.redelivered": () => <>redelivered a webhook</>,
-  "label.created": (t) => <>created {t}</>,
-  "label.updated": (t) => <>updated {t}</>,
-  "label.deleted": (t) => <>deleted {t}</>,
-  "template.created": (t) => <>created {t}</>,
-  "template.updated": (t) => <>updated {t}</>,
-  "template.deleted": (t) => <>deleted {t}</>,
-  "saved_reply.created": (t) => <>created {t}</>,
-  "saved_reply.updated": (t) => <>updated {t}</>,
-  "saved_reply.deleted": (t) => <>deleted {t}</>,
-  "tier.created": (t) => <>created {t}</>,
-  "tier.updated": (t) => <>updated {t}</>,
-  "tier.deleted": (t) => <>deleted {t}</>,
-  "tier.assigned": (t, d, n) => (d.tier_id === null ? <>removed the tier from {t}</> : <>set {n.tier(d.tier_id)} on {t}</>),
-  "issue.deleted": (t) => <>deleted {t}</>,
-  "issue.hidden": (t, d) => <>hid {t}{d.reason ? ` as ${String(d.reason).replace("_", " ")}` : ""}</>,
-  "issue.unhidden": (t) => <>unhid {t}</>,
-  "issue.transferred": (t, d) => <>moved {t}{d.to ? <> to <span className="mono audit-target">{String(d.to)}</span></> : ""}</>,
-  "issue.locked": (t) => <>locked {t}</>,
-  "issue.unlocked": (t) => <>unlocked {t}</>,
-  "issue.pinned": (t) => <>pinned {t}</>,
-  "issue.unpinned": (t) => <>unpinned {t}</>,
-  "issue.made_private": (t) => <>made {t} private</>,
-  "issue.made_public": (t) => <>made {t} public</>,
-  "comment.hidden": (t, d) => <>hid {t}{d.reason ? ` as ${String(d.reason).replace("_", " ")}` : ""}</>,
-  "comment.unhidden": (t) => <>unhid {t}</>,
-  "comment.deleted": (t) => <>deleted {t}</>,
-  "actor.blocked": (t, d) => <>blocked {t}{d.hide_content ? " and hid what they wrote" : ""}</>,
-  "actor.unblocked": (t) => <>unblocked {t}</>,
-  "import.started": (_t, d) => <>started importing {d.repo ? <span className="mono audit-target">{String(d.repo)}</span> : "a repository"} from GitHub</>,
-  "app.exported": () => <>downloaded the workspace export</>,
-  "report_key.created": (t) => <>created {t}</>,
-  "report_key.revoked": (t) => <>revoked {t}</>,
+const targetPhrase = (key: Parameters<typeof tr>[0]): Sentence => (actor, target) => (tr as (k: string, p: object) => ReactNode)(key, { actor, target })
+const sentences: Record<string, Sentence> = {
+  "member.invited": (actor, target, d, n, raw) =>
+    known(n, raw)
+      ? d.role
+        ? tr("audit.invitedAs", { actor, target, role: role(d.role) })
+        : tr("audit.invited", { actor, target })
+      : d.role
+        ? tr("audit.sentInvitationAs", { actor, role: role(d.role) })
+        : tr("audit.sentInvitation", { actor }),
+  "member.accepted": (actor, _t, d) => (d.role ? tr("audit.acceptedAs", { actor, role: role(d.role) }) : tr("audit.accepted", { actor })),
+  "member.declined": (actor) => tr("audit.declined", { actor }),
+  "member.role_changed": (actor, target, d) =>
+    changed(d) ? tr("audit.roleChangedFromTo", { actor, target, from: role(d.from), to: role(d.to) }) : tr("audit.roleChanged", { actor, target }),
+  "member.removed": (actor, target, _d, n, raw) =>
+    raw?.type === "invitation" && !known(n, raw) ? tr("audit.withdrew", { actor }) : tr("audit.removed", { actor, target }),
+  "member.left": (actor) => tr("audit.left", { actor }),
+  "app.updated": (actor, _t, d) =>
+    Array.isArray(d.fields) && d.fields.length
+      ? tr("audit.appUpdatedFields", { actor, fields: formatList(d.fields.map((f) => field(String(f)))) })
+      : tr("audit.appUpdated", { actor }),
+  "app.created": (actor) => tr("audit.appCreated", { actor }),
+  "app.ownership_transferred": targetPhrase("audit.madeOwner"),
+  "agent.created": (actor, target, d) => (d.to ? tr("audit.agentCreatedAs", { actor, target, role: role(d.to) }) : tr("audit.agentCreated", { actor, target })),
+  "agent.access_changed": (actor, target, d) =>
+    changed(d) ? tr("audit.accessChangedFromTo", { actor, target, from: role(d.from), to: role(d.to) }) : tr("audit.accessChanged", { actor, target }),
+  "agent.updated": targetPhrase("audit.updated"),
+  "agent.rotated": targetPhrase("audit.agentRotated"),
+  "agent.revoked": targetPhrase("audit.revoked"),
+  "webhook.updated": (actor, _t, d) => (d.enabled === false ? tr("audit.webhookRemoved", { actor }) : tr("audit.webhookUpdated", { actor })),
+  "webhook.rotated": (actor) => tr("audit.webhookRotated", { actor }),
+  "webhook.tested": (actor) => tr("audit.webhookTested", { actor }),
+  "webhook.redelivered": (actor) => tr("audit.webhookRedelivered", { actor }),
+  "label.created": targetPhrase("audit.created"),
+  "label.updated": targetPhrase("audit.updated"),
+  "label.deleted": targetPhrase("audit.deleted"),
+  "template.created": targetPhrase("audit.created"),
+  "template.updated": targetPhrase("audit.updated"),
+  "template.deleted": targetPhrase("audit.deleted"),
+  "saved_reply.created": targetPhrase("audit.created"),
+  "saved_reply.updated": targetPhrase("audit.updated"),
+  "saved_reply.deleted": targetPhrase("audit.deleted"),
+  "tier.created": targetPhrase("audit.created"),
+  "tier.updated": targetPhrase("audit.updated"),
+  "tier.deleted": targetPhrase("audit.deleted"),
+  "tier.assigned": (actor, target, d, n) =>
+    d.tier_id === null ? tr("audit.tierRemoved", { actor, target }) : tr("audit.tierSet", { actor, target, tier: n.tier(d.tier_id) }),
+  "issue.deleted": targetPhrase("audit.deleted"),
+  "issue.hidden": (actor, target, d) => (d.reason ? tr("audit.hidAs", { actor, target, reason: reason(d.reason) }) : tr("audit.hid", { actor, target })),
+  "issue.unhidden": targetPhrase("audit.unhid"),
+  "issue.transferred": (actor, target, d) =>
+    d.to ? tr("audit.movedTo", { actor, target, to: <span className="mono audit-target">{String(d.to)}</span> }) : tr("audit.moved", { actor, target }),
+  "issue.locked": targetPhrase("audit.locked"),
+  "issue.unlocked": targetPhrase("audit.unlocked"),
+  "issue.pinned": targetPhrase("audit.pinned"),
+  "issue.unpinned": targetPhrase("audit.unpinned"),
+  "issue.made_private": targetPhrase("audit.madePrivate"),
+  "issue.made_public": targetPhrase("audit.madePublic"),
+  "comment.hidden": (actor, target, d) => (d.reason ? tr("audit.hidAs", { actor, target, reason: reason(d.reason) }) : tr("audit.hid", { actor, target })),
+  "comment.unhidden": targetPhrase("audit.unhid"),
+  "comment.deleted": targetPhrase("audit.deleted"),
+  "actor.blocked": (actor, target, d) => (d.hide_content ? tr("audit.blockedHid", { actor, target }) : tr("audit.blocked", { actor, target })),
+  "actor.unblocked": targetPhrase("audit.unblocked"),
+  "import.started": (actor, _t, d) =>
+    d.repo ? tr("audit.importStarted", { actor, repo: <span className="mono audit-target">{String(d.repo)}</span> }) : tr("audit.importStartedRepo", { actor }),
+  "app.exported": (actor) => tr("audit.exported", { actor }),
+  "report_key.created": targetPhrase("audit.created"),
+  "report_key.revoked": targetPhrase("audit.revoked"),
 }
 
-/** The action filter's choices, grouped. */
-const actionGroups: { name: string; actions: [string, string][] }[] = [
+/** The action filter's choices, grouped (labels from audit.action.<id>). */
+const actionGroups: { name: PlainKey; actions: string[] }[] = [
   {
-    name: "People",
-    actions: [
-      ["member.invited", "Invited"],
-      ["member.accepted", "Accepted an invitation"],
-      ["member.role_changed", "Role changed"],
-      ["member.removed", "Removed"],
-      ["member.left", "Left"],
-      ["actor.blocked", "Blocked"],
-      ["actor.unblocked", "Unblocked"],
-      ["tier.assigned", "Tier set"],
-    ],
+    name: "audit.group.people",
+    actions: ["member.invited", "member.accepted", "member.role_changed", "member.removed", "member.left", "actor.blocked", "actor.unblocked", "tier.assigned"],
   },
   {
-    name: "Agents and integrations",
-    actions: [
-      ["agent.created", "Agent given access"],
-      ["agent.access_changed", "Agent access changed"],
-      ["agent.revoked", "Agent revoked"],
-      ["webhook.updated", "Webhook updated"],
-      ["webhook.rotated", "Webhook secret rotated"],
-      ["report_key.created", "Report key created"],
-      ["report_key.revoked", "Report key revoked"],
-    ],
+    name: "audit.group.agents",
+    actions: ["agent.created", "agent.access_changed", "agent.revoked", "webhook.updated", "webhook.rotated", "report_key.created", "report_key.revoked"],
   },
   {
-    name: "Moderation",
-    actions: [
-      ["issue.hidden", "Issue hidden"],
-      ["comment.hidden", "Comment hidden"],
-      ["issue.deleted", "Issue deleted"],
-      ["comment.deleted", "Comment deleted"],
-      ["issue.transferred", "Issue moved"],
-      ["issue.made_private", "Made private"],
-      ["issue.locked", "Locked"],
-    ],
+    name: "audit.group.moderation",
+    actions: ["issue.hidden", "comment.hidden", "issue.deleted", "comment.deleted", "issue.transferred", "issue.made_private", "issue.locked"],
   },
   {
-    name: "Setup",
-    actions: [
-      ["app.updated", "Workspace updated"],
-      ["app.exported", "Workspace exported"],
-      ["import.started", "GitHub import started"],
-      ["label.created", "Label created"],
-      ["label.deleted", "Label deleted"],
-      ["template.updated", "Template updated"],
-      ["saved_reply.created", "Saved reply created"],
-      ["tier.created", "Tier created"],
-    ],
+    name: "audit.group.setup",
+    actions: ["app.updated", "app.exported", "import.started", "label.created", "label.deleted", "template.updated", "saved_reply.created", "tier.created"],
   },
 ]
-const actionLabel = (a: string) => actionGroups.flatMap((g) => g.actions).find(([id]) => id === a)?.[1] ?? a
+const actionLabel = (a: string) => (actionGroups.some((g) => g.actions.includes(a)) ? tKey(`audit.action.${a}` as PlainKey) : a)
 
-function change(d: Record<string, unknown>) {
-  return "from" in d || "to" in d ? ` from ${d.from ?? "none"} to ${d.to ?? "none"}` : ""
-}
-function fields(d: Record<string, unknown>) {
-  return Array.isArray(d.fields) && d.fields.length ? ` (${d.fields.join(", ")})` : ""
-}
+const changed = (d: Record<string, unknown>) => "from" in d || "to" in d
+/** A role (or "none") inside a sentence; anything unknown as it was stored. */
+const role = (v: unknown) =>
+  v == null ? t("audit.none") : ["owner", "admin", "member", "viewer", "responder"].includes(String(v)) ? tKey(`roleWord.${v}` as PlainKey) : String(v)
+const reason = (v: unknown) => (["spam", "abuse", "off_topic"].includes(String(v)) ? tKey(`audit.reason.${v}` as PlainKey) : String(v).replace("_", " "))
+const fields = ["name", "description", "public", "visibility", "nudge_days", "mode", "helpdesk", "icon"]
+const field = (f: string) => (fields.includes(f) ? tKey(`audit.field.${f}` as PlainKey) : f.replace(/_/g, " "))
 
 /** Names for ids the log doesn't spell out (labels, tiers, saved replies, agents, members and invitations), from
  *  what this admin can already see; things deleted since fall back to "a label" and so on. */
@@ -159,51 +148,35 @@ function useNames(app: AppDetail): Names {
     of,
     tier: (id) => {
       const name = of("tier", id)
-      return name ? <span className="audit-target">{name}</span> : "a tier"
+      return name ? <span className="audit-target">{name}</span> : t("audit.a.tier")
     },
   }
 }
 
-const nouns: Record<string, [string, string]> = {
-  label: ["label", "a label"],
-  template: ["template", "a template"],
-  tier: ["tier", "a tier"],
-  saved_reply: ["saved reply", "a saved reply"],
-  agent: ["agent", "an agent"],
-  report_key: ["report key", "a report key"],
-  member: ["", "a member"],
-  invitation: ["", "an invitation"],
-  actor: ["", "someone"],
-  person: ["", "someone"],
-  delivery: ["", "a delivery"],
-  webhook: ["", "the webhook"],
-  app: ["", "the workspace"],
-}
+const named = ["label", "template", "tier", "saved_reply", "agent", "report_key"]
+const fallbacks = [...named, "member", "invitation", "actor", "person", "delivery", "webhook", "app"]
 
 /** The target as words: "#12", "label bug", an email, a key's preview, or "a label" when it's gone. */
 function Target({ slug, target, names }: { slug: string; target: AuditEntry["target"]; names: Names }) {
-  if (!target) return <>something</>
-  const t = target as Record<string, unknown>
-  const type = String(t.type ?? "")
-  if ((type === "issue" || type === "comment") && typeof t.number === "number") {
+  if (!target) return <>{t("audit.something")}</>
+  const raw = target as Record<string, unknown>
+  const type = String(raw.type ?? "")
+  if ((type === "issue" || type === "comment") && typeof raw.number === "number") {
     const link = (
-      <AppLink slug={slug} href={appPath(slug, `/issues/${t.number}`)} className="audit-target">
-        #{t.number}
+      <AppLink slug={slug} href={appPath(slug, `/issues/${raw.number}`)} className="audit-target">
+        #{raw.number}
       </AppLink>
     )
-    return type === "comment" ? <>a comment on {link}</> : link
+    return type === "comment" ? <>{tr("audit.commentOn", { issue: link })}</> : link
   }
-  const [noun, fallback] = nouns[type] ?? ["", type ? `a ${type.replace(/_/g, " ")}` : "it"]
-  const name = t.name ?? t.email ?? t.preview ?? t.handle ?? names.of(type, t.id)
-  if (typeof name === "string")
-    return (
-      <>
-        {noun && `${noun} `}
-        <span className={t.preview ? "audit-target mono" : "audit-target"}>{name}</span>
-      </>
-    )
-  if (typeof t.number === "number") return <span className="audit-target">#{t.number}</span>
-  return <>{fallback}</>
+  const name = raw.name ?? raw.email ?? raw.preview ?? raw.handle ?? names.of(type, raw.id)
+  if (typeof name === "string") {
+    const node = <span className={raw.preview ? "audit-target mono" : "audit-target"}>{name}</span>
+    return named.includes(type) ? <>{(tr as (k: string, p: object) => ReactNode)(`audit.target.${type}`, { name: node })}</> : node
+  }
+  if (typeof raw.number === "number") return <span className="audit-target">#{raw.number}</span>
+  if (fallbacks.includes(type)) return <>{tKey(`audit.a.${type}` as PlainKey)}</>
+  return <>{type ? t("audit.aThing", { type: type.replace(/_/g, " ") }) : t("audit.it")}</>
 }
 
 /** Before/after and other details, one row each; arrays and objects as compact JSON. */
@@ -212,7 +185,7 @@ function Details({ entry }: { entry: AuditEntry }) {
   const d = entry.data ?? {}
   if ("from" in d || "to" in d)
     rows.push([
-      "Change",
+      t("audit.change"),
       <>
         {show(d.from)} <span className="audit-change">→</span> {show(d.to)}
       </>,
@@ -230,13 +203,14 @@ function Details({ entry }: { entry: AuditEntry }) {
     </dl>
   )
 }
-const show = (v: unknown) => (v === null || v === undefined ? "none" : typeof v === "string" ? v : JSON.stringify(v))
+const show = (v: unknown) => (v === null || v === undefined ? t("audit.none") : typeof v === "string" ? v : JSON.stringify(v))
 
 /**
  * Settings → Audit log (admins): what people and agents did here, newest first, kept for 90 days. Filter by who
  * and by action; each entry opens its details (before and after).
  */
 export function AuditLog({ app }: { app: AppDetail }) {
+  useT()
   const [actor, setActor] = useState<Actor | null>(null)
   const [action, setAction] = useState("")
   const key = keys.audit(app.slug, actor?.id ?? "", action)
@@ -273,16 +247,16 @@ export function AuditLog({ app }: { app: AppDetail }) {
   return (
     <div>
       <div className="settings-heading">
-        <h1>Audit log</h1>
+        <h1>{tKey("section.audit")}</h1>
       </div>
-      <p className="settings-lede">What people and agents changed in this workspace. Kept for 90 days.</p>
+      <p className="settings-lede">{t("audit.lede")}</p>
       <div className="audit-filters">
         <Menu
           align="start"
           width={260}
           trigger={(p) => (
-            <button type="button" className="btn audit-filter" data-variant="default" data-active={actor ? "" : undefined} aria-label={actor ? `Actor: ${actorName(actor)}` : "Filter by actor"} {...p}>
-              <span className="filter-text">{actor ? actorName(actor) : "Anyone"}</span>
+            <button type="button" className="btn audit-filter" data-variant="default" data-active={actor ? "" : undefined} aria-label={actor ? t("audit.actorLabel", { name: actorName(actor) }) : t("audit.filterActor")} {...p}>
+              <span className="filter-text">{actor ? actorName(actor) : t("audit.anyone")}</span>
               <ChevronDownIcon size={14} />
             </button>
           )}
@@ -296,13 +270,13 @@ export function AuditLog({ app }: { app: AppDetail }) {
                   close()
                 }}
               >
-                Anyone
+                {t("audit.anyone")}
               </MenuItem>
               {[...actors.values()].map((a) => (
                 <MenuItem
                   key={a.id}
                   checked={actor?.id === a.id}
-                  description={a.type === "agent" ? "Agent" : a.type === "guest" ? "Guest" : undefined}
+                  description={a.type === "agent" ? t("audit.agent") : a.type === "guest" ? t("audit.guest") : undefined}
                   onSelect={() => {
                     setActor(a)
                     close()
@@ -318,8 +292,8 @@ export function AuditLog({ app }: { app: AppDetail }) {
           align="start"
           width={280}
           trigger={(p) => (
-            <button type="button" className="btn audit-filter" data-variant="default" data-active={action ? "" : undefined} aria-label={action ? `Action: ${actionLabel(action)}` : "Filter by action"} {...p}>
-              <span className="filter-text">{action ? actionLabel(action) : "All actions"}</span>
+            <button type="button" className="btn audit-filter" data-variant="default" data-active={action ? "" : undefined} aria-label={action ? t("audit.actionLabel", { name: actionLabel(action) }) : t("audit.filterAction")} {...p}>
+              <span className="filter-text">{action ? actionLabel(action) : t("audit.allActions")}</span>
               <ChevronDownIcon size={14} />
             </button>
           )}
@@ -333,14 +307,14 @@ export function AuditLog({ app }: { app: AppDetail }) {
                   close()
                 }}
               >
-                All actions
+                {t("audit.allActions")}
               </MenuItem>
               {actionGroups.map((g) => (
                 <div key={g.name}>
                   <MenuHeader>
-                    <span className="menu-item-description">{g.name}</span>
+                    <span className="menu-item-description">{tKey(g.name)}</span>
                   </MenuHeader>
-                  {g.actions.map(([id, label]) => (
+                  {g.actions.map((id) => (
                     <MenuItem
                       key={id}
                       checked={action === id}
@@ -349,7 +323,7 @@ export function AuditLog({ app }: { app: AppDetail }) {
                         close()
                       }}
                     >
-                      {label}
+                      {actionLabel(id)}
                     </MenuItem>
                   ))}
                 </div>
@@ -366,7 +340,7 @@ export function AuditLog({ app }: { app: AppDetail }) {
               setAction("")
             }}
           >
-            Clear
+            {t("audit.clear")}
           </Button>
         )}
       </div>
@@ -378,14 +352,14 @@ export function AuditLog({ app }: { app: AppDetail }) {
           </>
         )}
         {!!error && !data && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {data?.entries.length === 0 && <div className="box-empty">{filtered ? "Nothing matches these filters." : "Nothing recorded yet."}</div>}
+        {data?.entries.length === 0 && <div className="box-empty">{filtered ? t("audit.noMatch") : t("audit.empty")}</div>}
         {data?.entries.map((e) => <Row key={e.id} slug={app.slug} entry={e} names={names} />)}
       </section>
       {(data?.next_cursor || moreError) && (
         <div className="audit-foot">
           {data?.next_cursor && (
             <Button onClick={loadMore} disabled={loadingMore}>
-              {loadingMore ? "Loading…" : "Load more"}
+              {loadingMore ? tc("common.loading") : tc("common.loadMore")}
             </Button>
           )}
           {moreError && <span className="field-error">{moreError}</span>}
@@ -399,21 +373,23 @@ function Row({ slug, entry, names }: { slug: string; entry: AuditEntry; names: N
   const [open, setOpen] = useState(false)
   const sentence = sentences[entry.action]
   const target = <Target slug={slug} target={entry.target} names={names} />
+  const actor = <ActorName actor={entry.actor} badge={entry.actor.type === "agent"} />
   const hasDetails = Object.keys(entry.data ?? {}).length > 0
   return (
     <div className="box-row audit-row">
       <ActorAvatar actor={entry.actor} size={24} />
       <div className="audit-main">
         <p className="audit-text">
-          <ActorName actor={entry.actor} badge={entry.actor.type === "agent"} />{" "}
-          {sentence ? sentence(target, entry.data ?? {}, names, entry.target) : <>{entry.action.replace(/[._]/g, " ")} · {target}</>}
+          {sentence
+            ? sentence(actor, target, entry.data ?? {}, names, entry.target)
+            : tr("audit.other", { actor, action: entry.action.replace(/[._]/g, " "), target })}
         </p>
       </div>
       <div className="audit-side">
         <Time iso={entry.created_at} />
         {hasDetails && (
-          <button type="button" className="audit-toggle" aria-expanded={open} aria-label={open ? "Hide details" : "Show details"} onClick={() => setOpen(!open)}>
-            Details
+          <button type="button" className="audit-toggle" aria-expanded={open} aria-label={open ? t("audit.hideDetails") : t("audit.showDetails")} onClick={() => setOpen(!open)}>
+            {t("audit.details")}
             <ChevronDownIcon size={12} />
           </button>
         )}

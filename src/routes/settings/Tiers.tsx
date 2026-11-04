@@ -9,6 +9,9 @@ import { ColorField, randomColor, validColor } from "../../ui/ColorField"
 import { ChevronDownIcon, PlusIcon } from "../../ui/icons"
 import { Menu, MenuItem } from "../../ui/Menu"
 import { Avatar, Button, Label } from "../../ui/primitives"
+import { t, tr, tKey, useT } from "../../i18n/settings"
+import { t as tc } from "../../i18n/core"
+import { formatList, sentenceGap } from "../../i18n"
 import "../../styles/tiers.css"
 
 const noRules: TierRules = { label_ids: [], assignee_id: null, private: false, agents_reply: true }
@@ -16,6 +19,7 @@ const noRules: TierRules = { label_ids: [], assignee_id: null, private: false, a
 /** Settings → Tiers: statuses for people (VIP, Pro, Beta) with what happens when they open an issue. Admins edit
  *  tiers; members see them and add or remove people. Only the team and agents ever see tiers. */
 export function Tiers({ app }: { app: AppDetail }) {
+  useT()
   const slug = app.slug
   const admin = canSetup(app.role)
   const { data: tiers, error } = useResource<Tier[]>(keys.tiers(slug), () => api.tiers(slug), 5_000)
@@ -31,17 +35,15 @@ export function Tiers({ app }: { app: AppDetail }) {
   return (
     <div>
       <div className="settings-heading">
-        <h1>Tiers</h1>
+        <h1>{tKey("section.tiers")}</h1>
         {admin && editing !== "new" && (
           <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setEditing("new")}>
-            New tier
+            {t("tiers.new")}
           </Button>
         )}
       </div>
-      <p className="settings-lede">
-        Give people a status, like VIP, Pro or Beta, and decide what happens when they open an issue. Only the team and agents see tiers.
-      </p>
-      {!admin && <p className="settings-readonly">Only admins and owners can change tiers. You can add and remove people.</p>}
+      <p className="settings-lede">{t("tiers.lede")}</p>
+      {!admin && <p className="settings-readonly">{t("tiers.readOnly")}</p>}
       <section className="box tiers">
         {editing === "new" && (
           <TierForm
@@ -58,7 +60,7 @@ export function Tiers({ app }: { app: AppDetail }) {
         )}
         {!tiers && !error && <div className="box-row skeleton-row" />}
         {!!error && !tiers && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {tiers?.length === 0 && editing !== "new" && <div className="box-empty">No tiers yet.{admin ? " Create one for the people you look after first." : ""}</div>}
+        {tiers?.length === 0 && editing !== "new" && <div className="box-empty">{admin ? t("tiers.emptyAdmin") : t("tiers.empty")}</div>}
         {sorted.map((tier) =>
           editing === tier.id ? (
             <TierForm
@@ -94,11 +96,11 @@ export function Tiers({ app }: { app: AppDetail }) {
 function rulesSummary(app: AppDetail, rules: TierRules, assigneeName: string | null) {
   const parts: string[] = []
   const labels = app.labels.filter((l) => rules.label_ids.includes(l.id)).map((l) => l.name)
-  if (labels.length) parts.push(`Adds ${labels.join(", ")}`)
-  if (rules.assignee_id) parts.push(`Assigns ${assigneeName ?? "a teammate"}`)
-  if (rules.private) parts.push("Private")
-  if (!rules.agents_reply) parts.push("Humans only")
-  return parts.length ? parts.join(" · ") : "No special handling"
+  if (labels.length) parts.push(t("tiers.adds", { labels: formatList(labels) }))
+  if (rules.assignee_id) parts.push(t("tiers.assigns", { name: assigneeName ?? t("tiers.aTeammate") }))
+  if (rules.private) parts.push(t("tiers.private"))
+  if (!rules.agents_reply) parts.push(t("tiers.humansOnly"))
+  return parts.length ? parts.join(" · ") : t("tiers.noRules")
 }
 
 function TierRow({
@@ -143,7 +145,7 @@ function TierRow({
           <span className="tier-main">
             <span className="tier-name-line">
               <span className="tier-name">{tier.name}</span>
-              <span className="tier-count">{tier.count === 1 ? "1 person" : `${tier.count} people`}</span>
+              <span className="tier-count">{t("tiers.people", { count: tier.count })}</span>
             </span>
             {tier.description && <span className="tier-description">{tier.description}</span>}
             <span className="tier-rules">{rulesSummary(app, tier.rules, assigneeName)}</span>
@@ -154,22 +156,23 @@ function TierRow({
           (confirming ? (
             <div className="tier-confirm">
               <span className="tier-confirm-text">
-                Delete {tier.name}? {tier.count ? `${tier.count === 1 ? "1 person loses" : `${tier.count} people lose`} the tier.` : ""}
+                {t("tiers.confirmDelete", { name: tier.name })}
+                {tier.count ? `${sentenceGap()}${t("tiers.loses", { count: tier.count })}` : ""}
               </span>
               <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
-                Cancel
+                {tc("common.cancel")}
               </Button>
               <Button size="small" variant="danger" onClick={remove} disabled={busy}>
-                Delete
+                {tc("common.delete")}
               </Button>
             </div>
           ) : (
             <div className="settings-row-actions tier-actions">
               <Button size="small" variant="invisible" onClick={onEdit}>
-                Edit
+                {tc("common.edit")}
               </Button>
               <Button size="small" variant="invisible" onClick={() => setConfirming(true)}>
-                Delete
+                {tc("common.delete")}
               </Button>
             </div>
           ))}
@@ -226,17 +229,17 @@ function TierPeople({ slug, tier }: { slug: string; tier: Tier }) {
     <div className="tier-people">
       <form className="tier-add" onSubmit={add}>
         <div className="input" data-size="small">
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label={`Add to ${tier.name} by email`} autoComplete="off" />
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label={t("tiers.addLabel", { name: tier.name })} autoComplete="off" />
         </div>
         <Button type="submit" size="small" disabled={!email.trim() || busy === "add"}>
-          {busy === "add" ? "Adding…" : "Add by email"}
+          {busy === "add" ? t("tiers.adding") : t("tiers.add")}
         </Button>
       </form>
-      <p className="tier-add-hint">Accounts get the tier when they sign in with that email. Guests get it from their comments ("…" → Set tier).</p>
+      <p className="tier-add-hint">{t("tiers.addHint")}</p>
       {problem && <p className="field-error">{problem}</p>}
       {!people && !error && <div className="tier-person skeleton-row" />}
       {!!error && !people && <p className="muted-text">{errorMessage(error)}</p>}
-      {people?.length === 0 && <p className="tier-empty">No one has this tier yet.</p>}
+      {people?.length === 0 && <p className="tier-empty">{t("tiers.peopleEmpty")}</p>}
       {people?.map((p, i) => {
         const id = p.actor?.id ?? p.email ?? String(i)
         return (
@@ -247,22 +250,22 @@ function TierPeople({ slug, tier }: { slug: string; tier: Tier }) {
               <span className="tier-person-meta">
                 {p.actor ? (
                   <>
-                    {p.actor.type === "guest" ? "Guest" : (p.email ?? "Account")}
-                    {` · ${p.issue_count === 1 ? "1 issue" : `${p.issue_count} issues`}`}
+                    {p.actor.type === "guest" ? t("tiers.guest") : (p.email ?? t("tiers.account"))}
+                    {` · ${t("tiers.issues", { count: p.issue_count })}`}
                     {p.last_seen_at && (
                       <>
-                        {" · seen "}
-                        <Time iso={p.last_seen_at} />
+                        {" · "}
+                        {tr("tiers.seen", { time: <Time iso={p.last_seen_at} /> })}
                       </>
                     )}
                   </>
                 ) : (
-                  "Hasn't signed in yet"
+                  t("tiers.notSignedIn")
                 )}
               </span>
             </div>
             <Button size="small" variant="invisible" onClick={() => remove(p, id)} disabled={busy === id}>
-              Remove
+              {tc("common.remove")}
             </Button>
           </div>
         )
@@ -312,28 +315,28 @@ function TierForm({
       <div className="tier-form-grid">
         <div className="field">
           <label className="field-label" htmlFor={`tier-name-${id}`}>
-            Name
+            {t("field.name")}
           </label>
           <div className="input">
-            <input id={`tier-name-${id}`} value={name} onChange={(e) => setName(e.target.value)} placeholder="VIP" required maxLength={40} autoFocus />
+            <input id={`tier-name-${id}`} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("tiers.namePlaceholder")} required maxLength={40} autoFocus />
           </div>
         </div>
         <div className="field">
           <label className="field-label" htmlFor={`tier-color-${id}`}>
-            Colour
+            {t("field.colour")}
           </label>
           <ColorField id={`tier-color-${id}`} value={color} onChange={setColor} />
         </div>
         <div className="field tier-form-wide">
           <label className="field-label" htmlFor={`tier-description-${id}`}>
-            Description
+            {t("field.description")}
           </label>
           <div className="input">
             <input
               id={`tier-description-${id}`}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional: who gets it and why"
+              placeholder={t("tiers.descriptionPlaceholder")}
               maxLength={200}
             />
           </div>
@@ -341,9 +344,9 @@ function TierForm({
       </div>
 
       <fieldset className="tier-rules-form">
-        <legend className="field-label">When they open an issue</legend>
+        <legend className="field-label">{t("tiers.when")}</legend>
         <div className="tier-rule">
-          <span className="tier-rule-label">Add labels</span>
+          <span className="tier-rule-label">{t("tiers.addLabels")}</span>
           <div className="tier-rule-value">
             {chosen.map((l) => (
               <Label key={l.id} name={l.name} color={l.color} />
@@ -353,7 +356,7 @@ function TierForm({
               width={260}
               trigger={(p) => (
                 <Button size="small" {...p} disabled={!app.labels.length}>
-                  {chosen.length ? "Change" : app.labels.length ? "Choose labels" : "No labels yet"}
+                  {chosen.length ? t("tiers.change") : app.labels.length ? t("tiers.chooseLabels") : t("tiers.noLabels")}
                 </Button>
               )}
             >
@@ -379,14 +382,14 @@ function TierForm({
           </div>
         </div>
         <div className="tier-rule">
-          <span className="tier-rule-label">Assign to</span>
+          <span className="tier-rule-label">{t("tiers.assignTo")}</span>
           <div className="tier-rule-value">
             <Menu
               align="start"
               width={260}
               trigger={(p) => (
                 <button type="button" className="btn tier-assignee" data-variant="default" data-size="small" {...p}>
-                  <span className="tier-assignee-name">{assignee ? assignee.name || assignee.email : "No one"}</span>
+                  <span className="tier-assignee-name">{assignee ? assignee.name || assignee.email : t("tiers.noOne")}</span>
                   <ChevronDownIcon size={12} />
                 </button>
               )}
@@ -400,7 +403,7 @@ function TierForm({
                       close()
                     }}
                   >
-                    No one
+                    {t("tiers.noOne")}
                   </MenuItem>
                   {assignees.map((m) => (
                     <MenuItem
@@ -423,15 +426,15 @@ function TierForm({
         <label className="checkbox tier-check">
           <input type="checkbox" checked={rules.private} onChange={(e) => setRules((r) => ({ ...r, private: e.target.checked }))} />
           <span>
-            Make their issues private
-            <span className="tier-check-hint">Only the team and they can see them, whatever the workspace's default.</span>
+            {t("tiers.makePrivate")}
+            <span className="tier-check-hint">{t("tiers.makePrivateHint")}</span>
           </span>
         </label>
         <label className="checkbox tier-check">
           <input type="checkbox" checked={rules.agents_reply} onChange={(e) => setRules((r) => ({ ...r, agents_reply: e.target.checked }))} />
           <span>
-            Agents can reply
-            <span className="tier-check-hint">Off: on their issues, agents can only leave internal notes, and a person on the team answers.</span>
+            {t("tiers.agentsReply")}
+            <span className="tier-check-hint">{t("tiers.agentsReplyHint")}</span>
           </span>
         </label>
       </fieldset>
@@ -439,10 +442,10 @@ function TierForm({
       {error && <p className="field-error">{error}</p>}
       <div className="tier-form-actions">
         <Button variant="invisible" onClick={() => onDone(null)}>
-          Cancel
+          {tc("common.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={saving || !name.trim() || !validColor(color)}>
-          {saving ? "Saving…" : tier ? "Save" : "Create tier"}
+          {saving ? tc("common.saving") : tier ? tc("common.save") : t("tiers.create")}
         </Button>
       </div>
     </form>

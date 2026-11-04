@@ -19,11 +19,15 @@ import { Tiers } from "./settings/Tiers"
 import { ReportKeys } from "./settings/ReportKeys"
 import { WebhookEvents, sameEvents } from "./settings/WebhookEvents"
 import { DocsLink } from "./settings/DocsLink"
+import { LastUsed } from "./settings/LastUsed"
 import { Insights } from "./settings/Insights"
 import { AuditLog } from "./settings/AuditLog"
 import { SavedReplies } from "./settings/SavedReplies"
 import { Data } from "./settings/Data"
 import { Reminders, reminderText } from "./settings/Reminders"
+import { t, tr, tKey, useT, type PlainKey } from "../i18n/settings"
+import { t as tc } from "../i18n/core"
+import { sentenceGap } from "../i18n"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
@@ -45,21 +49,22 @@ type Section =
   | "audit"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
-const sections: { id: Section; label: string; min: Role }[] = [
-  { id: "general", label: "General", min: "viewer" },
-  { id: "insights", label: "Insights", min: "member" },
-  { id: "labels", label: "Labels", min: "viewer" },
-  { id: "templates", label: "Templates", min: "viewer" },
-  { id: "saved-replies", label: "Saved replies", min: "viewer" },
-  { id: "members", label: "Members", min: "member" },
-  { id: "agents", label: "Agents", min: "admin" },
-  { id: "webhook", label: "Webhook", min: "admin" },
-  { id: "report-keys", label: "Report keys", min: "admin" },
-  { id: "tiers", label: "Tiers", min: "member" },
-  { id: "blocked", label: "Blocked", min: "member" },
-  { id: "data", label: "Data", min: "admin" },
-  { id: "audit", label: "Audit log", min: "admin" },
+const sections: { id: Section; min: Role }[] = [
+  { id: "general", min: "viewer" },
+  { id: "insights", min: "member" },
+  { id: "labels", min: "viewer" },
+  { id: "templates", min: "viewer" },
+  { id: "saved-replies", min: "viewer" },
+  { id: "members", min: "member" },
+  { id: "agents", min: "admin" },
+  { id: "webhook", min: "admin" },
+  { id: "report-keys", min: "admin" },
+  { id: "tiers", min: "member" },
+  { id: "blocked", min: "member" },
+  { id: "data", min: "admin" },
+  { id: "audit", min: "admin" },
 ]
+const sectionLabel = (id: Section) => tKey(`section.${id}`)
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
   return (
@@ -70,14 +75,15 @@ export default function Settings({ slug, section }: { slug: string; section?: st
 }
 
 function SettingsBody({ app, section }: { app: AppDetail; section: Section }) {
+  useT()
   if (!app.role) {
     return (
       <Page narrow>
         <div className="blank">
-          <h1 className="blank-title">For this workspace's team</h1>
-          <p className="muted-text">Settings are for the people on this workspace. Sign in with an account that's on its team.</p>
+          <h1 className="blank-title">{t("team.title")}</h1>
+          <p className="muted-text">{t("team.text")}</p>
           <a href={signInHref()} className="btn">
-            Sign in
+            {tc("common.signIn")}
           </a>
         </div>
       </Page>
@@ -115,10 +121,10 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
   return (
     <Page>
       <div className="settings">
-        <nav className="settings-nav" aria-label="Settings" ref={nav} onScroll={edges}>
+        <nav className="settings-nav" aria-label={tc("header.settings")} ref={nav} onScroll={edges}>
           {visible.map((s) => (
             <Link key={s.id} href={appPath(app.slug, s.id === "general" ? "/settings" : `/settings/${s.id}`)} aria-current={active === s.id ? "page" : undefined}>
-              {s.label}
+              {sectionLabel(s.id)}
             </Link>
           ))}
         </nav>
@@ -150,6 +156,9 @@ function Heading({ title, action }: { title: string; action?: ReactNode }) {
     </div>
   )
 }
+
+/** A role inside a sentence ("Become member?"), in the language's in-sentence form. */
+const roleWord = (role: Role | AgentRole) => tKey(`roleWord.${role}`)
 
 function Flash({ error }: { error: string | null }) {
   return error ? (
@@ -200,13 +209,13 @@ function General({ app }: { app: AppDetail }) {
 
   return (
     <form className="settings-form" onSubmit={save}>
-      <Heading title="General" />
+      <Heading title={sectionLabel("general")} />
       <IconField app={app} />
       {admin ? (
         <>
           <div className="field">
             <label className="field-label" htmlFor="set-name">
-              Name
+              {t("field.name")}
             </label>
             <div className="input">
               <input id="set-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} />
@@ -214,23 +223,23 @@ function General({ app }: { app: AppDetail }) {
           </div>
           <div className="field">
             <label className="field-label" htmlFor="set-description">
-              Description
+              {t("field.description")}
             </label>
             <textarea id="set-description" className="textarea" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
           </div>
           <div className="field">
-            <span className="field-label">Visibility</span>
+            <span className="field-label">{t("general.visibility")}</span>
             <PublicToggle value={isPublic} onChange={setPublic} id="set-public" />
           </div>
           <div className="field">
             <span className="field-label" id="set-issues-label">
-              New issues
+              {t("general.newIssues")}
             </span>
             <IssueVisibilityControl value={issues} onChange={setIssues} />
           </div>
           <div className="field">
             <span className="field-label" id="set-reminders-label">
-              Reminders
+              {t("general.reminders")}
             </span>
             <Reminders value={nudge} onChange={setNudge} />
           </div>
@@ -238,35 +247,35 @@ function General({ app }: { app: AppDetail }) {
       ) : (
         <>
           <div className="field">
-            <span className="field-label">Name</span>
+            <span className="field-label">{t("field.name")}</span>
             <p className="settings-value">{app.name}</p>
           </div>
           <div className="field">
-            <span className="field-label">Description</span>
-            <p className="settings-value">{app.description || <span className="muted-text">No description</span>}</p>
+            <span className="field-label">{t("field.description")}</span>
+            <p className="settings-value">{app.description || <span className="muted-text">{t("general.noDescription")}</span>}</p>
           </div>
           <div className="field">
-            <span className="field-label">Visibility</span>
+            <span className="field-label">{t("general.visibility")}</span>
             <VisibilityValue value={!!app.public} />
           </div>
           <div className="field">
-            <span className="field-label">New issues</span>
+            <span className="field-label">{t("general.newIssues")}</span>
             <p className="settings-value visibility-value">
-              {app.visibility?.default === "private" ? "Private" : "Public"}
+              {app.visibility?.default === "private" ? t("general.private") : t("general.public")}
               <span className="visibility-hint">{issueVisibilityText(app.visibility ?? { default: "public", reporter_can_choose: false })}</span>
             </p>
           </div>
           <div className="field">
-            <span className="field-label">Reminders</span>
+            <span className="field-label">{t("general.reminders")}</span>
             <p className="settings-value visibility-value">
-              {app.nudge_days ? `After ${app.nudge_days} ${app.nudge_days === 1 ? "day" : "days"}` : "Off"}
-              <span className="visibility-hint">{reminderText}</span>
+              {app.nudge_days ? t("general.remindersAfter", { count: app.nudge_days }) : t("general.remindersOff")}
+              <span className="visibility-hint">{reminderText()}</span>
             </p>
           </div>
         </>
       )}
       <div className="field">
-        <span className="field-label">Public page</span>
+        <span className="field-label">{t("general.publicPage")}</span>
         <a className="mono" href={appPath(app.slug)}>
           {appLabel(app.slug)}
         </a>
@@ -275,21 +284,23 @@ function General({ app }: { app: AppDetail }) {
       {admin ? (
         <div className="row">
           <Button type="submit" variant="primary" disabled={saving || !name.trim()}>
-            {saving ? "Saving…" : "Save"}
+            {saving ? tc("common.saving") : tc("common.save")}
           </Button>
-          {saved && <span className="muted-text">Saved</span>}
+          {saved && <span className="muted-text">{t("saved")}</span>}
         </div>
       ) : (
-        <p className="muted-text">Only admins and owners can change these. You're {app.role === "member" ? "a member" : "a viewer"} here.</p>
+        <p className="muted-text">{app.role === "member" ? t("general.readOnlyMember") : t("general.readOnlyViewer")}</p>
       )}
     </form>
   )
 }
 
 const issueVisibilityText = (v: AppVisibility) =>
-  `${v.default === "private" ? "Only the team and each issue's reporter can read them." : "Anyone with the link can read them."} ${
-    v.reporter_can_choose ? "Reporters can choose when they open one." : "Reporters can't change that."
-  } The team can change any issue.`
+  [
+    v.default === "private" ? t("general.privateRead") : t("general.publicRead"),
+    v.reporter_can_choose ? t("general.reporterChooses") : t("general.reporterFixed"),
+    t("general.teamCanChange"),
+  ].join(sentenceGap())
 
 /** "New issues are public / private", and whether reporters may choose. */
 function IssueVisibilityControl({ value, onChange }: { value: AppVisibility; onChange: (next: AppVisibility) => void }) {
@@ -306,7 +317,7 @@ function IssueVisibilityControl({ value, onChange }: { value: AppVisibility; onC
             onClick={() => onChange({ ...value, default: d })}
           >
             {d === "private" && <LockIcon size={12} />}
-            {d === "public" ? "Public" : "Private"}
+            {d === "public" ? t("general.public") : t("general.private")}
           </button>
         ))}
       </div>
@@ -317,7 +328,7 @@ function IssueVisibilityControl({ value, onChange }: { value: AppVisibility; onC
           checked={value.reporter_can_choose}
           onChange={(e) => onChange({ ...value, reporter_can_choose: e.target.checked })}
         />
-        Reporters can choose
+        {t("general.reportersCanChoose")}
       </label>
       <p className="visibility-hint">{issueVisibilityText(value)}</p>
     </div>
@@ -326,8 +337,8 @@ function IssueVisibilityControl({ value, onChange }: { value: AppVisibility; onC
 
 const iconTypes = ["image/png", "image/jpeg", "image/webp"]
 const iconLimit = 1024 * 1024
-const tooBig = "That image is over 1 MB. Try a smaller export."
-const wrongType = "Use a PNG, JPEG or WebP image."
+const tooBig = () => t("icon.tooBig")
+const wrongType = () => t("icon.wrongType")
 
 /** The workspace's icon: favicon and top-left logo on its pages. Admins upload or remove it. */
 function IconField({ app }: { app: AppDetail }) {
@@ -344,13 +355,13 @@ function IconField({ app }: { app: AppDetail }) {
   const upload = async (file: File | undefined) => {
     if (!file) return
     setError(null)
-    if (!iconTypes.includes(file.type)) return setError(wrongType)
-    if (file.size > iconLimit) return setError(tooBig)
+    if (!iconTypes.includes(file.type)) return setError(wrongType())
+    if (file.size > iconLimit) return setError(tooBig())
     setBusy("upload")
     try {
       store(await api.putIcon(app.slug, file))
     } catch (e) {
-      setError(e instanceof ApiFailure && e.status === 413 ? tooBig : e instanceof ApiFailure && e.status === 415 ? wrongType : errorMessage(e))
+      setError(e instanceof ApiFailure && e.status === 413 ? tooBig() : e instanceof ApiFailure && e.status === 415 ? wrongType() : errorMessage(e))
     } finally {
       setBusy(null)
     }
@@ -370,22 +381,22 @@ function IconField({ app }: { app: AppDetail }) {
 
   return (
     <div className="field">
-      <span className="field-label">Icon</span>
+      <span className="field-label">{t("icon.label")}</span>
       <div className="icon-field">
         <AppIcon src={app.icon_url} size={48} />
         {owner ? (
           <div className="icon-field-main">
             <div className="row">
               <Button size="small" onClick={() => input.current?.click()} disabled={!!busy}>
-                {busy === "upload" ? "Uploading…" : app.icon_url ? "Replace" : "Upload"}
+                {busy === "upload" ? t("icon.uploading") : app.icon_url ? t("icon.replace") : t("icon.upload")}
               </Button>
               {app.icon_url && (
                 <Button size="small" variant="invisible" onClick={remove} disabled={!!busy}>
-                  {busy === "remove" ? "Removing…" : "Remove"}
+                  {busy === "remove" ? t("icon.removing") : tc("common.remove")}
                 </Button>
               )}
             </div>
-            <span className="icon-field-hint">PNG, JPEG or WebP up to 1 MB. Square images work best; shown at 16–48 px.</span>
+            <span className="icon-field-hint">{t("icon.hint")}</span>
             <input
               ref={input}
               type="file"
@@ -398,7 +409,7 @@ function IconField({ app }: { app: AppDetail }) {
             />
           </div>
         ) : (
-          <span className="icon-field-hint">{app.icon_url ? "Shown as the tab icon and logo on these pages." : "Using the Bellhop mark."}</span>
+          <span className="icon-field-hint">{app.icon_url ? t("icon.shown") : t("icon.default")}</span>
         )}
       </div>
       {error && <p className="field-error">{error}</p>}
@@ -417,7 +428,7 @@ function Labels({ app }: { app: AppDetail }) {
   const [error, setError] = useState<string | null>(null)
 
   const remove = async (label: LabelType) => {
-    if (!confirm(`Delete the “${label.name}” label? It will be removed from every issue.`)) return
+    if (!confirm(t("labels.confirmDelete", { name: label.name }))) return
     setError(null)
     try {
       await api.deleteLabel(app.slug, label.id)
@@ -431,18 +442,18 @@ function Labels({ app }: { app: AppDetail }) {
   return (
     <div>
       <Heading
-        title="Labels"
+        title={sectionLabel("labels")}
         action={
           admin &&
           editing !== "new" && (
             <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setEditing("new")}>
-              New label
+              {t("labels.new")}
             </Button>
           )
         }
       />
       <Flash error={error} />
-      {!admin && <p className="settings-readonly">Only admins and owners can change labels.</p>}
+      {!admin && <p className="settings-readonly">{t("labels.readOnly")}</p>}
       <section className="box">
         {editing === "new" && (
           <LabelForm
@@ -453,7 +464,7 @@ function Labels({ app }: { app: AppDetail }) {
             }}
           />
         )}
-        {labels.length === 0 && editing !== "new" && <div className="box-empty">No labels yet.</div>}
+        {labels.length === 0 && editing !== "new" && <div className="box-empty">{t("labels.empty")}</div>}
         {labels.map((label) =>
           editing === label.id ? (
             <LabelForm
@@ -474,10 +485,10 @@ function Labels({ app }: { app: AppDetail }) {
               {admin && (
                 <div className="settings-row-actions">
                   <Button size="small" variant="invisible" onClick={() => setEditing(label.id)}>
-                    Edit
+                    {tc("common.edit")}
                   </Button>
                   <Button size="small" variant="invisible" onClick={() => remove(label)}>
-                    Delete
+                    {tc("common.delete")}
                   </Button>
                 </div>
               )}
@@ -514,12 +525,12 @@ function LabelForm({ slug, label, onDone }: { slug: string; label?: LabelType; o
   return (
     <form className="box-row label-form" onSubmit={save}>
       <div className="label-form-preview">
-        <Label name={name.trim() || "Label preview"} color={valid ? color : "878d96"} />
+        <Label name={name.trim() || t("labels.preview")} color={valid ? color : "878d96"} />
       </div>
       <div className="label-form-fields">
         <div className="field">
           <label className="field-label" htmlFor="label-name">
-            Name
+            {t("field.name")}
           </label>
           <div className="input">
             <input id="label-name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={50} autoFocus />
@@ -527,24 +538,24 @@ function LabelForm({ slug, label, onDone }: { slug: string; label?: LabelType; o
         </div>
         <div className="field" style={{ flex: 2 }}>
           <label className="field-label" htmlFor="label-description">
-            Description
+            {t("field.description")}
           </label>
           <div className="input">
-            <input id="label-description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={100} placeholder="Optional" />
+            <input id="label-description" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={100} placeholder={t("field.optional")} />
           </div>
         </div>
         <div className="field">
           <label className="field-label" htmlFor="label-color">
-            Colour
+            {t("field.colour")}
           </label>
           <ColorField id="label-color" value={color} onChange={setColor} />
         </div>
         <div className="label-form-actions">
           <Button variant="invisible" onClick={() => onDone(null)}>
-            Cancel
+            {tc("common.cancel")}
           </Button>
           <Button type="submit" variant="primary" disabled={saving || !name.trim() || !valid}>
-            {label ? "Save" : "Create label"}
+            {label ? tc("common.save") : t("labels.create")}
           </Button>
         </div>
       </div>
@@ -562,12 +573,12 @@ function Templates({ app }: { app: AppDetail }) {
   const templates = [...app.templates].sort((a, b) => a.position - b.position)
   const store = (next: Template[]) => setData<AppDetail>(keys.app(app.slug), (a) => (a ? { ...a, templates: next } : a))
 
-  const remove = async (t: Template) => {
-    if (!confirm(`Delete the “${t.name}” template?`)) return
+  const remove = async (tpl: Template) => {
+    if (!confirm(t("templates.confirmDelete", { name: tpl.name }))) return
     setError(null)
     try {
-      await api.deleteTemplate(app.slug, t.id)
-      store(templates.filter((x) => x.id !== t.id))
+      await api.deleteTemplate(app.slug, tpl.id)
+      store(templates.filter((x) => x.id !== tpl.id))
     } catch (e) {
       setError(errorMessage(e))
     }
@@ -576,54 +587,54 @@ function Templates({ app }: { app: AppDetail }) {
   return (
     <div>
       <Heading
-        title="Templates"
+        title={sectionLabel("templates")}
         action={
           admin &&
           editing !== "new" && (
             <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setEditing("new")}>
-              New template
+              {t("templates.new")}
             </Button>
           )
         }
       />
       <Flash error={error} />
-      {!admin && <p className="settings-readonly">Only admins and owners can change templates.</p>}
+      {!admin && <p className="settings-readonly">{t("templates.readOnly")}</p>}
       <section className="box">
         {editing === "new" && (
           <TemplateForm
             app={app}
             position={(templates[templates.length - 1]?.position ?? -1) + 1}
-            onDone={(t) => {
-              if (t) store([...templates, t])
+            onDone={(tpl) => {
+              if (tpl) store([...templates, tpl])
               setEditing(null)
             }}
           />
         )}
-        {templates.length === 0 && editing !== "new" && <div className="box-empty">No templates. Reporters get a blank form.</div>}
-        {templates.map((t) =>
-          editing === t.id ? (
+        {templates.length === 0 && editing !== "new" && <div className="box-empty">{t("templates.empty")}</div>}
+        {templates.map((tpl) =>
+          editing === tpl.id ? (
             <TemplateForm
-              key={t.id}
+              key={tpl.id}
               app={app}
-              template={t}
-              position={t.position}
+              template={tpl}
+              position={tpl.position}
               onDone={(next) => {
                 if (next) store(templates.map((x) => (x.id === next.id ? next : x)))
                 setEditing(null)
               }}
             />
           ) : (
-            <div key={t.id} className="box-row settings-row">
+            <div key={tpl.id} className="box-row settings-row">
               <div className="settings-row-main">
-                <div className="template-row-name">{t.name}</div>
+                <div className="template-row-name">{tpl.name}</div>
                 <div className="issue-meta">
-                  {t.description}
-                  {t.ask_system_info && <span className="muted-text"> · asks for system info</span>}
+                  {tpl.description}
+                  {tpl.ask_system_info && <span className="muted-text"> · {t("templates.asksSystemInfo")}</span>}
                 </div>
-                {t.label_ids.length > 0 && (
+                {tpl.label_ids.length > 0 && (
                   <div className="row" style={{ gap: 4, marginTop: 6, flexWrap: "wrap" }}>
                     {app.labels
-                      .filter((l) => t.label_ids.includes(l.id))
+                      .filter((l) => tpl.label_ids.includes(l.id))
                       .map((l) => (
                         <Label key={l.id} name={l.name} color={l.color} />
                       ))}
@@ -632,11 +643,11 @@ function Templates({ app }: { app: AppDetail }) {
               </div>
               {admin && (
                 <div className="settings-row-actions">
-                  <Button size="small" variant="invisible" onClick={() => setEditing(t.id)}>
-                    Edit
+                  <Button size="small" variant="invisible" onClick={() => setEditing(tpl.id)}>
+                    {tc("common.edit")}
                   </Button>
-                  <Button size="small" variant="invisible" onClick={() => remove(t)}>
-                    Delete
+                  <Button size="small" variant="invisible" onClick={() => remove(tpl)}>
+                    {tc("common.delete")}
                   </Button>
                 </div>
               )}
@@ -657,7 +668,7 @@ function TemplateForm({
   app: AppDetail
   template?: Template
   position: number
-  onDone: (t: Template | null) => void
+  onDone: (template: Template | null) => void
 }) {
   const [form, setForm] = useState<Required<TemplateInput>>({
     name: template?.name ?? "",
@@ -691,15 +702,15 @@ function TemplateForm({
       <div className="form-grid">
         <div className="field">
           <label className="field-label" htmlFor="tpl-name">
-            Name
+            {t("field.name")}
           </label>
           <div className="input">
-            <input id="tpl-name" value={form.name} onChange={(e) => set("name", e.target.value)} required maxLength={60} autoFocus placeholder="Bug report" />
+            <input id="tpl-name" value={form.name} onChange={(e) => set("name", e.target.value)} required maxLength={60} autoFocus placeholder={t("templates.namePlaceholder")} />
           </div>
         </div>
         <div className="field">
           <label className="field-label" htmlFor="tpl-position">
-            Order
+            {t("templates.order")}
           </label>
           <div className="input" style={{ width: 90 }}>
             <input id="tpl-position" className="mono" type="number" value={form.position} onChange={(e) => set("position", Number(e.target.value) || 0)} />
@@ -708,29 +719,29 @@ function TemplateForm({
       </div>
       <div className="field">
         <label className="field-label" htmlFor="tpl-description">
-          Description
+          {t("field.description")}
         </label>
         <div className="input">
-          <input id="tpl-description" value={form.description} onChange={(e) => set("description", e.target.value)} maxLength={140} placeholder="Shown in the template list" />
+          <input id="tpl-description" value={form.description} onChange={(e) => set("description", e.target.value)} maxLength={140} placeholder={t("templates.descriptionPlaceholder")} />
         </div>
       </div>
       <div className="field">
         <label className="field-label" htmlFor="tpl-title">
-          Title
+          {t("templates.title")}
         </label>
         <div className="input">
-          <input id="tpl-title" value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={256} placeholder="Prefilled issue title (optional)" />
+          <input id="tpl-title" value={form.title} onChange={(e) => set("title", e.target.value)} maxLength={256} placeholder={t("templates.titlePlaceholder")} />
         </div>
       </div>
       <div className="field">
         <label className="field-label" htmlFor="tpl-body">
-          Body
+          {t("templates.body")}
         </label>
         <textarea id="tpl-body" className="textarea mono-area" rows={8} value={form.body} onChange={(e) => set("body", e.target.value)} />
       </div>
       {app.labels.length > 0 && (
         <div className="field">
-          <span className="field-label">Labels</span>
+          <span className="field-label">{t("templates.labels")}</span>
           <div className="label-toggles">
             {app.labels.map((l) => {
               const on = form.label_ids.includes(l.id)
@@ -751,27 +762,27 @@ function TemplateForm({
       )}
       <label className="checkbox">
         <input type="checkbox" checked={form.ask_system_info} onChange={(e) => set("ask_system_info", e.target.checked)} />
-        Offer “Attach system info”
+        {t("templates.offerSystemInfo")}
       </label>
       {!!error && <p className="field-error">{error}</p>}
       <div className="form-actions">
         <Button variant="invisible" onClick={() => onDone(null)}>
-          Cancel
+          {tc("common.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={saving || !form.name.trim()}>
-          {template ? "Save" : "Create template"}
+          {template ? tc("common.save") : t("templates.create")}
         </Button>
       </div>
     </form>
   )
 }
 
-function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+function CopyButton({ text, label = tc("common.copy") }: { text: string; label?: string }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
-    const t = setTimeout(() => setCopied(false), 1500)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setCopied(false), 1500)
+    return () => clearTimeout(timer)
   }, [copied])
   return (
     <Button
@@ -781,7 +792,7 @@ function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) 
         setCopied(true)
       }}
     >
-      {copied ? "Copied" : label}
+      {copied ? tc("common.copied") : label}
     </Button>
   )
 }
@@ -794,16 +805,12 @@ function Agents({ app }: { app: AppDetail }) {
   const { data: agents, error } = useResource<AppAgent[]>(keys.appAgents(app.slug), () => api.appAgents(app.slug), 5_000)
   return (
     <div>
-      <Heading title="Agents with access" action={<DocsLink page="mcp" />} />
-      <p className="settings-lede">
-        Agents belong to people's accounts and work here with the role set below, never above their owner's. To create a token agent or
-        connect one, use{" "}
-        <SiteLink href={homeUrl("/agents")}>your Agents page</SiteLink>.
-      </p>
+      <Heading title={t("agents.title")} action={<DocsLink page="mcp" />} />
+      <p className="settings-lede">{tr("agents.lede", { link: <SiteLink href={homeUrl("/agents")}>{t("agents.ledeLink")}</SiteLink> })}</p>
       <section className="box">
         {!agents && !error && <div className="box-row skeleton-row" />}
         {!!error && !agents && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {agents?.length === 0 && <div className="box-empty">No agents have access yet.</div>}
+        {agents?.length === 0 && <div className="box-empty">{t("agents.empty")}</div>}
         {agents?.map((agent) => <AppAgentRow key={agent.id} slug={app.slug} agent={agent} />)}
       </section>
     </div>
@@ -846,52 +853,45 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
       <AgentAvatar size={28} />
       <div className="settings-row-main">
         <div className="template-row-name">
-          {agent.client_name} <span className="agent-kind">{agent.kind === "token" ? "Token agent" : "Connected app"}</span>
+          {agent.client_name} <span className="agent-kind">{agent.kind === "token" ? t("agents.token") : t("agents.connected")}</span>
         </div>
         <div className="issue-meta">
-          Approved by {agent.approved_by.name} ·{" "}
-          {agent.last_used_at ? (
-            <>
-              last used <Time iso={agent.last_used_at} />
-            </>
-          ) : (
-            "not used yet"
-          )}
+          {tr("agents.meta", { name: agent.approved_by.name, used: <LastUsed iso={agent.last_used_at} /> })}
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
       {confirming ? (
         <div className="agent-confirm-inline">
-          <span className="agent-confirm-text">Remove its access here? If it has all workspaces, this one is excluded.</span>
+          <span className="agent-confirm-text">{t("agents.confirmRemove")}</span>
           <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
-            Cancel
+            {tc("common.cancel")}
           </Button>
           <Button size="small" variant="danger" onClick={remove} disabled={busy}>
-            Remove
+            {tc("common.remove")}
           </Button>
         </div>
       ) : (
         <div className="settings-row-actions">
           <RoleSelect
             value={agent.role}
-            label={`Role for ${agent.client_name}`}
+            label={t("roleFor", { name: agent.client_name })}
             disabled={busy}
             options={agentRoles.map((r) => ({
               value: r,
               label: agentRoleLabel[r],
-              description: atLeast(agent.max_role, r) ? agentRoleText[r] : `Above its owner's role (${agentRoleLabel[agent.max_role].toLowerCase()} at most)`,
+              description: atLeast(agent.max_role, r) ? agentRoleText[r] : t("agents.aboveOwner", { role: roleWord(agent.max_role) }),
               disabled: !atLeast(agent.max_role, r),
             }))}
             onChange={setRole}
           />
           <Button size="small" variant="invisible" data-wide-only onClick={() => setConfirming(true)}>
-            Remove
+            {tc("common.remove")}
           </Button>
           <div className="narrow-only">
             <Menu
               align="end"
               width={220}
-              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`More for ${agent.client_name}`} icon={<KebabIcon />} {...p} />}
+              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("moreFor", { name: agent.client_name })} icon={<KebabIcon />} {...p} />}
             >
               {(close) => (
                 <MenuItem
@@ -901,7 +901,7 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
                     setConfirming(true)
                   }}
                 >
-                  Remove
+                  {tc("common.remove")}
                 </MenuItem>
               )}
             </Menu>
@@ -951,13 +951,13 @@ function Webhook({ app }: { app: AppDetail }) {
       setUrl(null)
       setEvents(null)
       return next
-    }, value.trim() ? "Saved" : "Webhook removed")
+    }, value.trim() ? t("saved") : t("webhook.removed"))
   }
 
   if (!settings) {
     return (
       <div>
-        <Heading title="Webhook" action={<DocsLink page="webhooks" />} />
+        <Heading title={sectionLabel("webhook")} action={<DocsLink page="webhooks" />} />
         {error ? <Flash error={errorMessage(error)} /> : <div className="skeleton" style={{ height: 32, width: "60%" }} />}
       </div>
     )
@@ -966,23 +966,23 @@ function Webhook({ app }: { app: AppDetail }) {
   const secret = settings.webhook.secret
   return (
     <div className="settings-stack">
-      <Heading title="Webhook" action={<DocsLink page="webhooks" />} />
+      <Heading title={sectionLabel("webhook")} action={<DocsLink page="webhooks" />} />
       <form className="settings-stack" onSubmit={save}>
         <div className="field">
           <label className="field-label" htmlFor="hook-url">
-            Payload URL
+            {t("webhook.payloadUrl")}
           </label>
           <div className="input">
             <input id="hook-url" type="url" value={value} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/bellhop" className="mono" />
           </div>
         </div>
         <div className="field">
-          <span className="field-label">Events</span>
+          <span className="field-label">{t("webhook.events")}</span>
           <WebhookEvents value={chosen} onChange={setEvents} />
         </div>
         <div className="row">
           <Button type="submit" variant="primary" disabled={busy === "save" || !changed}>
-            {busy === "save" ? "Saving…" : "Save"}
+            {busy === "save" ? tc("common.saving") : tc("common.save")}
           </Button>
           {changed && (
             <Button
@@ -992,27 +992,27 @@ function Webhook({ app }: { app: AppDetail }) {
                 setEvents(null)
               }}
             >
-              Discard
+              {tc("common.discard")}
             </Button>
           )}
         </div>
       </form>
 
       <div className="field">
-        <span className="field-label">Signing secret</span>
+        <span className="field-label">{t("webhook.secret")}</span>
         <div className="row">
           <code className="secret-value mono">{reveal ? secret : "•".repeat(Math.min(32, secret.length || 32))}</code>
           <Button size="small" onClick={() => setReveal((r) => !r)}>
-            {reveal ? "Hide" : "Reveal"}
+            {reveal ? t("webhook.hide") : t("webhook.reveal")}
           </Button>
           <CopyButton text={secret} />
           <Button
             size="small"
             variant="danger"
             disabled={busy === "rotate"}
-            onClick={() => confirm("Rotate the signing secret? Your receiver must switch to the new one.") && act("rotate", () => api.rotateWebhook(app.slug), "Secret rotated")}
+            onClick={() => confirm(t("webhook.confirmRotate")) && act("rotate", () => api.rotateWebhook(app.slug), t("webhook.rotated"))}
           >
-            Rotate
+            {t("webhook.rotate")}
           </Button>
         </div>
       </div>
@@ -1024,31 +1024,31 @@ function Webhook({ app }: { app: AppDetail }) {
             act("test", async () => {
               await api.testWebhook(app.slug)
               setTimeout(() => reload().catch(() => {}), 1500)
-            }, "Test ping sent")
+            }, t("webhook.testSent"))
           }
         >
-          Send test
+          {t("webhook.sendTest")}
         </Button>
         {note && <span className="muted-text">{note}</span>}
       </div>
       <Flash error={actionError} />
 
       <div>
-        <h2 className="section-title">Recent deliveries</h2>
+        <h2 className="section-title">{t("webhook.recent")}</h2>
         <section className="box">
           {settings.webhook.deliveries.length === 0 ? (
-            <div className="box-empty">No deliveries yet.</div>
+            <div className="box-empty">{t("webhook.noDeliveries")}</div>
           ) : (
             <div className="table-scroll">
               <table className="table">
                 <thead>
                   <tr>
-                    <th>Event</th>
-                    <th>Status</th>
-                    <th>Response</th>
-                    <th>Attempts</th>
-                    <th>Sent</th>
-                    <th aria-label="Actions" />
+                    <th>{t("webhook.colEvent")}</th>
+                    <th>{t("webhook.colStatus")}</th>
+                    <th>{t("webhook.colResponse")}</th>
+                    <th>{t("webhook.colAttempts")}</th>
+                    <th>{t("webhook.colSent")}</th>
+                    <th aria-label={t("webhook.colActions")} />
                   </tr>
                 </thead>
                 <tbody>
@@ -1057,7 +1057,7 @@ function Webhook({ app }: { app: AppDetail }) {
                       <td className="mono">{d.event}</td>
                       <td>
                         <span className="delivery-status" data-status={d.status}>
-                          {d.status === "delivered" ? "Delivered" : d.status === "failed" ? "Failed" : "Pending"}
+                          {d.status === "delivered" ? t("webhook.delivered") : d.status === "failed" ? t("webhook.failed") : t("webhook.pending")}
                         </span>
                       </td>
                       <td className="mono">{d.response_status ?? "—"}</td>
@@ -1086,8 +1086,8 @@ function Redeliver({ slug, id, onDone }: { slug: string; id: string; onDone: () 
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     if (state !== "done") return
-    const t = setTimeout(() => setState("idle"), 2500)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => setState("idle"), 2500)
+    return () => clearTimeout(timer)
   }, [state])
   return (
     <>
@@ -1096,7 +1096,7 @@ function Redeliver({ slug, id, onDone }: { slug: string; id: string; onDone: () 
         size="small"
         variant="invisible"
         disabled={state === "busy"}
-        title="Send the same payload again"
+        title={t("webhook.redeliverTitle")}
         onClick={async () => {
           setState("busy")
           setError(null)
@@ -1110,7 +1110,7 @@ function Redeliver({ slug, id, onDone }: { slug: string; id: string; onDone: () 
           }
         }}
       >
-        {state === "busy" ? "Sending…" : state === "done" ? "Sent" : "Redeliver"}
+        {state === "busy" ? t("webhook.sending") : state === "done" ? t("webhook.sent") : t("webhook.redeliver")}
       </Button>
     </>
   )
@@ -1122,8 +1122,8 @@ const elevated = (role: Role) => role === "owner" || role === "admin"
 
 /** The server's refusals, in plain words: 403 when an admin touches admins or owners, 409 for the last owner. */
 function memberError(e: unknown) {
-  if (e instanceof ApiFailure && e.code === "last_owner") return "A workspace must keep at least one owner who has accepted."
-  if (e instanceof ApiFailure && e.status === 403) return "Only owners can add, change or remove admins and owners."
+  if (e instanceof ApiFailure && e.code === "last_owner") return t("members.lastOwner")
+  if (e instanceof ApiFailure && e.status === 403) return t("members.ownersOnly")
   return errorMessage(e)
 }
 
@@ -1141,8 +1141,8 @@ function Members({ app }: { app: AppDetail }) {
 
   return (
     <div>
-      <Heading title="Members" />
-      {admin ? <Invite app={app} owner={owner} /> : <p className="settings-readonly">Only admins and owners can manage members.</p>}
+      <Heading title={sectionLabel("members")} />
+      {admin ? <Invite app={app} owner={owner} /> : <p className="settings-readonly">{t("members.readOnly")}</p>}
       {note && <p className="settings-note">{note}</p>}
       <section className="box">
         {!settings && !error && <div className="box-row skeleton-row" />}
@@ -1190,24 +1190,24 @@ function Invite({ app, owner }: { app: AppDetail; owner: boolean }) {
     <form className="member-invite" onSubmit={invite}>
       <div className="member-invite-row">
         <div className="input">
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label="Email to invite" autoComplete="off" />
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" aria-label={t("members.emailLabel")} autoComplete="off" />
         </div>
         <RoleSelect
           value={role}
-          label="Role for the invite"
+          label={t("members.inviteRole")}
           options={teamRoles.map((r) => ({
             value: r,
             label: roleLabel[r],
-            description: !owner && elevated(r) ? "Only owners can invite admins and owners" : roleText[r],
+            description: !owner && elevated(r) ? t("members.inviteOwnersOnly") : roleText[r],
             disabled: !owner && elevated(r),
           }))}
           onChange={setRole}
         />
         <Button type="submit" variant="primary" disabled={busy || !email.trim()}>
-          {busy ? "Inviting…" : "Invite"}
+          {busy ? t("members.inviting") : t("members.invite")}
         </Button>
       </div>
-      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">They join once they accept the invitation, signed in with that email.</p>}
+      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">{t("members.inviteHint")}</p>}
     </form>
   )
 }
@@ -1277,12 +1277,12 @@ function MemberRow({
   const confirmText =
     confirm?.kind === "remove"
       ? you
-        ? "Leave this workspace? You'll need a new invitation to come back."
-        : `Remove ${who}?`
+        ? t("members.confirmLeave")
+        : t("members.confirmRemove", { name: who })
       : confirm?.kind === "role"
-        ? `Become ${roleLabel[confirm.role].toLowerCase()}? You may lose access to these settings.`
+        ? t("members.confirmRole", { role: roleWord(confirm.role) })
         : confirm?.kind === "transfer"
-          ? `Make ${who} an owner too?`
+          ? t("members.confirmTransfer", { name: who })
           : ""
 
   return (
@@ -1291,11 +1291,11 @@ function MemberRow({
       <div className="settings-row-main">
         <div className="template-row-name">
           {who}
-          {you && <span className="member-you"> (you)</span>}
+          {you && <span className="member-you"> {t("members.you")}</span>}
         </div>
         <div className="issue-meta">
           {member.name ? member.email : ""}
-          {!member.joined && `${member.name ? " · " : ""}Invited · hasn't accepted yet`}
+          {!member.joined && `${member.name ? " · " : ""}${t("members.invited")}`}
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
@@ -1303,7 +1303,7 @@ function MemberRow({
         <div className="agent-confirm-inline">
           <span className="agent-confirm-text">{confirmText}</span>
           <Button size="small" variant="invisible" onClick={() => setConfirm(null)} disabled={busy}>
-            Cancel
+            {tc("common.cancel")}
           </Button>
           <Button
             size="small"
@@ -1316,10 +1316,10 @@ function MemberRow({
                   : act(() => api.removeMember(app.slug, member.id))
                 : confirm.kind === "role"
                   ? act(() => api.patchMember(app.slug, member.id, confirm.role))
-                  : act(() => api.transfer(app.slug, member.id), `${who} is now an owner too. If you're handing over, change your own role.`)
+                  : act(() => api.transfer(app.slug, member.id), t("members.transferred", { name: who }))
             }
           >
-            {confirm.kind === "remove" ? (you ? "Leave" : "Remove") : confirm.kind === "role" ? "Change" : "Make owner"}
+            {confirm.kind === "remove" ? (you ? t("members.leave") : tc("common.remove")) : confirm.kind === "role" ? t("members.change") : t("members.makeOwner")}
           </Button>
         </div>
       ) : (
@@ -1327,7 +1327,7 @@ function MemberRow({
           {canManage ? (
             <RoleSelect
               value={member.role}
-              label={`Role for ${who}`}
+              label={t("roleFor", { name: who })}
               disabled={busy}
               options={teamRoles.map((r) => {
                 const ownerOnly = !owner && elevated(r)
@@ -1335,7 +1335,7 @@ function MemberRow({
                 return {
                   value: r,
                   label: roleLabel[r],
-                  description: keepOwner ? "A workspace needs an owner who has accepted" : ownerOnly ? "Only owners can grant this" : roleText[r],
+                  description: keepOwner ? t("members.needsOwner") : ownerOnly ? t("members.ownersGrant") : roleText[r],
                   disabled: ownerOnly || keepOwner,
                 }
               })}
@@ -1348,32 +1348,32 @@ function MemberRow({
             <Menu
               align="end"
               width={240}
-              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={`More for ${who}`} icon={<KebabIcon />} {...p} />}
+              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("moreFor", { name: who })} icon={<KebabIcon />} {...p} />}
             >
               {(close) => (
                 <>
                   {canManage && owner && member.joined && member.role !== "owner" && (
                     <MenuItem
-                      description="They become an owner too; you stay one"
+                      description={t("members.transferHint")}
                       onSelect={() => {
                         close()
                         setConfirm({ kind: "transfer" })
                       }}
                     >
-                      Transfer ownership
+                      {t("members.transfer")}
                     </MenuItem>
                   )}
                   {(you ? canLeave : canManage) && (
                     <MenuItem
                       danger
                       disabled={!you && lastOwner}
-                      description={!you && lastOwner ? "A workspace needs an owner who has accepted" : undefined}
+                      description={!you && lastOwner ? t("members.needsOwner") : undefined}
                       onSelect={() => {
                         close()
                         setConfirm({ kind: "remove" })
                       }}
                     >
-                      {you ? "Leave workspace" : "Remove"}
+                      {you ? t("members.leaveWorkspace") : tc("common.remove")}
                     </MenuItem>
                   )}
                 </>
@@ -1393,12 +1393,12 @@ function Blocked({ app }: { app: AppDetail }) {
   const { data: blocks, error } = useResource<Block[]>(keys.blocks(app.slug), () => api.blocks(app.slug), 5_000)
   return (
     <div>
-      <Heading title="Blocked" />
-      <p className="settings-lede">Blocked people can still read, but can't post, edit or upload here. Block someone from the "…" on one of their comments.</p>
+      <Heading title={sectionLabel("blocked")} />
+      <p className="settings-lede">{t("blocked.lede")}</p>
       <section className="box">
         {!blocks && !error && <div className="box-row skeleton-row" />}
         {!!error && !blocks && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {blocks?.length === 0 && <div className="box-empty">No one is blocked.</div>}
+        {blocks?.length === 0 && <div className="box-empty">{t("blocked.empty")}</div>}
         {blocks?.map((b) => <BlockRow key={b.id} slug={app.slug} block={b} />)}
       </section>
     </div>
@@ -1424,16 +1424,16 @@ function BlockRow({ slug, block }: { slug: string; block: Block }) {
       <ActorAvatar actor={block.actor} size={28} />
       <div className="settings-row-main">
         <div className="template-row-name">
-          {actorName(block.actor)} <span className="agent-kind">{block.actor.type === "guest" ? "Guest" : "Account"}</span>
+          {actorName(block.actor)} <span className="agent-kind">{block.actor.type === "guest" ? t("blocked.guest") : t("blocked.account")}</span>
         </div>
         <div className="issue-meta">
-          Blocked by {actorName(block.by)} <Time iso={block.created_at} />
+          {tr("blocked.by", { name: actorName(block.by), time: <Time iso={block.created_at} /> })}
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
       <div className="settings-row-actions">
         <Button size="small" onClick={unblock} disabled={busy}>
-          {busy ? "Unblocking…" : "Unblock"}
+          {busy ? t("blocked.unblocking") : t("blocked.unblock")}
         </Button>
       </div>
     </div>

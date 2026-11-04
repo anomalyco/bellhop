@@ -8,6 +8,9 @@ import { PlusIcon } from "../../ui/icons"
 import { Button } from "../../ui/primitives"
 import { CopyField, Snippet } from "../../ui/onboarding/Snippet"
 import { DocsLink } from "./DocsLink"
+import { t, tr, tKey, useT } from "../../i18n/settings"
+import { t as tc } from "../../i18n/core"
+import { LastUsed } from "./LastUsed"
 import "../../styles/agents.css"
 import "../../styles/features.css"
 
@@ -23,28 +26,29 @@ export function ReportKeys({ app }: { app: AppDetail }) {
   const { data: list, error } = useResource<ReportKey[]>(key, () => api.reportKeys(app.slug), 5_000)
   const [creating, setCreating] = useState(false)
   const [created, setCreated] = useState<NewReportKey | null>(null)
+  useT()
 
   return (
     <div>
       <div className="settings-heading">
-        <h1>Report keys</h1>
+        <h1>{tKey("section.report-keys")}</h1>
         <div className="row">
           <DocsLink page="reports" />
           {!creating && !created && (
             <Button variant="primary" size="small" icon={<PlusIcon />} onClick={() => setCreating(true)}>
-              New key
+              {t("keys.new")}
             </Button>
           )}
         </div>
       </div>
-      <p className="settings-lede">
-        Your app can upload logs and system specs, then open a new-issue page with them attached for the person to review and describe. These
-        keys can only upload report metadata to this workspace, so they're safe to ship inside your app.
-      </p>
+      <p className="settings-lede">{t("keys.lede")}</p>
 
       <p className="key-docs">
-        Send <code>POST /api/apps/{app.slug}/metadata</code> with <code>Authorization: Bearer &lt;key&gt;</code> and JSON (title, message, source, system,
-        context, logs, fingerprint), up to 10 MB. Open the <code>url</code> it returns in the person's browser. Unused uploads expire after 7 days.
+        {tr("keys.docs", {
+          post: <code>POST /api/apps/{app.slug}/metadata</code>,
+          auth: <code>Authorization: Bearer &lt;key&gt;</code>,
+          url: <code>url</code>,
+        })}
       </p>
       {creating && (
         <CreateKey
@@ -63,7 +67,7 @@ export function ReportKeys({ app }: { app: AppDetail }) {
       <section className="box">
         {!list && !error && <div className="box-row skeleton-row" />}
         {!!error && !list && <div className="box-row muted-text">{errorMessage(error)}</div>}
-        {list?.length === 0 && <div className="box-empty">No report keys yet.</div>}
+        {list?.length === 0 && <div className="box-empty">{t("keys.empty")}</div>}
         {list?.map((k) => <KeyRow key={k.id} slug={app.slug} item={k} />)}
       </section>
     </div>
@@ -89,7 +93,7 @@ function CreateKey({ slug, onCancel, onCreated }: { slug: string; onCancel: () =
   return (
     <form className="key-create" onSubmit={submit}>
       <label className="field-label" htmlFor="key-name">
-        Name
+        {t("field.name")}
       </label>
       <div className="key-create-row">
         <div className="input">
@@ -97,20 +101,20 @@ function CreateKey({ slug, onCancel, onCreated }: { slug: string; onCancel: () =
             id="key-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="Desktop app"
+            placeholder={t("keys.namePlaceholder")}
             maxLength={60}
             autoFocus
             autoComplete="off"
           />
         </div>
         <Button variant="invisible" onClick={onCancel} disabled={busy}>
-          Cancel
+          {tc("common.cancel")}
         </Button>
         <Button type="submit" variant="primary" disabled={busy || !name.trim()}>
-          {busy ? "Creating…" : "Create key"}
+          {busy ? t("keys.creating") : t("keys.create")}
         </Button>
       </div>
-      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">Name it after the app or build that will use it.</p>}
+      {error ? <p className="field-error">{error}</p> : <p className="member-invite-hint">{t("keys.nameHint")}</p>}
     </form>
   )
 }
@@ -141,26 +145,26 @@ open(url) // the new-issue page, with this attached`
     <section className="secret" aria-labelledby={`key-${created.id}`}>
       <div className="secret-head">
         <h3 id={`key-${created.id}`} className="secret-title">
-          {created.name} is ready
+          {t("keys.ready", { name: created.name })}
         </h3>
-        <p className="secret-warning">Copy it now. It won't be shown again.</p>
+        <p className="secret-warning">{t("keys.copyNow")}</p>
       </div>
       <div className="secret-field">
-        <span className="secret-label">Report key</span>
+        <span className="secret-label">{t("keys.key")}</span>
         <CopyField value={created.key} />
       </div>
       <div className="key-snippets">
         <div className="secret-field">
-          <span className="secret-label">Try it with curl</span>
+          <span className="secret-label">{t("keys.tryCurl")}</span>
           <Snippet code={curl} label="curl" />
         </div>
         <div className="secret-field">
-          <span className="secret-label">From your app (TypeScript)</span>
+          <span className="secret-label">{t("keys.fromApp")}</span>
           <Snippet code={ts} label="TypeScript" />
         </div>
       </div>
       <div className="secret-actions">
-        <Button onClick={onDone}>Done</Button>
+        <Button onClick={onDone}>{t("keys.done")}</Button>
       </div>
     </section>
   )
@@ -189,31 +193,24 @@ function KeyRow({ slug, item }: { slug: string; item: ReportKey }) {
           <span className="mono key-preview">{item.preview}</span>
         </div>
         <div className="issue-meta">
-          Created <Time iso={item.created_at} /> ·{" "}
-          {item.last_used_at ? (
-            <>
-              last used <Time iso={item.last_used_at} />
-            </>
-          ) : (
-            "not used yet"
-          )}
+          {tr("keys.meta", { time: <Time iso={item.created_at} />, used: <LastUsed iso={item.last_used_at} /> })}
         </div>
         {error && <p className="field-error">{error}</p>}
       </div>
       {confirming ? (
         <div className="agent-confirm-inline">
-          <span className="agent-confirm-text">Revoke it? Apps using it can't upload any more.</span>
+          <span className="agent-confirm-text">{t("keys.confirmRevoke")}</span>
           <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
-            Cancel
+            {tc("common.cancel")}
           </Button>
           <Button size="small" variant="danger" onClick={revoke} disabled={busy}>
-            {busy ? "Revoking…" : "Revoke"}
+            {busy ? t("keys.revoking") : t("keys.revoke")}
           </Button>
         </div>
       ) : (
         <div className="settings-row-actions">
           <Button size="small" variant="invisible" onClick={() => setConfirming(true)}>
-            Revoke
+            {t("keys.revoke")}
           </Button>
         </div>
       )}

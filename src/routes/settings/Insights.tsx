@@ -4,26 +4,29 @@ import { api, errorMessage, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
 import { TierBadge } from "../../ui/Actor"
 import { Label } from "../../ui/primitives"
+import { t, tr, tKey, useT } from "../../i18n/settings"
+import { formatNumber, getLocale } from "../../i18n"
 import "../../styles/insights.css"
 
 type Days = 7 | 30 | 90
 const windows: Days[] = [7, 30, 90]
 
-/** "45s", "12m", "3.4h", "2.1d"; null as "—". */
+/** One decimal below 10 ("3.4"), whole numbers above, in the active language's digits. */
+const compact = (n: number) => new Intl.NumberFormat(getLocale(), { maximumFractionDigits: n < 10 ? 1 : 0 }).format(n)
+
+/** "45s", "12m", "3.4h", "2.1d" (in the language's compact units); null as "—". */
 export function duration(seconds: number | null | undefined) {
   if (seconds == null) return "—"
-  if (seconds < 60) return `${Math.max(0, Math.round(seconds))}s`
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`
-  if (seconds < 86400) {
-    const h = seconds / 3600
-    return `${h < 10 ? h.toFixed(1).replace(/\.0$/, "") : Math.round(h)}h`
-  }
-  const d = seconds / 86400
-  return `${d < 10 ? d.toFixed(1).replace(/\.0$/, "") : Math.round(d)}d`
+  if (seconds < 60) return t("insights.seconds", { n: Math.max(0, Math.round(seconds)) })
+  if (seconds < 3600) return t("insights.minutes", { n: Math.round(seconds / 60) })
+  if (seconds < 86400) return t("insights.hours", { n: compact(seconds / 3600) })
+  return t("insights.daysShort", { n: compact(seconds / 86400) })
 }
 
-const percent = (share: number | null | undefined) => (share == null ? "—" : `${Math.round(share * 100)}%`)
-const ratio = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(2))
+const percent = (share: number | null | undefined) =>
+  share == null ? "—" : new Intl.NumberFormat(getLocale(), { style: "percent", maximumFractionDigits: 0 }).format(share)
+const ratio = (n: number | null | undefined) =>
+  n == null ? "—" : new Intl.NumberFormat(getLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n)
 
 /**
  * Settings → Insights (members): how the workspace is doing over 7, 30 or 90 days. The agent-resolved rate leads,
@@ -31,6 +34,7 @@ const ratio = (n: number | null | undefined) => (n == null ? "—" : n.toFixed(2
  * daily chart of opened and closed with the first-response median; and breakdowns by tier and label.
  */
 export function Insights({ app }: { app: AppDetail }) {
+  useT()
   const [days, setDays] = useState<Days>(30)
   const { data, error } = useResource<Analytics>(keys.analytics(app.slug, days), () => api.analytics(app.slug, days), 60_000)
   // The last answer stays up (dimmed) while another window loads, so nothing collapses and nothing moves.
@@ -42,22 +46,26 @@ export function Insights({ app }: { app: AppDetail }) {
   return (
     <div className="insights">
       <div className="settings-heading insights-heading">
-        <h1>Insights</h1>
-        <div className="segmented" role="radiogroup" aria-label="Period">
+        <h1>{tKey("section.insights")}</h1>
+        <div className="segmented" role="radiogroup" aria-label={t("insights.period")}>
           {windows.map((d) => (
             <button key={d} type="button" role="radio" aria-checked={days === d} aria-pressed={days === d} onClick={() => setDays(d)}>
-              {d} days
+              {t("insights.days", { count: d })}
             </button>
           ))}
         </div>
       </div>
-      <p className="settings-lede">Issues opened in the last {days} days. Times are medians; the queue is right now.</p>
+      <p className="settings-lede">{t("insights.lede", { count: days })}</p>
       {error && !shown ? (
         <p className="flash" data-tone="danger">
           {errorMessage(error)}
         </p>
+      ) : !shown ? (
+        // Nothing until the first answer: translated numbers and notes wrap differently from any skeleton, and an
+        // empty area below can fill in without moving anything.
+        <div className="insights-body" aria-busy="true" />
       ) : (
-        <div className="insights-body" data-pending={(pending && !!shown) || undefined} aria-busy={pending || undefined}>
+        <div className="insights-body" data-pending={pending || undefined} aria-busy={pending || undefined}>
           <Headline data={shown} days={days} />
           <Chart data={shown} />
           <Breakdowns app={app} data={shown} />
@@ -85,9 +93,9 @@ function Headline({ data, days }: { data: Analytics | null; days: Days }) {
   const d = data
   const resolved = d?.agent_resolved_share
   return (
-    <section className="headline" aria-label="Headline numbers">
+    <section className="headline" aria-label={t("insights.headline")}>
       <div className="hero">
-        <span className="stat-label">Resolved by agents</span>
+        <span className="stat-label">{t("insights.resolvedByAgents")}</span>
         <span className="hero-value" data-empty={(ready && resolved == null) || undefined}>
           {ready ? percent(resolved) : <span className="skeleton hero-skeleton" />}
         </span>
@@ -95,8 +103,8 @@ function Headline({ data, days }: { data: Analytics | null; days: Days }) {
           {!ready
             ? "\u00a0"
             : resolved == null
-              ? `Nothing was resolved in the last ${days} days yet.`
-              : "of resolved issues were closed by an agent, with no human reply and no reopen."}
+              ? t("insights.nothingResolved", { count: days })
+              : t("insights.resolvedText")}
         </p>
         <div className="hero-bar" aria-hidden="true">
           <span style={{ width: `${Math.round((resolved ?? 0) * 100)}%` }} />
@@ -105,34 +113,45 @@ function Headline({ data, days }: { data: Analytics | null; days: Days }) {
       <div className="stats">
         <Stat
           ready={ready}
-          label="First response"
+          label={t("insights.firstResponse")}
           value={duration(d?.first_response.median)}
-          hint="No replies yet"
+          hint={t("insights.noReplies")}
           sub={
             <>
-              p90 {duration(d?.first_response.p90)}
-              {d?.first_response.by_agent_share != null && <> · {percent(d.first_response.by_agent_share)} by agents</>}
+              {t("insights.p90", { value: duration(d?.first_response.p90) })}
+              {d?.first_response.by_agent_share != null && <> · {t("insights.byAgents", { share: percent(d.first_response.by_agent_share) })}</>}
             </>
           }
         />
-        <Stat ready={ready} label="Resolution" value={duration(d?.resolution.median)} hint="Nothing resolved yet" sub={<>p90 {duration(d?.resolution.p90)}</>} />
-        <Stat ready={ready} label="Reopened" value={percent(d?.reopened_share)} hint="No issues in this period" sub="of issues opened" />
         <Stat
           ready={ready}
-          label="This helped, per reply"
-          value={ratio(d?.helpful_per_reply.agent)}
-          hint="No agent replies yet"
-          sub={<>agents · people {ratio(d?.helpful_per_reply.human)}</>}
+          label={t("insights.resolution")}
+          value={duration(d?.resolution.median)}
+          hint={t("insights.nothingResolvedYet")}
+          sub={t("insights.p90", { value: duration(d?.resolution.p90) })}
         />
-        <Stat ready={ready} label="Waiting on the team" value={d ? String(d.waiting_on_team) : "—"} sub="open now" />
-        <Stat ready={ready} label="Opened · closed" value={d ? `${d.opened} · ${d.closed}` : "—"} sub={`in ${days} days`} />
+        <Stat ready={ready} label={t("insights.reopened")} value={percent(d?.reopened_share)} hint={t("insights.noIssues")} sub={t("insights.ofOpened")} />
+        <Stat
+          ready={ready}
+          label={t("insights.helped")}
+          value={ratio(d?.helpful_per_reply.agent)}
+          hint={t("insights.noAgentReplies")}
+          sub={t("insights.agentsPeople", { value: ratio(d?.helpful_per_reply.human) })}
+        />
+        <Stat ready={ready} label={t("insights.waiting")} value={d ? formatNumber(d.waiting_on_team) : "—"} sub={t("insights.openNow")} />
+        <Stat
+          ready={ready}
+          label={t("insights.openedClosed")}
+          value={d ? `${formatNumber(d.opened)} · ${formatNumber(d.closed)}` : "—"}
+          sub={t("insights.inDays", { count: days })}
+        />
       </div>
     </section>
   )
 }
 
-const shortDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" })
-const fmtDate = (iso: string) => shortDate.format(new Date(`${iso}T00:00:00Z`))
+const fmtDate = (iso: string) =>
+  new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${iso}T00:00:00Z`))
 
 /** The daily chart: opened and closed as bars, the first-response median as a line on its own scale. Plain SVG. */
 function Chart({ data }: { data: Analytics | null }) {
@@ -179,29 +198,29 @@ function Chart({ data }: { data: Analytics | null }) {
   }
 
   return (
-    <section className="chart" aria-label="Opened and closed per day">
+    <section className="chart" aria-label={t("insights.chart")}>
       <div className="chart-head">
         <div className="chart-legend" aria-hidden="true">
           <span className="legend" data-kind="opened">
-            Opened
+            {t("insights.opened")}
           </span>
           <span className="legend" data-kind="closed">
-            Closed
+            {t("insights.closed")}
           </span>
           <span className="legend" data-kind="response">
-            First response
+            {t("insights.firstResponse")}
           </span>
         </div>
         <p className="chart-readout" aria-live="polite">
           {active ? (
-            <>
-              <span className="mono">{fmtDate(active.date)}</span> · {active.opened} opened · {active.closed} closed · first response{" "}
-              {duration(active.first_response_median)}
-            </>
+            tr("insights.readoutDay", {
+              date: <span className="mono">{fmtDate(active.date)}</span>,
+              opened: active.opened,
+              closed: active.closed,
+              response: duration(active.first_response_median),
+            })
           ) : data ? (
-            <>
-              {data.opened} opened · {data.closed} closed
-            </>
+            t("insights.readoutTotal", { opened: data.opened, closed: data.closed })
           ) : (
             "\u00a0"
           )}
@@ -213,7 +232,7 @@ function Chart({ data }: { data: Analytics | null }) {
         style={{ height }}
         tabIndex={0}
         role="img"
-        aria-label={data ? `${data.opened} opened and ${data.closed} closed over ${data.days} days. Use the arrow keys to read each day.` : "Loading"}
+        aria-label={data ? t("insights.chartLabel", { opened: data.opened, closed: data.closed, days: data.days }) : t("insights.chartLoading")}
         onKeyDown={onKey}
         onBlur={() => setFocus(null)}
         onPointerLeave={() => setFocus(null)}
@@ -226,11 +245,11 @@ function Chart({ data }: { data: Analytics | null }) {
       >
         {width > 0 && data && (
           <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-            {[0, top / 2, top].map((t) => (
-              <g key={t}>
-                <line className="chart-grid" x1={pad.left} x2={pad.left + w} y1={y(t)} y2={y(t)} />
-                <text className="chart-axis" x={pad.left - 6} y={y(t) + 3.5} textAnchor="end">
-                  {Number.isInteger(t) ? t : t.toFixed(1)}
+            {[0, top / 2, top].map((tick) => (
+              <g key={tick}>
+                <line className="chart-grid" x1={pad.left} x2={pad.left + w} y1={y(tick)} y2={y(tick)} />
+                <text className="chart-axis" x={pad.left - 6} y={y(tick) + 3.5} textAnchor="end">
+                  {formatNumber(tick)}
                 </text>
               </g>
             ))}
@@ -261,7 +280,7 @@ function Chart({ data }: { data: Analytics | null }) {
         )}
         {empty && (
           <p className="chart-empty">
-            <span>No issues opened in this period.</span>
+            <span>{t("insights.chartEmpty")}</span>
           </p>
         )}
       </div>
@@ -280,20 +299,20 @@ function Breakdowns({ app, data }: { app: AppDetail; data: Analytics | null }) {
   // Analytics names labels and tiers; their colours come from the app and the tier list.
   const { data: tierList } = useResource<Tier[]>(keys.tiers(app.slug), () => api.tiers(app.slug), 30_000)
   const labelColor = (name: string) => app.labels.find((l) => l.name === name)?.color ?? "878d96"
-  const tierColor = (name: string) => tierList?.find((t) => t.name === name)?.color ?? "878d96"
+  const tierColor = (name: string) => tierList?.find((x) => x.name === name)?.color ?? "878d96"
   const labels = data?.by_label ?? []
   const tiers = data?.by_tier ?? []
   const maxLabel = Math.max(1, ...labels.map((l) => l.opened))
-  const maxTier = Math.max(1, ...tiers.map((t) => t.opened))
+  const maxTier = Math.max(1, ...tiers.map((x) => x.opened))
   return (
     <div className="breakdowns">
       <section className="breakdown" aria-labelledby="by-label">
         <h2 id="by-label" className="section-title">
-          By label
+          {t("insights.byLabel")}
         </h2>
         <div className="box">
           {!data && <div className="box-row skeleton-row" />}
-          {data && labels.length === 0 && <div className="box-empty">No labeled issues in this period.</div>}
+          {data && labels.length === 0 && <div className="box-empty">{t("insights.byLabelEmpty")}</div>}
           {labels.map((l) => (
             <div key={l.label} className="box-row breakdown-row">
               <span className="breakdown-name">
@@ -302,31 +321,31 @@ function Breakdowns({ app, data }: { app: AppDetail; data: Analytics | null }) {
               <span className="breakdown-bar" aria-hidden="true">
                 <span style={{ width: `${(l.opened / maxLabel) * 100}%` }} />
               </span>
-              <span className="breakdown-num">{l.opened}</span>
+              <span className="breakdown-num">{formatNumber(l.opened)}</span>
             </div>
           ))}
         </div>
       </section>
       <section className="breakdown" aria-labelledby="by-tier">
         <h2 id="by-tier" className="section-title">
-          By tier
+          {t("insights.byTier")}
         </h2>
         <div className="box">
           {!data && <div className="box-row skeleton-row" />}
-          {data && tiers.length === 0 && <div className="box-empty">No reporters with a tier opened issues in this period.</div>}
-          {tiers.map((t) => (
-            <div key={t.tier} className="box-row breakdown-row">
+          {data && tiers.length === 0 && <div className="box-empty">{t("insights.byTierEmpty")}</div>}
+          {tiers.map((tier) => (
+            <div key={tier.tier} className="box-row breakdown-row">
               <span className="breakdown-name">
-                <TierBadge tier={{ name: t.tier, color: tierColor(t.tier) }} />
+                <TierBadge tier={{ name: tier.tier, color: tierColor(tier.tier) }} />
               </span>
               <span className="breakdown-bar" aria-hidden="true">
-                <span style={{ width: `${(t.opened / maxTier) * 100}%` }} />
+                <span style={{ width: `${(tier.opened / maxTier) * 100}%` }} />
               </span>
-              <span className="breakdown-num" title="Opened">
-                {t.opened}
+              <span className="breakdown-num" title={t("insights.opened")}>
+                {formatNumber(tier.opened)}
               </span>
-              <span className="breakdown-sub" title="First response, median">
-                {duration(t.first_response_median)}
+              <span className="breakdown-sub" title={t("insights.median")}>
+                {duration(tier.first_response_median)}
               </span>
             </div>
           ))}

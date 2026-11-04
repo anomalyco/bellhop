@@ -6,6 +6,9 @@ import { appPath } from "../../lib/site"
 import { Time } from "../../lib/time"
 import { Button, Dots } from "../../ui/primitives"
 import { AppLink } from "../../ui/SiteLink"
+import { t, tr, tKey, useT } from "../../i18n/settings"
+import { t as tc } from "../../i18n/core"
+import { formatNumber, sentenceGap } from "../../i18n"
 import "../../styles/data.css"
 
 /** The last import started from this browser, so its progress survives a reload (the API reads one job by id). */
@@ -36,10 +39,11 @@ const validRepo = (r: string) => /^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?\/[a-z0-9
 
 /** Settings → Data (admins): download the workspace as NDJSON, and import issues from a GitHub repository. */
 export function Data({ app }: { app: AppDetail }) {
+  useT()
   return (
     <div className="data">
       <div className="settings-heading">
-        <h1>Data</h1>
+        <h1>{tKey("section.data")}</h1>
       </div>
       <Export app={app} />
       <GitHubImport app={app} />
@@ -51,16 +55,13 @@ function Export({ app }: { app: AppDetail }) {
   return (
     <section className="data-section" aria-labelledby="export-title">
       <h2 id="export-title" className="data-title">
-        Export
+        {t("data.export")}
       </h2>
-      <p className="data-text">
-        Everything in this workspace as one file, a JSON object per line: settings, labels, templates, tiers, members, then each issue with its
-        comments (internal notes included), events, votes and file links. Secrets never are: no webhook secret, keys or tokens.
-      </p>
+      <p className="data-text">{t("data.exportText")}</p>
       <div className="data-actions">
         <a className="btn" data-variant="default" href={api.exportUrl(app.slug)} download={`${app.slug}.ndjson`}>
           <DownloadIcon />
-          Download workspace (NDJSON)
+          {t("data.download")}
         </a>
       </div>
     </section>
@@ -123,17 +124,14 @@ function GitHubImport({ app }: { app: AppDetail }) {
   return (
     <section className="data-section" aria-labelledby="import-title">
       <h2 id="import-title" className="data-title">
-        Import from GitHub
+        {t("data.import")}
       </h2>
-      <p className="data-text">
-        Copies a repository's issues, comments and labels into this workspace in the background. Authors show as guests named after their
-        GitHub login, and each issue links back to the original. One import runs at a time.
-      </p>
+      <p className="data-text">{t("data.importText")}</p>
       <form className="data-form" onSubmit={start} aria-disabled={disabled || undefined}>
         <fieldset disabled={disabled} className="data-fieldset">
           <div className="field">
             <label className="field-label" htmlFor="gh-repo">
-              Repository
+              {t("data.repo")}
             </label>
             <div className="input" data-invalid={(repo.trim() && !repoOk) || undefined}>
               <input
@@ -148,12 +146,12 @@ function GitHubImport({ app }: { app: AppDetail }) {
               />
             </div>
             <p id="gh-repo-hint" className="data-hint">
-              {repo.trim() && !repoOk ? "Use owner/name, like acme/app, or paste the repository's URL." : repo.trim() && name !== repo.trim() ? `Imports ${name}` : "Like acme/app, or the repository's URL."}
+              {repo.trim() && !repoOk ? t("data.repoInvalid") : repo.trim() && name !== repo.trim() ? t("data.repoImports", { name }) : t("data.repoHint")}
             </p>
           </div>
           <div className="field">
             <label className="field-label" htmlFor="gh-token">
-              Access token
+              {t("data.token")}
             </label>
             <div className="input">
               <input
@@ -169,20 +167,20 @@ function GitHubImport({ app }: { app: AppDetail }) {
               />
             </div>
             <p id="gh-token-hint" className="data-hint">
-              A fine-grained token with read-only <strong>Issues</strong> access to this repository. It's used for this import only, then deleted.{" "}
+              {tr("data.tokenHint", { issues: <strong>{t("data.tokenIssues")}</strong> })}{" "}
               <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">
-                Create one ↗
+                {t("data.createToken")}
               </a>
             </p>
           </div>
           <div className="field">
             <span className="field-label" id="gh-state-label">
-              Issues
+              {t("data.issues")}
             </span>
             <div className="segmented" role="radiogroup" aria-labelledby="gh-state-label">
               {(["all", "open"] as const).map((v) => (
                 <button key={v} type="button" role="radio" aria-checked={filter === v} aria-pressed={filter === v} onClick={() => setFilter(v)}>
-                  {v === "all" ? "All, open and closed" : "Open only"}
+                  {v === "all" ? t("data.all") : t("data.open")}
                 </button>
               ))}
             </div>
@@ -194,9 +192,9 @@ function GitHubImport({ app }: { app: AppDetail }) {
           )}
           <div className="row">
             <Button type="submit" variant="primary" disabled={disabled || !repoOk || !token.trim()}>
-              {busy ? "Checking with GitHub…" : "Start import"}
+              {busy ? t("data.checking") : t("data.start")}
             </Button>
-            {active && <span className="data-hint">An import is running; this form opens again when it finishes.</span>}
+            {active && <span className="data-hint">{t("data.running")}</span>}
           </div>
         </fieldset>
       </form>
@@ -208,25 +206,26 @@ function GitHubImport({ app }: { app: AppDetail }) {
 /** The server's refusals in plain words; GitHub's own message comes through for validation failures. */
 function importError(e: unknown) {
   if (!(e instanceof ApiFailure)) return errorMessage(e)
-  if (e.code === "import_active") return "An import is already running in this workspace. Start another when it finishes."
+  if (e.code === "import_active") return t("data.errActive")
   if (e.code === "github_validation") {
     const m = e.message.toLowerCase()
-    if (e.status === 429 || m.includes("rate limit")) return "GitHub is rate limiting this token. Try again in a few minutes."
-    if (m.includes("rejected the token")) return "GitHub didn't accept that token. Check it's pasted in full and hasn't expired."
-    if (m.includes("not found")) return "GitHub couldn't find that repository with this token. Check the name, and that the token can read its issues."
-    if (m.includes("lacks permission")) return "The token can't read this repository's issues. Give it read-only Issues access to the repository."
-    if (m.includes("temporarily unavailable")) return "GitHub isn't answering right now. Try again in a minute."
-    if (m.includes("does not match")) return "That repository has moved or been renamed. Use its current owner/name."
-    return `GitHub said: ${e.message}`
+    if (e.status === 429 || m.includes("rate limit")) return t("data.errRateLimit")
+    if (m.includes("rejected the token")) return t("data.errToken")
+    if (m.includes("not found")) return t("data.errNotFound")
+    if (m.includes("lacks permission")) return t("data.errPermission")
+    if (m.includes("temporarily unavailable")) return t("data.errUnavailable")
+    if (m.includes("does not match")) return t("data.errMoved")
+    return t("data.githubSaid", { message: e.message })
   }
-  if (/does not match/i.test(e.message)) return "That repository has moved or been renamed. Use its current owner/name."
-  if (e.code === "invalid_input") return "Use a repository as owner/name and paste the whole token."
+  if (/does not match/i.test(e.message)) return t("data.errMoved")
+  if (e.code === "invalid_input") return t("data.errInput")
   return e.message
 }
 
 const sentence = (s: string) => (/[.!?]$/.test(s.trim()) ? s.trim() : `${s.trim()}.`)
 
-const stateText: Record<ImportJob["state"], string> = { queued: "Queued", running: "Importing", done: "Done", failed: "Failed" }
+const stateText = (state: ImportJob["state"]) =>
+  ({ queued: t("data.queued"), running: t("data.importing"), done: t("data.done"), failed: t("data.failed") })[state]
 
 function Progress({ slug, job, onDismiss }: { slug: string; job: ImportJob; onDismiss: () => void }) {
   const active = job.state === "queued" || job.state === "running"
@@ -236,7 +235,7 @@ function Progress({ slug, job, onDismiss }: { slug: string; job: ImportJob; onDi
       <div className="import-job-head">
         <span className="import-state" data-state={job.state}>
           {active && <Dots />}
-          {stateText[job.state]}
+          {stateText(job.state)}
         </span>
         <a className="import-repo mono" href={`https://github.com/${job.repo}`} target="_blank" rel="noopener">
           {job.repo} ↗
@@ -244,41 +243,37 @@ function Progress({ slug, job, onDismiss }: { slug: string; job: ImportJob; onDi
         <span className="spacer" />
         {!active && (
           <Button size="small" variant="invisible" onClick={onDismiss}>
-            Dismiss
+            {tc("common.dismiss")}
           </Button>
         )}
       </div>
       <p className="import-counts">
-        <span>
-          <strong>{n.issues}</strong> {n.issues === 1 ? "issue" : "issues"}
-        </span>
-        <span>
-          <strong>{n.comments}</strong> {n.comments === 1 ? "comment" : "comments"}
-        </span>
-        <span>
-          <strong>{n.labels}</strong> {n.labels === 1 ? "label" : "labels"}
-        </span>
+        <span>{tr("data.countIssues", { count: n.issues, n: <strong>{formatNumber(n.issues)}</strong> })}</span>
+        <span>{tr("data.countComments", { count: n.comments, n: <strong>{formatNumber(n.comments)}</strong> })}</span>
+        <span>{tr("data.countLabels", { count: n.labels, n: <strong>{formatNumber(n.labels)}</strong> })}</span>
       </p>
       <p className="import-meta">
-        {job.state === "queued" && "Waiting to start. "}
-        {job.state === "running" && "Copying in the background; you can leave this page. "}
-        Started <Time iso={job.created_at} />
+        {job.state === "queued" && t("data.waiting") + sentenceGap()}
+        {job.state === "running" && t("data.copying") + sentenceGap()}
+        {tr("data.started", { time: <Time iso={job.created_at} /> })}
         {job.finished_at && (
           <>
-            {" "}
-            · finished <Time iso={job.finished_at} />
+            {" · "}
+            {tr("data.finished", { time: <Time iso={job.finished_at} /> })}
           </>
         )}
       </p>
       {job.state === "failed" && (
         <p className="import-error">
-          {sentence(job.error ?? "The import stopped")} <span className="import-error-note">Anything imported before it stopped stays.</span>
+          {job.error ? sentence(job.error) : t("data.stopped")}
+          {sentenceGap()}
+          <span className="import-error-note">{t("data.stoppedNote")}</span>
         </p>
       )}
       {job.state === "done" && (
         <p className="import-done">
           <AppLink slug={slug} href={appPath(slug, "/?q=" + encodeURIComponent("is:open"))}>
-            See the issues
+            {t("data.see")}
           </AppLink>
         </p>
       )}
