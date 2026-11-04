@@ -1,5 +1,17 @@
 import { memo, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 
+// The server's clock, as far as this page knows: boot data carries the server time, so relative times read the
+// same as on the server even when this device's clock is off.
+let offset = 0
+export const clockNow = () => Date.now() + offset
+/** `serverIso` was the server's time when this device's clock read `clientAt`. */
+export function setServerClock(serverIso: string, clientAt: number) {
+  const d = Date.parse(serverIso) - clientAt
+  if (!Number.isFinite(d)) return
+  offset = Math.abs(d) < 1000 ? 0 : d
+  minute = clockNow()
+}
+
 // One shared minute ticker re-renders every relative time on the page.
 let minute = Date.now()
 const listeners = new Set<() => void>()
@@ -8,7 +20,7 @@ let timer: ReturnType<typeof setInterval> | undefined
 function subscribe(listener: () => void) {
   listeners.add(listener)
   timer ??= setInterval(() => {
-    minute = Date.now()
+    minute = clockNow()
     for (const l of listeners) l()
   }, 60_000)
   return () => {
@@ -24,7 +36,7 @@ const short = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric
 const long = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", year: "numeric" })
 const full = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
 
-export function relative(iso: string, now = Date.now()) {
+export function relative(iso: string, now = clockNow()) {
   const date = new Date(iso)
   const s = Math.max(0, (now - date.getTime()) / 1000)
   if (s < 45) return "just now"
@@ -37,7 +49,7 @@ export function relative(iso: string, now = Date.now()) {
 export const Time = memo(function Time({ iso }: { iso: string }) {
   const now = useSyncExternalStore(subscribe, () => minute)
   // A freshly mounted time should not lag the shared minute tick.
-  const [mountedAt] = useState(Date.now)
+  const [mountedAt] = useState(clockNow)
   const title = useMemo(() => full.format(new Date(iso)), [iso])
   return (
     <time className="time" dateTime={iso} title={title}>
@@ -50,10 +62,10 @@ export const Time = memo(function Time({ iso }: { iso: string }) {
 export function useUntil(iso: string | null | undefined) {
   const [, force] = useState(0)
   useEffect(() => {
-    const ms = iso ? new Date(iso).getTime() - Date.now() : -1
+    const ms = iso ? new Date(iso).getTime() - clockNow() : -1
     if (ms <= 0) return
     const t = setTimeout(() => force((n) => n + 1), Math.min(ms + 50, 2 ** 31 - 1))
     return () => clearTimeout(t)
   }, [iso])
-  return iso ? new Date(iso).getTime() > Date.now() : false
+  return iso ? new Date(iso).getTime() > clockNow() : false
 }

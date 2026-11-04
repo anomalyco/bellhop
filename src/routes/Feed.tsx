@@ -4,7 +4,7 @@ import { useLocation, useSearch } from "wouter"
 import type { Activity, App, FeedApp, FeedIssue, FeedList, LiveEvent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { invalidate, load, setData, updateAll, useResource } from "../lib/cache"
-import { formatQuery, parseQuery, type Filter } from "../lib/issues"
+import { feedKey, formatQuery, parseQuery, type Filter } from "../lib/issues"
 import { useLive } from "../lib/live"
 import { flip, SPRING_30 } from "../lib/motion"
 import { RailReports } from "../ui/features/QuickLinks"
@@ -17,7 +17,7 @@ import { NoClosed, NoOpen, NoPublicWorkspaces, NoResults } from "../ui/onboardin
 import { IssueRow, SearchBox, SkeletonRows } from "./Issues"
 import "../styles/feed.css"
 
-export const feedKey = (f: Pick<Filter, "state" | "text">) => `${keys.feed}${f.state}|${f.text}`
+export { feedKey }
 export const fetchFeed = (f: Pick<Filter, "state" | "text">, cursor?: string) => api.feed({ state: f.state, q: f.text || undefined, cursor })
 
 const fits = (issue: FeedIssue, key: string) => {

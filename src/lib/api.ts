@@ -14,6 +14,7 @@ import type {
   ConnectedAgent,
   FeedApp,
   FeedList,
+  ImportJob,
   Invitation,
   Issue,
   IssueList,
@@ -72,7 +73,8 @@ export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Something went wrong."
 }
 
-async function failure(res: Response) {
+/** An error response as an ApiFailure (for callers that read the response themselves, like /api/page). */
+export async function failure(res: Response) {
   const body = (await res.json().catch(() => null)) as ApiError | null
   return new ApiFailure(res.status, body?.error?.code ?? `http_${res.status}`, body?.error?.message ?? res.statusText, body?.error?.moved_to)
 }
@@ -86,6 +88,11 @@ let guestReady = (() => {
   }
 })()
 let firstFlight: Promise<void> | null = null
+
+/** The page's own response already gave this browser its guest cookie (boot data): requests needn't queue. */
+export function bootGuestReady() {
+  markGuestReady()
+}
 
 function markGuestReady() {
   guestReady = true
@@ -157,7 +164,7 @@ export const api = {
   feedApps: () => get<FeedApp[]>("/api/feed/apps"),
   createApp: (input: NewApp) => request<AppDetail>("POST", "/api/apps", input),
   app: (slug: string) => get<AppDetail>(app(slug)),
-  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility }) => request<AppDetail>("PATCH", app(slug), input),
+  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean; visibility?: AppVisibility; nudge_days?: number | null }) => request<AppDetail>("PATCH", app(slug), input),
   settings: (slug: string) => get<AppSettings>(`${app(slug)}/settings`),
   putWebhook: (slug: string, url: string | null, events?: WebhookEventType[]) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url, events }),
   redeliver: (slug: string, id: string) => request<{ delivery_id: string }>("POST", `${app(slug)}/webhook/deliveries/${enc(id)}/redeliver`),
@@ -276,6 +283,10 @@ export const api = {
     if (params.cursor) qs.set("cursor", params.cursor)
     return get<AuditPage>(`${app(slug)}/audit${qs.size ? `?${qs}` : ""}`)
   },
+  /** The workspace as NDJSON; a plain link downloads it (same-origin cookies), this is the URL. */
+  exportUrl: (slug: string) => `${app(slug)}/export`,
+  importGitHub: (slug: string, input: { repo: string; token: string; state?: "open" | "all" }) => request<ImportJob>("POST", `${app(slug)}/import/github`, input),
+  importJob: (slug: string, id: string) => get<ImportJob>(`${app(slug)}/import/${enc(id)}`),
   savedReplies: (slug: string) => get<SavedReply[]>(`${app(slug)}/saved-replies`),
   createSavedReply: (slug: string, input: SavedReplyInput) => request<SavedReply>("POST", `${app(slug)}/saved-replies`, input),
   patchSavedReply: (slug: string, id: string, input: SavedReplyInput) => request<SavedReply>("PATCH", `${app(slug)}/saved-replies/${enc(id)}`, input),
@@ -316,6 +327,7 @@ export const keys = {
   /** Every audit page of an app shares this prefix; then the actor and action filters. */
   audit: (slug: string, actor = "", action = "") => `audit:${slug}:${actor}|${action}`,
   savedReplies: (slug: string) => `saved-replies:${slug}`,
+  importJob: (slug: string, id: string) => `import:${slug}:${id}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

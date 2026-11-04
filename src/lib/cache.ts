@@ -90,6 +90,36 @@ export function setData<T>(key: string, update: T | ((prev: T | undefined) => T 
   emit(e)
 }
 
+/**
+ * Fills `key` with data the server just sent another way (the page's boot payload, /api/page), marked fresh so
+ * nothing refetches it on mount. Leaves an entry alone while its own request is in flight.
+ */
+export function seed<T>(key: string, data: T) {
+  const e = entry(key)
+  if (e.promise) return
+  e.at = Date.now()
+  if (e.data !== undefined && e.error === undefined && JSON.stringify(e.data) === JSON.stringify(data)) return
+  e.data = data
+  e.error = undefined
+  emit(e)
+}
+
+/** Records a known failure for `key` (a page that isn't there), fresh, so the page renders it without asking. */
+export function seedError(key: string, error: unknown) {
+  const e = entry(key)
+  if (e.promise) return
+  e.at = Date.now()
+  e.data = undefined
+  e.error = error
+  emit(e)
+}
+
+/** Whether `key` has data newer than `maxAge` ms, or a request already on its way. */
+export function fresh(key: string, maxAge: number) {
+  const e = store.get(key)
+  return !!e && (!!e.promise || (e.data !== undefined && Date.now() - e.at < maxAge))
+}
+
 /** Applies `update` to every cached entry whose key starts with `prefix`. */
 export function updateAll<T>(prefix: string, update: (prev: T, key: string) => T | undefined) {
   for (const [key, e] of store) {
@@ -112,6 +142,39 @@ export function invalidate(prefix: string) {
   for (const [key, e] of store) if (key.startsWith(prefix)) e.at = 0
 }
 
+// On a boot-data page load, resources the HTML didn't carry (a sidebar's follow state, a rail) wait until the
+// first frame has painted: that frame is the page itself, with nothing on the network ahead of it.
+let painted = true
+const afterPaint: (() => void)[] = []
+export function holdFetchesUntilPaint(root: Element | null) {
+  painted = false
+  const release = () => {
+    painted = true
+    for (const run of afterPaint.splice(0)) run()
+  }
+  // Released by the first contentful paint itself (text can wait on a web font past the first frame); a page
+  // that never paints text, or a browser without paint timing, lets go after a few frames or 3 s.
+  let done = false
+  const once = () => {
+    if (done) return
+    done = true
+    release()
+  }
+  try {
+    const po = new PerformanceObserver((list) => {
+      if (list.getEntries().some((e) => e.name === "first-contentful-paint")) {
+        po.disconnect()
+        setTimeout(once, 0)
+      }
+    })
+    po.observe({ type: "paint", buffered: true })
+  } catch {
+    const frame = () => (!root || root.childElementCount > 0 ? setTimeout(once, 0) : requestAnimationFrame(frame))
+    requestAnimationFrame(frame)
+  }
+  setTimeout(once, 3000)
+}
+
 export function useResource<T>(key: string | null, fetcher: () => Promise<T>, maxAge = 2_000) {
   const subscribe = useCallback(
     (listener: () => void) => {
@@ -127,7 +190,11 @@ export function useResource<T>(key: string | null, fetcher: () => Promise<T>, ma
   useEffect(() => {
     if (!key) return
     const e = entry(key)
-    if (!e.promise && Date.now() - e.at > maxAge) load(key, fetcher).catch(() => {})
+    const refresh = () => {
+      if (!e.promise && Date.now() - e.at > maxAge) load(key, fetcher).catch(() => {})
+    }
+    if (painted) refresh()
+    else afterPaint.push(refresh)
     // The fetcher is derived from the key, so the key alone decides when to refetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])

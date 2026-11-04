@@ -8,6 +8,9 @@ const suffix = port ? `:${port}` : ""
 export const hostSlug = domain && hostname.endsWith(`.${domain}`) ? hostname.slice(0, -domain.length - 1) : null
 export const onHome = !!domain && hostname === domain
 
+/** First path segments that are the home domain's own pages, not workspaces under /<slug> (path mode). */
+export const homeSegments = new Set(["_design", "oauth", "device", "agents", "signin", "workspaces", "new", "reports", "settings"])
+
 /**
  * A link to `rest` ("/issues/3", "/settings", "?q=…") inside an app. Same-app links stay relative so client-side
  * navigation works; from the home domain or another app it's an absolute URL on that app's subdomain.

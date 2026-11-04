@@ -4,7 +4,8 @@ import { Route, Switch } from "wouter"
 import { api, keys, loadConfig, loadMe } from "./lib/api"
 import { load } from "./lib/cache"
 import { fetchList, listKey, parseQuery } from "./lib/issues"
-import { appPath, hostSlug, onHome } from "./lib/site"
+import { readBoot, seedBoot } from "./lib/page"
+import { appPath, homeSegments, hostSlug, onHome } from "./lib/site"
 import { Feed, feedKey, fetchFeed } from "./routes/Feed"
 import { NewWorkspacePage, WorkspacesPage } from "./routes/Home"
 import { SignInPage } from "./routes/home/SignIn"
@@ -25,8 +26,7 @@ const Agents = lazy(() => import("./routes/Agents").then((m) => ({ default: m.Ag
 const Reports = lazy(() => import("./routes/Reports").then((m) => ({ default: m.ReportsPage })))
 const NotificationSettings = lazy(() => import("./routes/NotificationSettings").then((m) => ({ default: m.NotificationSettingsPage })))
 
-/** First path segments that are the home domain's own pages, not old /<slug> links. */
-const homePages = new Set(["_design", "oauth", "device", "agents", "signin", "workspaces", "new", "reports", "settings"])
+const homePages = homeSegments
 
 // Old /<slug>/… links on the home domain move to the app's subdomain.
 const [, first, ...rest] = window.location.pathname.split("/")
@@ -34,6 +34,7 @@ const moved = onHome && first && !homePages.has(first) ? appPath(first, `/${rest
 if (moved) window.location.replace(moved + window.location.search + window.location.hash)
 else start()
 
+/** No boot data (an old cached page, or a dev setup without the Worker): fetch what the first screen reads. */
 function warmInitialRoute() {
   if (!hostSlug && (window.location.pathname === "/signin" || window.location.pathname.startsWith("/oauth/") || window.location.pathname === "/device")) {
     loadConfig().catch(() => {})
@@ -67,15 +68,36 @@ function warmInitialRoute() {
   if (subpath === "/new") void loadMarkdown()
 }
 
+/** With boot data the API is already answered; only the code the first screen needs is still worth warming. */
+function warmInitialCode() {
+  const subpath = hostSlug ? window.location.pathname : `/${rest.join("/")}`
+  const inApp = !!hostSlug || (!onHome && !!first && !homePages.has(first))
+  if (inApp && (/^\/issues\/[1-9]\d*$/.test(subpath) || subpath === "/new")) void loadMarkdown()
+}
+
 function start() {
+  // The HTML carries the first screen's data (me, config, the workspace, the list or issue): seed it before the
+  // first render, so the first paint is the real page with no API calls ahead of it.
+  const boot = readBoot()
+  const render = () =>
+    createRoot(document.getElementById("root")!).render(
+      <StrictMode>
+        <Suspense fallback={null}>{hostSlug ? <AppRoutes slug={hostSlug} /> : <PathRoutes />}</Suspense>
+      </StrictMode>,
+    )
+  if (boot) {
+    seedBoot(boot)
+    warmInitialCode()
+    // An issue's first paint is its rendered thread: wait (briefly) for the markdown renderer rather than paint
+    // raw text that reflows when it arrives.
+    if (boot.route.kind === "issue") void Promise.race([loadMarkdown(), new Promise((r) => setTimeout(r, 1500))]).finally(render)
+    else render()
+    return
+  }
   // Fires first so a brand-new browser mints one bh_guest cookie before the remaining boot fetches go out.
   loadMe().catch(() => {})
   warmInitialRoute()
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <Suspense fallback={null}>{hostSlug ? <AppRoutes slug={hostSlug} /> : <PathRoutes />}</Suspense>
-    </StrictMode>,
-  )
+  render()
 }
 
 /** Production: the subdomain names the app, so routes start at "/". */

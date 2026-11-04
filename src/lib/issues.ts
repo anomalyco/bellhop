@@ -1,7 +1,7 @@
 import type { Activity, Actor, AppDetail, Comment, Issue, IssueList, IssueRef, IssueSort, IssueSummary, TimelineItem } from "../../shared/api"
 import type { VisibleState } from "../ui/primitives"
 import { api, keys } from "./api"
-import { entries, load, peek, prefetch, setData, updateAll } from "./cache"
+import { entries, load, peek, setData, updateAll } from "./cache"
 
 export interface Filter {
   state: "open" | "closed"
@@ -38,6 +38,9 @@ export function formatQuery(f: Filter) {
   if (f.text) parts.push(f.text)
   return parts.join(" ")
 }
+
+/** One page of the home feed: its state and search (labels and sort don't apply there). */
+export const feedKey = (f: Pick<Filter, "state" | "text">) => `${keys.feed}${f.state}|${f.text}`
 
 export const listKey = (slug: string, f: Filter) => `${keys.lists(slug)}${f.state}|${f.label}|${f.text}|${f.sort ?? "newest"}`
 
@@ -244,14 +247,6 @@ export function findSummary(slug: string, number: number): IssueSummary | undefi
     if (hit) return hit
   }
   return undefined
-}
-
-export function prefetchIssue(slug: string, number: number) {
-  prefetch(keys.issue(slug, number), () => api.issue(slug, number))
-}
-
-export function prefetchList(slug: string, filter: Filter) {
-  prefetch(listKey(slug, filter), () => fetchList(slug, filter))
 }
 
 const isActor = (v: unknown): v is Actor =>

@@ -1,9 +1,10 @@
 import type { AnchorHTMLAttributes, FocusEvent, MouseEvent, PointerEvent, TouchEvent } from "react"
 import { Link, useLocation } from "wouter"
 import type { Issue } from "../../shared/api"
-import { api, keys } from "../lib/api"
-import { load, peek } from "../lib/cache"
-import { parseQuery, prefetchIssue, prefetchList, type Filter } from "../lib/issues"
+import { keys } from "../lib/api"
+import { peek } from "../lib/cache"
+import { parseQuery, type Filter } from "../lib/issues"
+import { loadPage, prefetchPage, routeKey, routeOf } from "../lib/page"
 import { hostSlug, isAbsolute } from "../lib/site"
 import { isMarkdownLoaded, loadMarkdown } from "./Markdown"
 
@@ -37,18 +38,20 @@ function parseAppHref(slug: string, href: string): AppTarget | null {
   return null
 }
 
+/** Warms a page on intent: its data in one /api/page request (unless fresh), and its code. */
 export function prefetchAppHref(slug: string, href: string) {
   const target = parseAppHref(slug, href)
   if (!target) return
   switch (target.kind) {
     case "issue":
-      prefetchIssue(slug, target.number)
+      prefetchPage(href)
       void loadMarkdown()
       break
     case "list":
-      prefetchList(slug, target.filter)
+      prefetchPage(href)
       break
     case "new":
+      prefetchPage(href)
       void loadMarkdown()
       break
     case "settings":
@@ -66,17 +69,24 @@ if (typeof window !== "undefined") {
 
 const ISSUE_HOLD_MS = 150
 
-/** Navigates inside an app; holds the current page up to ~150 ms when opening an uncached issue so fast fetches skip the skeleton. */
+/**
+ * Navigates inside an app. A page whose content isn't cached comes in one /api/page request; an uncached issue
+ * holds the current page up to ~150 ms for it, so fast answers skip the skeleton.
+ */
 export function navigateAppHref(slug: string, href: string, navigate: (to: string) => void) {
   const seq = ++navSeq
   const target = parseAppHref(slug, href)
+  if (target && target.kind !== "settings") {
+    const key = routeKey(routeOf(href))
+    if (key && !peek(key)) loadPage(href).catch(() => {})
+  }
   if (target?.kind === "issue") {
     const key = keys.issue(slug, target.number)
     const hasIssue = !!peek<Issue>(key)
     const hasMd = isMarkdownLoaded()
     if (!hasIssue || !hasMd) {
       const ready = Promise.all([
-        hasIssue ? Promise.resolve() : load(key, () => api.issue(slug, target.number)).catch(() => {}),
+        hasIssue ? Promise.resolve() : loadPage(href).catch(() => {}),
         hasMd ? Promise.resolve() : loadMarkdown().catch(() => {}),
       ])
       const timeout = new Promise<void>((r) => setTimeout(r, ISSUE_HOLD_MS))
