@@ -193,6 +193,25 @@ Don't combine `after` with `last` or `before`.
 
 Send messages with `POST /v1/conversations/:id/messages` and `{ "body": "…", "attachments": ["<upload id>"] }`. Bodies are Markdown. `POST …/read` with `{ item_id }` marks everything up to that item as read; `unread` on a conversation counts messages from others and verification requests after that mark. `POST …/typing` shows the team that the person is typing for a few seconds.
 
+### Request types
+
+A workspace can sort new requests by type, such as "Billing" or "Bug" (**Settings → Request types**). `GET /v1/workspace` lists the active ones in `request_types`, in order, each with an `id`, `name`, `description`, `require_verification` and its `fields`. A field has a `key`, a `label`, a `kind` (`text`, `textarea`, `email`, `url`, `number`, or `select` with `options`), `required`, and optionally `help`.
+
+Start the conversation with the type's `id` as `request_type`, and the answers by key, as strings, in `fields`. Leave out empty answers:
+
+```json
+{
+  "message": { "body": "I was charged twice for October." },
+  "request_type": "<a type id from GET /v1/workspace>",
+  "fields": { "billing_email": "dana@example.com", "invoice": "4821" }
+}
+```
+
+- A 400 whose message starts with a field key, such as `billing_email: invalid email` or `area: required`, names the answer to fix.
+- Types with `require_verification`, and answers to email fields with `verify`, need a verified person, or the request fails with `401 contact_required`. A `verify` email field also sends that address a code, which shows up in the conversation's `verifications`.
+- Internal fields (an account id, say) aren't listed for end users and a session can't answer them. Your server can fill them with a secret key, and only the workspace view returns them.
+- Requests without a type are fine too; the help desk's own form offers "Something else".
+
 When the team asks someone to prove an address ("the email on your billing account"), the conversation's `verifications` lists it and a `verification_requested` event appears. The person enters the code with `POST …/verifications/:vid/confirm`.
 
 ## Uploads

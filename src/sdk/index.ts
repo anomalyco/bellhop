@@ -33,7 +33,9 @@ export type {
   Upload,
   Workspace,
 } from "../../shared/v1"
-export type { Verification, Locale } from "../../shared/api"
+/** One request type from `workspace().request_types`: pass its id as `request_type`, with answers in `fields`. */
+export type RequestType = import("../../shared/v1").Workspace["request_types"][number]
+export type { Verification, Locale, RequestField } from "../../shared/api"
 
 export const VERSION = "1.0.0"
 

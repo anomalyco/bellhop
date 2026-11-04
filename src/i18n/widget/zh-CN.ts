@@ -117,6 +117,21 @@ const messages: Translation<typeof en> = {
   "upload.type": "{name} 无法在此发送，请换一个文件。",
   "upload.rateLimited": "过去一小时内上传次数过多，请稍后再试。",
   "upload.failed": "{name} 上传失败，请重试。",
+
+  // Starting a conversation where the workspace has request types: pick one, then fill in its fields
+  "types.title": "你需要哪方面的帮助？",
+  "types.other": "其他",
+  "types.otherText": "以上都不符合的问题。",
+  "types.change": "更改",
+  "types.changed": "表单刚刚有更新，请检查后重新发送。",
+  "field.choose": "请选择…",
+  "field.verifyNote": "我们会发送验证码来确认它。",
+  "field.required": "请填写此项。",
+  "field.email": "请输入有效的邮箱地址。",
+  "field.url": "请输入完整链接，以 https:// 开头。",
+  "field.number": "请输入数字。",
+  "field.option": "请选择其中一个选项。",
+  "field.invalid": "请检查此字段。",
 }
 
 export default messages

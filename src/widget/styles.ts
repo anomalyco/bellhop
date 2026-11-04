@@ -72,7 +72,7 @@ input,textarea{cursor:text}
 .msg.mine{align-self:flex-end;align-items:flex-end}
 .who{font-size:12px;color:var(--bw-faint);margin:0 4px 3px;display:flex;align-items:center;gap:6px}
 .ai{font-size:10px;font-weight:700;letter-spacing:.04em;padding:0 5px;border-radius:4px;background:var(--bw-surface);color:var(--bw-muted);line-height:16px}
-.bubble,.bubble a,.row-subject,.row-text,.title span{unicode-bidi:isolate}
+.bubble,.bubble a,.row-subject,.row-text,.title span,.type-name,.type-text,.field label span,.field .help{unicode-bidi:isolate}
 .bubble{padding:8px 12px;border-radius:6px;background:var(--bw-surface);overflow-wrap:anywhere;word-break:break-word}
 .mine .bubble{background:var(--bw-accent);color:var(--bw-accent-fg)}
 .bubble p+p,.bubble p+ul,.bubble p+ol,.bubble ul+p,.bubble ol+p{margin-top:8px}
@@ -111,6 +111,28 @@ input,textarea{cursor:text}
 .composer{flex:none;border-top:1px solid var(--bw-border);padding:8px;display:flex;align-items:flex-end;gap:6px;background:var(--bw-bg)}
 .composer textarea{flex:1;min-height:44px;max-height:140px;padding:11px 10px;border-radius:6px;background:var(--bw-surface);resize:none;font-size:15px;line-height:22px;color:var(--bw-fg);overflow-y:auto}
 .composer textarea::placeholder,.input::placeholder{color:var(--bw-faint)}
+.picker{padding:20px 16px 16px;display:flex;flex-direction:column;gap:12px}
+.picker h2{font-size:18px;line-height:24px;font-weight:650}
+.types{display:flex;flex-direction:column;border:1px solid var(--bw-border);border-radius:8px;overflow:hidden}
+.type{display:flex;flex-direction:column;gap:2px;padding:12px 14px;min-height:56px;text-align:left;width:100%;border-top:1px solid var(--bw-border)}
+.type:first-child{border-top:0}
+.type:hover{background:var(--bw-hover)}
+.type:focus-visible{outline-offset:-2px}
+.type:first-child:focus-visible{border-radius:8px 8px 0 0}
+.type:last-child:focus-visible{border-radius:0 0 8px 8px}
+.type-name{font-weight:600}
+.type-text{color:var(--bw-muted);font-size:13px}
+.request-form{display:flex;flex-direction:column;gap:12px;padding:12px 12px 4px}
+.form-type{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-left:2px}
+.form-type .btn{margin-right:-8px}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:13px;font-weight:600}
+.field .req{color:var(--bw-danger)}
+.field .input{flex:none;width:100%}
+.field textarea.input{padding:10px 12px;resize:vertical;min-height:88px;line-height:20px}
+.field select.input{appearance:auto}
+.field .help{color:var(--bw-muted);font-size:13px}
+.input[aria-invalid=true]{border-color:var(--bw-danger)}
 .attachments{flex:none;display:flex;flex-wrap:wrap;gap:6px;padding:8px 8px 0;border-top:1px solid var(--bw-border)}
 .attachments .err{flex-basis:100%;padding:0 4px 2px}
 .chip{display:inline-flex;align-items:center;max-width:100%;min-height:44px;padding-left:12px;border-radius:6px;background:var(--bw-surface);font-size:13px}

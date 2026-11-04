@@ -117,6 +117,21 @@ const messages: Translation<typeof en> = {
   "upload.type": "{name} はここでは送信できません。別のファイルをお試しください。",
   "upload.rateLimited": "直近1時間のアップロードが多すぎます。しばらくしてからお試しください。",
   "upload.failed": "{name} をアップロードできませんでした。もう一度お試しください。",
+
+  // Starting a conversation where the workspace has request types: pick one, then fill in its fields
+  "types.title": "どのようなことでお困りですか？",
+  "types.other": "その他",
+  "types.otherText": "上記に当てはまらない内容。",
+  "types.change": "変更",
+  "types.changed": "フォームが更新されました。内容を確認して、もう一度送信してください。",
+  "field.choose": "選択…",
+  "field.verifyNote": "確認のためにコードをお送りします。",
+  "field.required": "入力してください。",
+  "field.email": "有効なメールアドレスを入力してください。",
+  "field.url": "https:// から始まる完全なリンクを入力してください。",
+  "field.number": "数値を入力してください。",
+  "field.option": "選択肢から1つ選んでください。",
+  "field.invalid": "この項目を確認してください。",
 }
 
 export default messages

@@ -193,7 +193,13 @@ export class SessionClient {
     return this.request({ method: "GET", path: `/conversations/${encodeURIComponent(id)}` })
   }
 
-  /** Starts a conversation with its first message. */
+  /**
+   * Starts a conversation with its first message. Where the workspace has request types (`workspace().request_types`),
+   * pass one's id as `request_type` and answers by field key in `fields` (strings; leave out empty ones; internal
+   * fields aren't writable here). A 400 whose message starts with a field key ("billing_email: invalid email")
+   * names the answer to fix. Types with `require_verification`, and answers to email fields with `verify`, need a
+   * verified user (401 contact_required otherwise).
+   */
   createConversation(input: ConversationInput, options: { idempotencyKey?: string } = {}): Promise<Conversation> {
     return this.request({ method: "POST", path: "/conversations", body: input, ...options })
   }

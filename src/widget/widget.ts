@@ -27,6 +27,10 @@ type View = { name: "home" } | { name: "conversation"; id: string | null } | { n
 type Pending = { local: string; conversationId: string | null; body: string; files: Upload[]; state: "sending" | "failed"; key: string; retry?: () => Promise<void> }
 type Attachment = { local: string; name: string; state: "uploading" | "done"; upload?: Upload }
 type Workspace = Partial<ApiWorkspace>
+type RequestType = ApiWorkspace["request_types"][number]
+type RequestField = RequestType["fields"][number]
+/** A new conversation's draft. typeId: undefined until a request type is picked; null for "Something else". */
+type Draft = { subject?: string; body: string; metadataId?: string; typeId?: string | null; answers: Record<string, string> }
 
 const storageKey = (key: string) => `bellhop.session.${key.slice(6, 22)}`
 const jwtSub = (token: string) => {
@@ -52,7 +56,10 @@ export class Widget {
   private activity = new Map<string, { name: string; text: string }>()
   private listeners = new Map<WidgetEvent, Set<(data?: unknown) => void>>()
   private view: View = { name: "home" }
-  private draft: { subject?: string; body: string; metadataId?: string } = { body: "" }
+  private draft: Draft = { body: "", answers: {} }
+  private fieldErrors: Record<string, string> = {}
+  private formError: string | null = null
+  private formBox: HTMLElement | null = null
   private workspace: Workspace = {}
   private connection: ConnectionState = "polling"
   private wasLive = false
@@ -145,7 +152,9 @@ export class Widget {
     await this.start()
   }
   newConversation(input: { subject?: string; message?: string; metadataId?: string } = {}) {
-    this.draft = { subject: input.subject, body: input.message ?? "", metadataId: input.metadataId }
+    this.draft = { subject: input.subject, body: input.message ?? "", metadataId: input.metadataId, answers: {} }
+    this.fieldErrors = {}
+    this.formError = null
     this.open()
     // Where visitors can't sign in, home explains how to reach support instead.
     this.go(this.canSignIn() ? { name: "conversation", id: null } : { name: "home" })
@@ -468,7 +477,9 @@ export class Widget {
       if (fromOthers) {
         this.typing.delete(e.conversation_id)
         if (e.item.kind === "message") {
+          // A reply ends the agent's activity line at once (a held reply sent later has no "activity cleared" frame)
           this.activity.delete(e.conversation_id)
+          this.renderLive()
           this.announce(`${this.name(e.item.message.author)}: ${snippet(e.item.message.body).slice(0, 200)}`)
         }
       }
@@ -558,6 +569,9 @@ export class Widget {
     this.attachments = []
     this.renderAttachments()
     const p: Pending = { local: randomId(), conversationId: view.id, body, files, state: "sending", key: randomId() }
+    // The request type and its answers, as they were when this was sent (a retry sends the same)
+    const typeId = view.id ? null : (this.draft.typeId ?? null)
+    const form = typeId ? { request_type: typeId, fields: this.answers() } : {}
     this.pending.push(p)
     this.renderThread(true)
     const run = async () => {
@@ -570,10 +584,13 @@ export class Widget {
             subject: this.draft.subject ?? (snippet(body.split("\n")[0]!).slice(0, 80) || undefined),
             message: { body, attachments: files.map((f) => f.id) },
             metadata_id: this.draft.metadataId,
+            ...form,
           },
           { idempotencyKey: p.key },
         )
-        this.draft = { body: "" }
+        this.draft = { body: "", answers: {} }
+        this.fieldErrors = {}
+        this.formError = null
         this.conversations.set(c.id, c)
         p.conversationId = c.id
         this.pending = this.pending.filter((x) => x !== p)
@@ -590,6 +607,7 @@ export class Widget {
       void this.sub?.refresh()
     }
     const failed = (e: unknown) => {
+      if (!p.conversationId && this.formRefused(e, p)) return
       p.state = "failed"
       this.handle(e)
       this.renderThread(false)
@@ -638,7 +656,7 @@ export class Widget {
       return this.close()
     }
     if (e.key !== "Tab" || !this.panel) return
-    const focusable = [...this.panel.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),textarea:not([disabled]),[tabindex="0"]')].filter((el) => !el.closest("[hidden]"))
+    const focusable = [...this.panel.querySelectorAll<HTMLElement>('button:not([disabled]),a[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex="0"]')].filter((el) => !el.closest("[hidden]"))
     if (!focusable.length) return
     const first = focusable[0]!,
       last = focusable.at(-1)!,
@@ -741,8 +759,189 @@ export class Widget {
       ),
     )
   }
+  // Request types: a picker, then the chosen type's fields above the composer
+
+  private types(): RequestType[] {
+    return this.workspace.request_types ?? []
+  }
+  private chosenType() {
+    return this.types().find((x) => x.id === this.draft.typeId) ?? null
+  }
+  /** What the person fills in: the type's fields minus internal ones (the API leaves those out too). */
+  private formFields(): RequestField[] {
+    return (this.chosenType()?.fields ?? []).filter((f) => !f.internal)
+  }
+  private answers() {
+    const out: Record<string, string> = {}
+    for (const f of this.formFields()) {
+      const v = (this.draft.answers[f.key] ?? "").trim()
+      if (v) out[f.key] = v
+    }
+    return out
+  }
+  private typePicker() {
+    const t = this.t
+    const choose = (typeId: string | null) => {
+      this.draft.typeId = typeId
+      this.fieldErrors = {}
+      this.formError = null
+      // Types that need a verified email: sign in by email first, then fill in the form.
+      if (this.chosenType()?.require_verification && (!this.session || this.session.user?.anonymous))
+        return this.go({ name: "email", step: "email", then: async () => {} })
+      this.go({ name: "conversation", id: null })
+    }
+    const options: [string | null, string, string][] = [...this.types().map((x): [string, string, string] => [x.id, x.name, x.description]), [null, t("types.other"), t("types.otherText")]]
+    const buttons = options.map(([id, name, text]) =>
+      h("button", { class: "type", type: "button", "data-k": "type:" + (id ?? ""), onclick: () => choose(id) }, h("span", { class: "type-name", dir: "auto" }, name), text ? h("span", { class: "type-text", dir: "auto" }, text) : null),
+    )
+    // Arrow keys move between the options; Tab, Enter and Space work as usual
+    const list = h("div", { class: "types", role: "group", "aria-labelledby": "bw-types" }, buttons)
+    list.addEventListener("keydown", (e) => {
+      const i = buttons.indexOf(this.shadow.activeElement as HTMLButtonElement)
+      const to = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : e.key === "Home" ? 0 : e.key === "End" ? buttons.length - 1 : null
+      if (to === null || i < 0) return
+      e.preventDefault()
+      buttons[(to + buttons.length) % buttons.length]!.focus()
+    })
+    requestAnimationFrame(() => buttons[0]?.focus())
+    return h("div", { class: "scroll" }, h("div", { class: "picker" }, h("h2", { id: "bw-types" }, t("types.title")), this.formError ? h("p", { class: "err", role: "alert" }, this.formError) : null, list))
+  }
+  private renderForm() {
+    const box = this.formBox
+    if (!box) return
+    const t = this.t,
+      type = this.chosenType()
+    box.replaceChildren(
+      h(
+        "div",
+        { class: "form-type" },
+        h("span", { class: "type-name", id: "bw-type", dir: "auto" }, type?.name ?? t("types.other")),
+        h(
+          "button",
+          {
+            class: "btn quiet",
+            type: "button",
+            "data-k": "change-type",
+            "aria-describedby": "bw-type",
+            onclick: () => {
+              this.draft.typeId = undefined
+              this.fieldErrors = {}
+              this.formError = null
+              this.go({ name: "conversation", id: null })
+            },
+          },
+          t("types.change"),
+        ),
+      ),
+      ...this.formFields().map((f) => this.fieldControl(f)),
+      this.formError ? h("p", { class: "err", role: "alert" }, this.formError) : "",
+    )
+  }
+  private fieldControl(f: RequestField) {
+    const t = this.t,
+      id = `bw-f-${f.key}`,
+      error = this.fieldErrors[f.key]
+    const described = [f.help && `${id}-help`, f.kind === "email" && f.verify && `${id}-verify`, error && `${id}-err`].filter(Boolean).join(" ")
+    const attrs = { id, class: "input", "data-k": "f:" + f.key, dir: "auto", required: f.required, "aria-invalid": error ? "true" : null, "aria-describedby": described || null }
+    const control =
+      f.kind === "select"
+        ? h("select", attrs, h("option", { value: "" }, t("field.choose")), (f.options ?? []).map((o) => h("option", { value: o }, o)))
+        : f.kind === "textarea"
+          ? h("textarea", { ...attrs, rows: 3 })
+          : h("input", {
+              ...attrs,
+              type: f.kind === "email" ? "email" : f.kind === "url" ? "url" : "text",
+              inputmode: f.kind === "number" ? "decimal" : null,
+              autocomplete: f.kind === "email" ? "email" : "off",
+            })
+    control.value = this.draft.answers[f.key] ?? ""
+    const errorNode = error ? h("p", { class: "err", id: `${id}-err` }, error) : null
+    const changed = () => {
+      this.draft.answers[f.key] = control.value
+      if (!this.fieldErrors[f.key]) return
+      delete this.fieldErrors[f.key]
+      errorNode?.remove()
+      control.removeAttribute("aria-invalid")
+      const rest = described.split(" ").filter((x) => x && x !== `${id}-err`).join(" ")
+      if (rest) control.setAttribute("aria-describedby", rest)
+      else control.removeAttribute("aria-describedby")
+    }
+    control.addEventListener("input", changed)
+    control.addEventListener("change", changed)
+    return h(
+      "div",
+      { class: "field" },
+      h("label", { for: id }, h("span", { dir: "auto" }, f.label), f.required ? h("span", { class: "req", "aria-hidden": "true" }, " *") : null),
+      control,
+      f.help ? h("p", { class: "help", id: `${id}-help`, dir: "auto" }, f.help) : null,
+      f.kind === "email" && f.verify ? h("p", { class: "help", id: `${id}-verify` }, t("field.verifyNote")) : null,
+      errorNode,
+    )
+  }
+  /** The same checks the API makes (it has the last word: its 400s land on the field too). */
+  private validateForm() {
+    const out: Record<string, string> = {},
+      t = this.t
+    for (const f of this.formFields()) {
+      const v = (this.draft.answers[f.key] ?? "").trim()
+      const problem = !v
+        ? f.required
+          ? t("field.required")
+          : null
+        : f.kind === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)
+          ? t("field.email")
+          : f.kind === "url" && !/^https?:\/\/[^\s]+\.[^\s]+/i.test(v)
+            ? t("field.url")
+            : f.kind === "number" && !/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(v)
+              ? t("field.number")
+              : f.kind === "select" && !f.options?.includes(v)
+                ? t("field.option")
+                : null
+      if (problem) out[f.key] = problem
+    }
+    return out
+  }
+  private showFieldErrors(problems: Record<string, string>) {
+    this.fieldErrors = problems
+    this.renderForm()
+    const first = Object.keys(problems)[0]!
+    this.formBox?.querySelector<HTMLElement>(`#bw-f-${CSS.escape(first)}`)?.focus()
+    this.announce(problems[first]!)
+  }
+  /**
+   * A new conversation the API refused because of its form: a 400 naming a field ("billing_email: invalid email"),
+   * or a type that changed meanwhile. The message goes back into the composer and the problem shows on the form.
+   */
+  private formRefused(e: unknown, p: Pending) {
+    if (!(e instanceof BellhopError) || !this.types().length) return false
+    const named = e.status === 400 ? /^([a-z0-9_]+): (.*)$/.exec(e.message) : null,
+      field = named && this.formFields().find((f) => f.key === named[1]),
+      changed = e.code === "request_type_changed" || (e.status === 400 && /request type/i.test(e.message))
+    if (!field && !changed) return false
+    const t = this.t
+    this.pending = this.pending.filter((x) => x !== p)
+    this.draft.body = p.body
+    this.attachments = p.files.map((u) => ({ local: randomId(), name: u.name, state: "done", upload: u }))
+    if (this.view.name === "conversation" && this.view.id === null) this.render()
+    if (field) {
+      const why = named![2]!
+      const kind = /required/.test(why) ? "required" : /email/.test(why) ? "email" : /URL/i.test(why) ? "url" : /number/.test(why) ? "number" : /option/.test(why) ? "option" : "invalid"
+      this.showFieldErrors({ [field.key]: t(`field.${kind}`) })
+    } else {
+      // Reload the types: keep the choice if it still exists, otherwise pick again
+      this.formError = t("types.changed")
+      void this.loadWorkspace().then(() => {
+        if (this.draft.typeId && !this.chosenType()) this.draft.typeId = undefined
+        if (this.view.name === "conversation" && this.view.id === null) this.render()
+        this.announce(t("types.changed"))
+      })
+    }
+    return true
+  }
   private conversationView(id: string | null): Node[] {
     const t = this.t
+    this.formBox = null
+    if (!id && this.types().length && this.draft.typeId === undefined) return [this.typePicker()]
     this.thread = h("div", { class: "thread", role: "log", "aria-label": t("panel.label") })
     this.live = h("div", { class: "live", "aria-hidden": "true" })
     this.card = h("div", { hidden: true })
@@ -768,6 +967,10 @@ export class Widget {
       const value = textarea.value
       if (!value.trim() && !this.attachments.some((a) => a.state === "done")) return
       if (this.attachments.some((a) => a.state === "uploading")) return
+      if (!id && this.formBox) {
+        const problems = this.validateForm()
+        if (Object.keys(problems).length) return this.showFieldErrors(problems)
+      }
       textarea.value = ""
       if (!id) this.draft.body = ""
       grow()
@@ -796,7 +999,8 @@ export class Widget {
     this.textarea = textarea
     requestAnimationFrame(grow)
     this.typingTimer = setInterval(() => this.renderLive(), 1000)
-    const scroll = h("div", { class: "scroll" }, this.thread)
+    if (!id && this.types().length) this.formBox = h("div", { class: "request-form" })
+    const scroll = h("div", { class: "scroll" }, this.formBox, this.thread)
     // Near the top, load the page before the oldest message.
     scroll.addEventListener("scroll", () => id && scroll.scrollTop < 160 && this.items.has(id) && void this.loadOlder(id), { passive: true })
     const out = [
@@ -809,6 +1013,7 @@ export class Widget {
       h("span", { id: "bw-hint", class: "sr" }, t("composer.hint")),
     ]
     this.renderAttachments()
+    this.renderForm()
     this.renderThread(true)
     this.renderLive()
     this.renderCard()
@@ -827,7 +1032,7 @@ export class Widget {
     const nodes: Node[] = []
     if (v.id && this.older.get(v.id)) nodes.push(h("p", { class: "event older", "aria-hidden": "true" }, this.loadingOlder ? t("conversation.older") : "\u00a0"))
     if (!items) nodes.push(h("p", { class: "event" }, t("conversation.loading")))
-    else if (!items.length && !this.pending.some((p) => p.conversationId === v.id)) nodes.push(h("p", { class: "event" }, t("conversation.empty")))
+    else if (!items.length && !this.formBox && !this.pending.some((p) => p.conversationId === v.id)) nodes.push(h("p", { class: "event" }, t("conversation.empty")))
     let prev: { author: string; at: number } | null = null
     for (const item of items ?? []) {
       if (item.kind === "event") {
