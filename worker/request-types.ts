@@ -5,10 +5,13 @@ import { agentAccessSQL } from "./permissions"
 export const autonomy = (x: unknown) => choice(x, ["suggest", "approve_actions", "autonomous"] as const, "autonomy")
 const flag = (x: unknown, key: string) => (typeof x === "boolean" ? x : bad(`Invalid ${key}`))
 const kinds = ["text", "textarea", "email", "url", "number", "select"] as const
+function checkFieldBytes(value: unknown) {
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 256 * 1024) bad("fields JSON exceeds 256 KiB")
+}
 export function fieldDefinitions(raw: unknown): RequestField[] {
   if (!Array.isArray(raw) || raw.length > 30) bad("Expected at most 30 fields")
   const keys = new Set<string>()
-  return raw.map((value) => {
+  const fields = raw.map((value) => {
     const b = input(value),
       key = str(b.key, "field key", 40)
     if (!/^[a-z0-9_]{1,40}$/.test(key) || keys.has(key)) bad(`Invalid or duplicate field key: ${key}`)
@@ -37,6 +40,8 @@ export function fieldDefinitions(raw: unknown): RequestField[] {
       ...(internal && { internal })
     }
   })
+  checkFieldBytes(fields)
+  return fields
 }
 export function routeTarget(v: unknown): RouteTarget {
   if (v === null) return null
@@ -106,6 +111,7 @@ export function formAnswers(t: RequestType, raw: unknown, team: boolean) {
     pub = new Map<string, string>(),
     verify = new Set<string>(),
     defs = new Map(t.fields.map((f) => [f.key, f]))
+  checkFieldBytes(b)
   for (const k of Object.keys(b))
     if (!defs.has(k) || (!team && defs.get(k)!.internal)) bad(`${k}: field is not writable`)
   for (const f of t.fields) {

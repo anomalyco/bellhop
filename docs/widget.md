@@ -118,6 +118,18 @@ If the script loads before your own code, add the queue yourself so early calls 
 </script>
 ```
 
+## Request types
+
+If your workspace sorts requests by type (**Settings → Request types**), a new conversation starts with "What do you need help with?" and the types to choose from, plus "Something else". The chosen type's fields then appear above the message box:
+
+- text, long text, email, link, number and choice fields, with required ones marked and their help text below;
+- answers are checked before sending, and a problem the server finds lands on its field, with the message kept;
+- an email field set to verify says "We'll send a code to confirm it", and the code card appears in the conversation after sending;
+- for a type that needs a verified email, a visitor who isn't signed in confirms their email first, then fills in the form;
+- internal fields, which your team or server fills in, never show.
+
+Arrow keys move through the types, and Enter picks one. Without request types, the chat starts with the message box as before.
+
 ## Theming and languages
 
 The widget lives in its own shadow root, so your page's CSS doesn't change it and its CSS doesn't leak into your page. It takes the workspace's name and icon from **Settings**, `theme` sets light, dark or automatic, and `position` picks the corner. On phones it opens full screen.
@@ -148,7 +160,11 @@ const session = client.fromSessionToken(tokenFromYourServer, undefined, {
   onRefresh: (s) => localStorage.setItem("support-session", s.token),
 })
 
-const conversation = await session.createConversation({ message: { body: "Hi! My invoice is wrong." } })
+const billing = workspace.request_types.find((t) => t.name === "Billing") // or let the person pick
+const conversation = await session.createConversation({
+  message: { body: "Hi! My invoice is wrong." },
+  ...(billing && { request_type: billing.id, fields: { invoice: "4821" } }),
+})
 const latest = await session.latest(conversation.id, 30) // the newest 30, oldest first
 const earlier = latest.next_cursor ? await session.older(conversation.id, { cursor: latest.next_cursor }) : null
 

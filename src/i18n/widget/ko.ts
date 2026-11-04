@@ -117,6 +117,21 @@ const messages: Translation<typeof en> = {
   "upload.type": "{name} 파일은 여기에서 보낼 수 없어요. 다른 파일을 사용해 주세요.",
   "upload.rateLimited": "최근 1시간 동안 업로드가 너무 많았어요. 잠시 후 다시 시도해 주세요.",
   "upload.failed": "{name} 업로드에 실패했어요. 다시 시도해 주세요.",
+
+  // Starting a conversation where the workspace has request types: pick one, then fill in its fields
+  "types.title": "어떤 도움이 필요하세요?",
+  "types.other": "기타",
+  "types.otherText": "위 항목에 해당하지 않는 모든 문의",
+  "types.change": "변경",
+  "types.changed": "양식이 방금 바뀌었어요. 확인하고 다시 보내 주세요.",
+  "field.choose": "선택…",
+  "field.verifyNote": "확인용 코드를 보내 드려요.",
+  "field.required": "이 항목을 입력해 주세요.",
+  "field.email": "올바른 이메일 주소를 입력해 주세요.",
+  "field.url": "https://로 시작하는 전체 링크를 입력해 주세요.",
+  "field.number": "숫자를 입력해 주세요.",
+  "field.option": "옵션 중 하나를 선택해 주세요.",
+  "field.invalid": "이 항목을 확인해 주세요.",
 }
 
 export default messages

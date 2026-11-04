@@ -206,7 +206,24 @@ function issueFilter(
   }
   for (const { key, value } of parsed.terms) {
     switch (key) {
+      case "type":
+        if (v.team) {
+          where.push(
+            `EXISTS(SELECT 1 FROM request_answers b JOIN request_types t ON t.id=b.type_id JOIN apps a ON a.id=b.app_id AND a.mode='helpdesk' WHERE b.issue_id=i.id AND t.name=? COLLATE NOCASE)`
+          )
+          values.push(value)
+        }
+        break
       case "is":
+        if (value === "held" || value === "awaiting-approval") {
+          if (v.team)
+            where.push(
+              value === "held"
+                ? `EXISTS(SELECT 1 FROM held_replies h JOIN apps a ON a.id=i.app_id AND a.mode='helpdesk' WHERE h.issue_id=i.id)`
+                : `EXISTS(SELECT 1 FROM approvals p JOIN apps a ON a.id=i.app_id AND a.mode='helpdesk' WHERE p.issue_id=i.id AND p.state='pending' AND p.expires>unixepoch())`
+            )
+          break
+        }
         if (value === "hidden") {
           if (v.team) where.push("i.hidden IS NOT NULL")
         } else if (value === "closed" || value === "open")
@@ -298,6 +315,7 @@ export async function listIssues(
 ): Promise<IssueList> {
   const parsed = parseSearch(options.query),
     mine = parsed.terms.some((t) => t.key === "author" && t.value === "@me"),
+    filterPins = mine || (viewer.team && parsed.terms.some(t => t.key === 'type' || (t.key === 'is' && ['held', 'awaiting-approval'].includes(t.value)))),
     needsHandles = parsed.terms.some((t) => (t.key === "author" || t.key === "assignee") && t.value !== "@me"),
     handles = needsHandles
       ? new Map(
@@ -368,10 +386,10 @@ export async function listIssues(
       teamQuery(env, scope),
       sql(
         env,
-        `WITH ${viewerCTE} SELECT ${fields(viewer.team)}${formCols} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
+        `WITH ${viewerCTE} SELECT ${fields(viewer.team)}${formCols} FROM issues i WHERE i.pinned=1 AND ${filterPins ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
         ...viewerArgs(viewer),
         appKey(scope),
-        ...(mine ? filter.values : actorBindings(viewer)),
+        ...(filterPins ? filter.values : actorBindings(viewer)),
         options.cursor === undefined ? 3 : 0
       )
     ],
@@ -587,6 +605,8 @@ export async function getIssue(
       TeamRow,
       AttachmentRow & { comment_id: string | null },
       Pick<Comment, "id" | "body" | "created_at" | "updated_at" | "edited_at" | "via"> & {
+        held_at: string | null
+        sent_by: string | null
         author: string
         hidden: string | null
         internal: number
@@ -636,10 +656,10 @@ export async function getIssue(
       ),
       sql(
         env,
-        `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,c.via,
+        `SELECT c.id,c.body,c.created_at,c.updated_at,c.author,c.hidden,c.edited_at,c.internal,c.mentions,c.via,c.sent_by,${v.team ? "c.held_at" : "NULL"} held_at,
         ${v.team ? tierBag("(SELECT app_id FROM issues WHERE id=c.issue_id)", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,
        (SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,EXISTS(SELECT 1 FROM comment_helpful WHERE comment_id=c.id AND voter=?) viewer_helpful
-       FROM comments c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.rowid`,
+       FROM ${v.team ? "team_comments" : "comments"} c WHERE issue_id=(${target}) ${v.team ? "" : "AND internal=0"} ORDER BY c.created_at,c.id`,
         v.voter ?? v.actorId,
         key,
         number
@@ -654,12 +674,13 @@ export async function getIssue(
            ? `UNION ALL SELECT e.id,e.type,i.author,e.data,i.created_at,${tierBag("i.app_id", ["i.author", "json_extract(e.data,'$.assignee')"])},NULL,NULL,NULL
          FROM tier_issue_events e JOIN issues i ON i.id=e.issue_id AND i.app_id=e.app_id WHERE e.issue_id=(${target})
          UNION ALL SELECT n.id,'nudged','{"type":"agent","id":"bellhop","name":"Bellhop"}','{}',n.created_at,NULL,NULL,NULL,NULL FROM nudge_events n WHERE n.issue_id=(${target})
-         UNION ALL SELECT e.id,'routed',e.actor,e.data,e.created_at,NULL,NULL,NULL,NULL FROM request_route_events e JOIN apps a ON a.id=e.app_id AND a.mode='helpdesk' WHERE e.issue_id=(${target}) ORDER BY created_at`
+         UNION ALL SELECT e.id,'routed',e.actor,e.data,e.created_at,NULL,NULL,NULL,NULL FROM request_route_events e JOIN apps a ON a.id=e.app_id AND a.mode='helpdesk' WHERE e.issue_id=(${target})
+         UNION ALL SELECT id,type,actor,data,created_at,NULL,NULL,NULL,NULL FROM approval_events WHERE issue_id=(${target}) ORDER BY created_at`
            : "ORDER BY e.created_at,e.rowid"
        }`,
         key,
         number,
-        ...(v.team ? [key, number, key, number, key, number] : [])
+        ...(v.team ? [key, number, key, number, key, number, key, number] : [])
       ),
       sql(
         env,
@@ -722,7 +743,7 @@ export async function getIssue(
     timeline: TimelineItem[] = []
   const privileged = v.team
   if (!sees(v, gateOf(s))) missing()
-  for (const { tier_bag, ...c } of comments) {
+  for (const { tier_bag, held_at, sent_by, ...c } of comments) {
     const author = parseActor(c.author, roles)
     timeline.push({
       kind: "comment",
@@ -730,6 +751,8 @@ export async function getIssue(
         commentView(
           {
             ...c,
+            held: held_at ? { at: held_at } : null,
+            sent_by: sent_by ? parseActor(sent_by, roles) : null,
             internal: !!c.internal,
             helpful: c.helpful,
             viewer_helpful: !!c.viewer_helpful,

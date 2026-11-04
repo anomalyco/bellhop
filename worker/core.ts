@@ -103,6 +103,12 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("active request type limit")) return new ApiFailure(409, "type_limit", "A workspace can have at most 50 active request types")
+  if (message.includes("request fields byte limit")) return new ApiFailure(400, "fields_too_large", "Active request type fields exceed 256 KiB")
+  if (message.includes("public reply requires review"))
+    return new ApiFailure(409, "review_required", "Autonomy changed; submit the reply for review")
+  if (message.includes('reply_unavailable')) return new ApiFailure(409,'reply_unavailable','Reply is no longer available for this action')
+  if (message.includes('approval details changed')) return new ApiFailure(409,'details_changed','Approval details changed; review the parameters again')
   if (message.includes("request_type_changed"))
     return new ApiFailure(409, "request_type_changed", "Request type or permissions changed; reload the form")
   if (message.includes("api_nonce_limit"))

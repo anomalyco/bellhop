@@ -15,6 +15,12 @@ const sections = [
   ],
   ["label", "labels x", "x.app_id=?1", "x.id,x.name,x.color,x.description"],
   [
+    "request_type",
+    "request_types x",
+    "x.app_id=?1",
+    "x.id,x.name,x.description,x.fields,x.require_verification,x.route,x.autonomy,x.position,x.archived"
+  ],
+  [
     "template",
     "templates x",
     "x.app_id=?1",
@@ -56,6 +62,12 @@ const children = [
   ],
   ["event", "JOIN issue_events x ON x.issue_id=i.id", "x", "x.id,x.type AS event_type,x.actor,x.data,x.created_at"],
   [
+    "request_answers",
+    "JOIN request_answers x ON x.issue_id=i.id AND x.app_id=i.app_id",
+    "x",
+    "x.type_id,x.answers,x.public_answers"
+  ],
+  [
     "tier_event",
     "JOIN tier_issue_events x ON x.issue_id=i.id AND x.app_id=i.app_id",
     "x",
@@ -95,7 +107,8 @@ type Section = (typeof children)[number]
 const wide: Partial<Record<Section[0], string[]>> = {
   issue: ["i.body", "i.title", "i.system_info", "i.mentions"],
   comment: ["x.body", "x.mentions"],
-  metadata: ["x.system", "x.context", "x.message"]
+  metadata: ["x.system", "x.context", "x.message"],
+  request_answers: ["x.answers", "x.public_answers"]
 }
 async function* archive(c: Ctx) {
   const app = c.var.app.id,
@@ -103,10 +116,11 @@ async function* archive(c: Ctx) {
     acl = `EXISTS(SELECT 1 FROM members WHERE app_id=?1 AND user_id=?2 AND role IN ('admin','owner'))`
   for (const [type, from, where, fields] of sections) {
     let seq = 0
+    const limit = type === "request_type" ? 2 : size // Includes archived, potentially large definitions.
     for (;;) {
       const r = await sql(
         c.env,
-        `SELECT x.rowid seq,${fields} FROM ${from} WHERE ${where} AND ${acl} AND x.rowid>?3 ORDER BY x.rowid LIMIT ${size}`,
+        `SELECT x.rowid seq,${fields} FROM ${from} WHERE ${where} AND ${acl} AND x.rowid>?3 ORDER BY x.rowid LIMIT ${limit}`,
         app,
         admin,
         seq
@@ -114,9 +128,15 @@ async function* archive(c: Ctx) {
       for (const { seq: key, ...data } of r.results) {
         seq = key
         if (data.label_ids) data.label_ids = JSON.parse(String(data.label_ids))
+        if (type === "request_type") {
+          data.fields = JSON.parse(String(data.fields))
+          if (data.route) data.route = JSON.parse(String(data.route))
+          data.archived = !!data.archived
+          data.require_verification = !!data.require_verification
+        }
         yield { type, data }
       }
-      if (r.results.length < size) break
+      if (r.results.length < limit) break
     }
   }
   // Parallel cursors over indexed issue numbers, not a query per issue. Cap each
@@ -149,7 +169,9 @@ async function* archive(c: Ctx) {
           "source",
           "system",
           "context",
-          "actor"
+          "actor",
+          "answers",
+          "public_answers"
         ])
           if (typeof data[k] === "string") data[k] = JSON.parse(data[k] as string)
         if (typeof data.voter === "string" && data.voter.startsWith("g:"))

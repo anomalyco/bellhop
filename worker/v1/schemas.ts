@@ -21,6 +21,34 @@ export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
 export const schemas = {
+  Approval: obj({
+    details_hash:{type:"string",pattern:"^[A-Za-z0-9_-]{43}$"},
+    id: string,
+    issue_number: integer,
+    action: string,
+    summary: string,
+    details: { type: "object", description:"At most 4096 UTF-8 bytes as JSON.", maxProperties: 20, additionalProperties: { type: ["number", "boolean", "string"], maxLength:256 } },
+    state: { enum: ["pending", "approved", "rejected", "expired", "used"] },
+    requested_by: ref("Actor"),
+    decided_by: nullable(ref("Actor")),
+    decided_at: nullable(date),
+    note: ns,
+    expires_at: date,
+    created_at: date
+  }),
+  Approvals: arr(ref("Approval")),
+  JWKS: obj({
+    keys: arr(
+      obj({
+        kid: string,
+        kty: { const: "OKP" },
+        crv: { const: "Ed25519" },
+        alg: { const: "EdDSA" },
+        use: { const: "sig" },
+        x: string
+      })
+    )
+  }),
   RequestField: obj(
     {
       key: { type: "string", pattern: "^[a-z0-9_]{1,40}$" },
@@ -139,6 +167,7 @@ export const schemas = {
   ),
   Message: obj(
     {
+      held: bool,
       internal: bool,
       id: string,
       conversation_id: string,
@@ -159,7 +188,7 @@ export const schemas = {
   ),
   Item: {
     allOf: [
-      obj({ internal: bool, hidden: bool }, []),
+      obj({ internal: bool, hidden: bool, held: bool }, []),
       one(
         obj({ kind: { const: "message" }, id: string, created_at: date, message: ref("Message") }),
         obj({

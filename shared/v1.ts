@@ -153,7 +153,7 @@ export interface Conversation {
   request_type: { id: string; name: string } | null
   /** Request form answers. Internal answers are included only in the workspace view. */
   fields: Record<string, string>
-  /** Workspace-only; informational until the approvals phase. */
+  /** Workspace only. Suggest holds agent replies; action services enforce signed approvals. */
   effective_autonomy?: import("./api").Autonomy
   /** Workspace-only fields. created_via is set on requests opened on behalf of a contact by a server key. */
   contact_id?: string | null
@@ -209,6 +209,7 @@ export interface Upload {
 }
 
 export interface Message {
+  held?: boolean // Workspace only, awaiting review.
   internal?: boolean
   id: string
   conversation_id: string
@@ -227,7 +228,7 @@ export type ConversationEvent =
   | { type: "verification_requested"; verification_id: string }
   | { type: "verified"; verification_id: string }
 
-export type ConversationItem = { internal?: boolean; hidden?: boolean } & (
+export type ConversationItem = { internal?: boolean; hidden?: boolean; held?: boolean } & (
   | { kind: "message"; id: string; created_at: string; message: Message }
   | { kind: "event"; id: string; created_at: string; actor: Participant | null; event: ConversationEvent }
 )

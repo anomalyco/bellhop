@@ -118,6 +118,21 @@ const en = {
   "upload.type": "{name} can't be sent here. Try a different file.",
   "upload.rateLimited": "Too many uploads in the last hour. Try again a little later.",
   "upload.failed": "Couldn't upload {name}. Try again.",
+
+  // Starting a conversation where the workspace has request types: pick one, then fill in its fields
+  "types.title": "What do you need help with?",
+  "types.other": "Something else",
+  "types.otherText": "Anything that doesn't fit above.",
+  "types.change": "Change",
+  "types.changed": "This form just changed. Check it and send again.",
+  "field.choose": "Choose…",
+  "field.verifyNote": "We'll send a code to confirm it.",
+  "field.required": "Fill this in.",
+  "field.email": "Enter a valid email address.",
+  "field.url": "Enter a full link, starting with https://.",
+  "field.number": "Enter a number.",
+  "field.option": "Pick one of the options.",
+  "field.invalid": "Check this field.",
 } as const
 
 export default en

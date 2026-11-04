@@ -78,11 +78,21 @@ export const emailConfigured = (env: Env) =>
   (devMail(env)
     ? /^os_test_[a-f0-9]{64}$/i.test(secrets(env).OPENSEND_API_KEY!)
     : (env as { MAIL_DELIVERY?: string }).MAIL_DELIVERY === "live")
-export async function sendMail(env: Env, id: string, letter: Letter, redactCode?: string) {
+export async function sendMail(env: Env, id: string, letter: Letter, redactCode?: string, formCode?: string) {
   // Reserve the address before sending. An erasure while the provider is acknowledging
   // the message removes this row, so a late acknowledgement cannot put the address back.
   const pending = "pending:" + crypto.randomUUID()
-  await sql(env, "INSERT INTO mail_sent(provider_id,address) VALUES(?,?)", pending, letter.to).run()
+  if (formCode) {
+    // Erasure, expiry or successful delivery while a queued worker was decrypting: don't send or restore a receipt.
+    const reserve = await sql(
+      env,
+      `INSERT INTO mail_sent(provider_id,address) SELECT ?,v.email FROM email_codes v JOIN form_code_mail j ON j.id=v.id JOIN apps a ON a.id=v.app_id AND a.mode='helpdesk' WHERE v.id=? AND v.email=? AND v.state='pending' AND v.expires>unixepoch()`,
+      pending,
+      formCode,
+      letter.to
+    ).run()
+    if (!reserve.meta.changes) return
+  } else await sql(env, "INSERT INTO mail_sent(provider_id,address) VALUES(?,?)", pending, letter.to).run()
   try {
     const body = {
       ...letter,

@@ -72,8 +72,12 @@ const audience = (c: Ctx, s: Scope): Audience => ({ env: c.env, app: s.app, who:
 export async function project(raw: string, a: Audience, workspace = false): Promise<ConversationItem> {
   const r = JSON.parse(raw) as ItemRow & { internal?: number; hidden?: number },
     who = r.actor ? participant(r.actor) : null,
-    base = { id: r.id, created_at: r.created_at, ...(workspace && { internal: !!r.internal, hidden: !!r.hidden }) }
-  if (r.type === "message")
+    base = {
+      id: r.id,
+      created_at: r.created_at,
+      ...(workspace && { internal: !!r.internal, hidden: !!r.hidden, ...(r.type === "held" && { held: true }) })
+    }
+  if (r.type === "message" || (workspace && r.type === "held"))
     return {
       ...base,
       kind: "message",

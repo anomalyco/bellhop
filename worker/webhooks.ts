@@ -37,7 +37,10 @@ export const webhookEvents = [
   "issue.moved",
   "comment.edited",
   "comment.deleted",
-  "verification.completed"
+  "verification.completed",
+  "reply.held",
+  "approval.requested",
+  "approval.decided"
 ] satisfies WebhookEventType[]
 
 // Read the destination in the same transaction as the action. webhookUrl stores
@@ -117,7 +120,7 @@ interface Job {
 
 export type Hook = Pick<
   WebhookPayload,
-  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification"
+  "type" | "changes" | "mentioned" | "comment" | "label" | "moved_to" | "verification" | "approval"
 > & {
   transition?: Partial<Pick<IssueSummary, "assignee" | "status" | "close_reason">>
 }
@@ -211,7 +214,7 @@ export async function enqueueWebhooks(
         env,
         `INSERT ${hook.verification ? "OR IGNORE " : ""}INTO webhook_deliveries(id,app_id,event,payload,created_at) SELECT ?1,s.app_id,?3,?4,?5 FROM webhook_settings s
       WHERE s.app_id=?2 AND s.url=?6 AND ${subscribed("?3")} AND ${gate}
-      AND (?9 IS NULL OR ${hook.type === "comment.deleted" ? "NOT " : ""}EXISTS(SELECT 1 FROM comments WHERE id=?9 AND issue_id=?7))`,
+      AND (?9 IS NULL OR ${hook.type === "comment.deleted" ? "NOT " : ""}EXISTS(SELECT 1 FROM ${hook.type === "reply.held" ? "held_replies" : "comments"} WHERE id=?9 AND issue_id=?7))`,
         id,
         app.id,
         hook.type,

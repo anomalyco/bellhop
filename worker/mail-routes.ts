@@ -33,11 +33,12 @@ async function prefs(c: Ctx): Promise<NotificationSettings> {
     p =
       (await sql(
         c.env,
-        `SELECT coalesce(p.opened,1) opened,coalesce(p.replied,1) replied,coalesce(p.mentions,1) mentions,coalesce(p.assigned,1) assigned,EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email) muted FROM users u LEFT JOIN mail_settings p ON p.user_id=u.id WHERE u.id=?`,
+        `SELECT coalesce(p.opened,1) opened,coalesce(p.replied,1) replied,coalesce(p.mentions,1) mentions,coalesce(p.assigned,1) assigned,coalesce(p.approvals,EXISTS(SELECT 1 FROM members m JOIN apps a ON a.id=m.app_id AND a.mode='helpdesk' WHERE m.user_id=u.id AND (m.role IN ('admin','owner') OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=m.app_id AND json_extract(i.assignee,'$.id')=u.id)))) approvals,EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email) muted FROM users u LEFT JOIN mail_settings p ON p.user_id=u.id WHERE u.id=?`,
         u.id
       ).first<Record<string, number>>()) ?? missing()
   return {
     email: u.email,
+    approvals: !p.muted && !!p.approvals,
     opened: !p.muted && !!p.opened,
     replied: !p.muted && !!p.replied,
     mentions: !p.muted && !!p.mentions,
@@ -51,7 +52,9 @@ mailRoutes.patch("/api/me/notifications", async (c) => {
     keys = Object.keys(b)
   if (
     !keys.length ||
-    keys.some((k) => !["opened", "replied", "mentions", "assigned"].includes(k) || typeof b[k] !== "boolean")
+    keys.some(
+      (k) => !["opened", "replied", "mentions", "assigned", "approvals"].includes(k) || typeof b[k] !== "boolean"
+    )
   )
     bad("Expected notification switches; email is read-only")
   await c.env.DB.batch([

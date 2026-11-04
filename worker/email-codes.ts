@@ -5,6 +5,7 @@ import { entry } from "./audit"
 import { keyAudit } from "./v1/server-auth"
 import { accountCopy, deskCopy, formatMail } from "./mail-copy"
 import { cleanSender, devMail, emailConfigured, esc, mailOrigin, sendMail, workspaceSender } from "./mail-provider"
+import { seal, unseal } from "./identity-keys"
 
 export type Challenge = { app: string | null; email: string } & (
   | { kind: "account" | "contact"; requester: string; issue?: never }
@@ -109,35 +110,74 @@ export async function prepareCode(
     id,
     statements: q,
     index,
+    async reserveFormMail() {
+      if (x.kind !== "verification" || !x.app) throw Error("Only form verification mail can be queued")
+      const cipher = await seal(env, x.app, id, code, "form-verification-mail/v1")
+      return sql(
+        env,
+        `INSERT INTO form_code_mail(id,cipher,sender,locale) SELECT v.id,?,CASE WHEN a.trusted THEN ? ELSE ? END,? FROM email_codes v JOIN apps a ON a.id=v.app_id WHERE v.id=? AND v.state='pending'`,
+        cipher,
+        workspaceSender(workspace, true),
+        workspaceSender(workspace, false),
+        locale,
+        id
+      )
+    },
     async deliver(row: { state: string; trusted: number | null }) {
       const googleOnly = x.kind === "account" && row.state === "failed"
-      const copy = deskCopy[locale],
-        name = x.app ? workspaceSender(workspace, !!row.trusted) : cleanSender(workspace),
-        googleLink = mailOrigin(env) + "/auth/google",
-        text = googleOnly
-          ? `${accountCopy[locale].google} ${googleLink}`
-          : formatMail(copy.code, { workspace: name, code })
+      const name = x.app ? workspaceSender(workspace, !!row.trusted) : cleanSender(workspace)
       try {
-        await sendMail(
-          env,
-          "code-" + id,
-          {
-            to: x.email,
-            fromName: name,
-            subject: formatMail(x.kind === "verification" ? copy.verify : copy.signin, { workspace: name }),
-            text,
-            html: googleOnly
-              ? `<p><a href="${esc(googleLink)}">${esc(accountCopy[locale].google)}</a></p>`
-              : `<p>${esc(text)}</p>`
-          },
-          code
-        )
+        await sendCodeMail(env, id, x.email, name, locale, code, googleOnly ? "google" : x.kind)
       } catch {
         await sql(env, "UPDATE email_codes SET state='failed',digest=NULL WHERE id=? AND state='pending'", id).run()
         fail(503, "mail_unavailable", "Email delivery unavailable")
       }
     }
   }
+}
+async function sendCodeMail(
+  env: Env,
+  id: string,
+  to: string,
+  name: string,
+  locale: Locale,
+  code: string,
+  kind: Challenge["kind"] | "form" | "google"
+) {
+  const copy = deskCopy[locale],
+    googleLink = mailOrigin(env) + "/auth/google",
+    text =
+      kind === "google"
+        ? `${accountCopy[locale].google} ${googleLink}`
+        : formatMail(copy.code, { workspace: name, code })
+  await sendMail(
+    env,
+    "code-" + id,
+    {
+      to,
+      fromName: name,
+      subject: formatMail(kind === "verification" || kind === "form" ? copy.verify : copy.signin, { workspace: name }),
+      text,
+      html:
+        kind === "google"
+          ? `<p><a href="${esc(googleLink)}">${esc(accountCopy[locale].google)}</a></p>`
+          : `<p>${esc(text)}</p>`
+    },
+    code,
+    kind === "form" ? id : undefined
+  )
+}
+export const formMailPrefix = "form-code-"
+export async function deliverFormCode(env: Env, id: string) {
+  const row = await sql(
+    env,
+    `SELECT j.sender,j.locale,j.cipher,v.email,v.app_id FROM form_code_mail j JOIN email_codes v ON v.id=j.id JOIN apps a ON a.id=v.app_id AND a.mode='helpdesk' WHERE j.id=? AND v.kind='verification' AND v.state='pending' AND v.expires>unixepoch()`,
+    id
+  ).first<{ sender: string; locale: Locale; cipher: string; email: string; app_id: string }>()
+  if (!row) return
+  const code = new TextDecoder().decode(await unseal(env, row.app_id, id, row.cipher, "form-verification-mail/v1"))
+  await sendCodeMail(env, id, row.email, row.sender, row.locale, code, "form")
+  await sql(env, "DELETE FROM form_code_mail WHERE id=?", id).run()
 }
 export async function issueCode(...args: Parameters<typeof prepareCode>) {
   const plan = await prepareCode(...args),

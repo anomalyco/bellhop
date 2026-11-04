@@ -52,6 +52,8 @@
 //   only), status:open|in_progress|waiting|closed, reason:completed|not_planned|duplicate, label:<name> (repeatable,
 //   all must match), no:label, no:assignee, assignee:@me|<handle>, author:@me|<handle>, has:metadata,
 //   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
+//   Help desk (team only): is:held (has a held agent reply), is:awaiting-approval (has a pending approval),
+//   type:<request type name>.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days?, mode?, helpdesk? }
@@ -243,6 +245,23 @@
 //   PATCH  /api/apps/:slug/request-types/:id Partial<RequestTypeInput> & { archived?, position? } -> RequestType  admin
 //   PUT    /api/apps/:slug/issues/:number/request-type { request_type_id: string | null, fields? } -> Issue   member;
 //          changes a request's type (validates fields, keeps answers whose keys still exist) and re-applies routing
+//   Autonomy (help desk; the request's effective Autonomy applies to agents):
+//   - "suggest": an agent's public reply is held (Comment.held): only the team and agents see it. Reviewers may
+//     receive review mail. End users never see or receive it until a member sends it.
+//   POST   /api/apps/:slug/issues/:number/comments/:id/send { body? } -> Comment   member; publishes a held reply
+//          (optionally edited first; it stays the agent's reply, with `sent_by`); DELETE .../comments/:id discards it
+//   - Approvals are help-desk only, at any autonomy level. An agent asks before an action with consequences (refund, cancellation, account
+//     change). The team approves or rejects; an approval then carries a signed token the action's own service
+//     verifies before acting (EdDSA/Ed25519 JWT; public keys at GET https://api.blhp.app/v1/approvals/jwks.json?workspace=<expected-slug>,
+//     one `kid` per workspace). "approve_actions" means the agent must not act without one (the agent's tools
+//     enforce it by requiring the token); "autonomous" lets the agent act alone and ask only when it wants to.
+//   POST   /api/apps/:slug/issues/:number/approvals/:id/decide { decision: "approve" | "reject", details_hash: string, note? } -> Approval
+//          member; display details verbatim and echo the hash from that same snapshot. Mismatch: 409 details_changed.
+//          One decision, recorded and audited; approval tokens are never shown in the web UI.
+//   DELETE .../comments/:id?held=1   discard only while held; 409 reply_unavailable if already sent/discarded
+//          A plain DELETE also discards a held reply. Once sent, deleting that published reply requires ?held=0.
+//   POST   /v1/approvals/:id/consume (secret key)        -> Approval           optional online single-use check for
+//          the action service: marks it "used" (409 if already used, 410 if expired or rejected)
 //   GET    /api/apps/:slug/api-keys                      -> ApiKey[]           admin; public API v1 keys (shared/v1.ts)
 //   POST   /api/apps/:slug/api-keys { name, kind, allowed_origins? } -> NewApiKey   admin; secret keys are returned only here
 //   PATCH  /api/apps/:slug/api-keys/:id { name?, allowed_origins? } -> ApiKey  admin
@@ -585,6 +604,9 @@ export interface NotificationSettings {
   mentions: boolean
   /** Email me when an issue is assigned to me (team only; on by default). */
   assigned: boolean
+  /** Email me when an agent asks for an approval or holds a reply in a help desk I'm on (team only; on by default
+   *  for admins and the request's assignee). */
+  approvals: boolean
 }
 
 export interface IssueSubscription {
@@ -958,7 +980,7 @@ export interface Relation {
 }
 
 export interface Issue extends IssueSummary {
-  /** Help desk team/agent reads only. Informational in H2a, not an approval policy yet. */
+  /** Help desk team/agent reads only. Suggest holds agent replies; action services enforce signed approvals. */
   effective_autonomy?: Autonomy
   body: string
   attachments: Attachment[]
@@ -1065,9 +1087,59 @@ export interface Comment {
   helpful: number
   viewer_helpful: boolean
   mentions: Mention[]
+  /** A held agent reply (autonomy "suggest"): team and agents only, not emailed, until a member sends it. */
+  held: { at: string } | null
+  /** Member who sent a held reply. Team only; always null for requesters. */
+  sent_by: Actor | null
+}
+
+/** An agent's request to take an action with consequences, decided by a team member. */
+export interface Approval {
+  id: string
+  issue_number: number
+  /** Machine name of the action, e.g. "refund", "cancel_subscription", "change_email". */
+  action: string
+  /** Advisory only. `details` is what's signed and what the member must check. */
+  summary: string
+  /** Structured parameters the action service checks against the token (e.g. { amount: 2000, currency: "usd" }). */
+  details: Record<string, string | number | boolean>
+  /** Unpadded base64url SHA-256 of flat JSON: keys sorted by UTF-16 code unit, JSON.stringify strings/scalars, no whitespace. */
+  details_hash: string
+  state: "pending" | "approved" | "rejected" | "expired" | "used"
+  requested_by: Actor
+  decided_by: Actor | null
+  decided_at: string | null
+  note: string | null
+  /** Pending approvals expire after 7 days; an approval's token is valid for 30 minutes after the decision. */
+  expires_at: string
+  created_at: string
+}
+
+/**
+ * Claims of an approval token (JWT, alg EdDSA, header kid = the workspace's signing key id). Only the requesting
+ * agent receives it (MCP get_approval), once approved. The action service verifies the signature with the JWKS,
+ * checks aud, act, det against what it is about to do, exp, and (optionally) consumes it online.
+ */
+export interface ApprovalToken {
+  iss: "https://blhp.app"
+  /** The workspace slug. */
+  aud: string
+  /** The approval id (also the jti). */
+  sub: string
+  jti: string
+  act: string
+  det: Record<string, string | number | boolean>
+  /** The request number. */
+  req: number
+  /** Who approved: { id, name } of the member. */
+  by: { id: string; name: string }
+  iat: number
+  exp: number
 }
 
 export type IssueEventType =
+  | "approval.requested" // team only; data.approval never contains a token
+  | "approval.decided"
   | "routed" // team-only: request_type, target, outcome and the assignee resolved at write time
   | "verified" // data: { verification_id }; requester/team only, no email or code in the event
   | "nudged" // team-only: the waiting reporter was sent a reminder
@@ -1149,6 +1221,9 @@ export type WebhookEventType =
   | "comment.deleted"
   | "mention.created"
   | "verification.completed" // verification in `verification` (verified, or failed/expired)
+  | "reply.held" // an agent reply was held for review (comment in `comment`)
+  | "approval.requested" // approval in `approval`
+  | "approval.decided" // approval in `approval` (approved or rejected; never the token)
 
 /** What a webhook gets until its events are changed (the behaviour before events were selectable). */
 export const DEFAULT_WEBHOOK_EVENTS: WebhookEventType[] = ["issue.opened", "issue.updated", "comment.created", "mention.created"]
@@ -1185,6 +1260,8 @@ export interface WebhookPayload {
   contact?: Contact
   /** For verification.completed. */
   verification?: Verification
+  /** For approval.requested / approval.decided (never the token). */
+  approval?: Approval
   mcp_url: string
 }
 
@@ -1209,6 +1286,10 @@ export interface WebhookPayload {
 //   list_request_types {}                         the help desk's request types with fields, routing and autonomy
 //                                                  (get_issue carries request_type, fields and the effective autonomy)
 //   set_request_type { number, request_type, fields? }  member; re-route a request (applies the type's routing)
+//   comment (help desk)                           under "suggest", a public reply returns { held: true } and waits for a
+//                                                  member; internal notes and triage are unaffected
+//   request_approval { number, action, summary, details? }  responder -> Approval (pending); the team is notified
+//   get_approval   { id }                        the Approval; once approved, also { token } (requesting agent only)
 //   list_labels    {}
 //   comment        { number, body, internal? }   posts with the AI badge; clears the agent's activity; internal
 //                                                  makes it a team-only note; @handle mentions (list_mentionables)

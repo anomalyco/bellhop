@@ -117,6 +117,21 @@ const messages: Translation<typeof en> = {
   "upload.type": "{name} kann hier nicht gesendet werden. Versuch es mit einer anderen Datei.",
   "upload.rateLimited": "Zu viele Uploads in der letzten Stunde. Versuch es etwas später noch mal.",
   "upload.failed": "{name} konnte nicht hochgeladen werden. Versuch es noch mal.",
+
+  // Starting a conversation where the workspace has request types: pick one, then fill in its fields
+  "types.title": "Wobei brauchst du Hilfe?",
+  "types.other": "Etwas anderes",
+  "types.otherText": "Alles, was oben nicht passt.",
+  "types.change": "Ändern",
+  "types.changed": "Das Formular hat sich gerade geändert. Prüf es und schick es noch mal ab.",
+  "field.choose": "Auswählen…",
+  "field.verifyNote": "Wir senden dir einen Code zur Bestätigung.",
+  "field.required": "Bitte ausfüllen.",
+  "field.email": "Gib eine gültige E-Mail-Adresse ein.",
+  "field.url": "Gib einen vollständigen Link ein, der mit https:// beginnt.",
+  "field.number": "Gib eine Zahl ein.",
+  "field.option": "Wähle eine der Optionen.",
+  "field.invalid": "Prüfe dieses Feld.",
 }
 
 export default messages
