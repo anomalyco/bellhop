@@ -1004,12 +1004,17 @@ a.box-row:hover {
   pointer-events: auto;
 }
 
-/* Issue page: the report on the page itself (title, by-line, body, files, property pills), a hairline, then the
-   thread grouped by person and the pinned composer. One 760 px column, no surfaces around the report. */
+/* Issue page: on the left the report on the page itself (title, by-line, body, files), a hairline, the thread
+   grouped by person and the pinned composer; on the right a quiet sidebar. No surfaces around anything. */
 .issue {
   display: grid;
-  max-width: 760px;
-  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) 288px;
+  gap: 56px;
+  align-items: start;
+}
+.issue-main {
+  display: grid;
+  min-width: 0;
 }
 .report {
   display: grid;
@@ -1090,18 +1095,8 @@ a.box-row:hover {
 .report-edit-body:hover {
   color: var(--fg);
 }
-.report > .attachments {
-  margin-top: 14px;
-}
-.report-props {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  margin-top: 16px;
-}
-.report-props .menu-root {
-  display: inline-flex;
+.report-body .attachments {
+  margin-top: 12px;
 }
 /* A property pill: a hairline pill that opens its editor in place */
 .prop {
@@ -1143,29 +1138,176 @@ button.prop:hover,
 .prop[aria-expanded="true"] {
   background: var(--hover);
 }
-.prop-relations {
-  display: grid;
+/* Phones: status, assignee and labels as pills under the title */
+.mobile-props {
+  display: none;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 6px;
-  padding: 6px 6px 2px;
+  margin-top: 12px;
+}
+.mobile-props .menu-root {
+  display: inline-flex;
+}
+
+/* The sidebar: small labels, hairlines between sections, sticky while it fits the window */
+.issue-side {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  padding-top: 4px;
   font-size: var(--text-ui);
 }
-.prop-relations .relation-form {
-  padding: 6px 0 2px;
+.issue-side[data-sticky] {
+  position: sticky;
+  top: 24px;
 }
-.prop-relations .relation-group + .relation-form {
-  margin-top: 4px;
-  padding-top: 10px;
+.side-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.side-section + .side-section {
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--border-muted);
 }
-.report-sysinfo {
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 24px;
+  margin-bottom: -2px;
+}
+.side-head h3,
+.side-toggle {
+  margin: 0;
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+}
+.side-head .btn {
+  margin-right: -4px;
+}
+.side-select {
+  width: 100%;
+  justify-content: flex-start;
+}
+.side-select-text {
+  flex: 1;
+  text-align: left;
+}
+.side-section > .menu-root {
+  display: flex;
+}
+.side-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  min-width: 0;
+}
+.side-value .actor-name {
+  font-weight: var(--weight-medium);
+}
+.side-empty,
+.sidebar-empty {
+  color: var(--fg-faint);
+}
+.side-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.side-labels a:hover {
+  text-decoration: none;
+}
+.side-times {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+}
+.side-times div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.side-times dt {
+  color: var(--fg-muted);
+}
+.side-times dd {
+  margin: 0;
+}
+.side-people {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.side-person {
+  position: relative;
+  display: inline-flex;
+}
+/* The AI marker on an agent's avatar */
+.side-person .ai-badge {
+  position: absolute;
+  z-index: 1;
+  right: -7px;
+  bottom: -5px;
+  height: 12px;
+  padding: 0 3px;
+  font-size: 8.5px;
+  box-shadow:
+    0 0 0 1.5px var(--bg),
+    inset 0 0 0 0.5px var(--border-strong);
+}
+.side-person:has(.ai-badge) {
+  margin-right: 6px;
+}
+.side-foot {
+  gap: 2px;
+}
+.side-sysinfo {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.issue-side .attachments,
+.mobile-details .attachments {
+  display: grid;
+  justify-items: start;
+  margin: 0;
+}
+.side-toggle {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  width: fit-content;
+  min-height: 24px;
+  padding: 0;
+  font-family: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.side-toggle:hover {
+  color: var(--fg);
+}
+.side-toggle .icon {
+  transition: transform 120ms var(--ease);
+}
+.side-toggle[aria-expanded="true"] .icon {
+  transform: rotate(180deg);
+}
+.side-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
   height: 28px;
-  margin-left: auto;
-  padding: 0 8px;
+  margin-left: -10px;
+  padding: 0 10px;
   font: inherit;
-  font-size: var(--text-small);
   font-weight: var(--weight-medium);
   color: var(--fg-muted);
   background: none;
@@ -1173,20 +1315,49 @@ button.prop:hover,
   border-radius: var(--radius-full);
   cursor: pointer;
 }
-.report-sysinfo:hover {
+.side-copy:hover {
   color: var(--fg);
   background: var(--hover);
 }
-.report-sysinfo .icon {
+.side-copy .icon {
+  color: var(--icon-muted);
+}
+.side-copy-number {
+  color: var(--fg-faint);
+  font-size: 12px;
+}
+
+/* Phones: the sidebar's information, folded after the report */
+.mobile-details {
+  display: none;
+  border-bottom: 1px solid var(--border-muted);
+}
+.mobile-details-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 44px;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-medium);
+  color: var(--fg-muted);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.mobile-details-toggle .icon {
+  color: var(--icon-muted);
   transition: transform 120ms var(--ease);
 }
-.report-sysinfo[aria-expanded="true"] .icon {
+.mobile-details[data-open] .mobile-details-toggle .icon {
   transform: rotate(180deg);
 }
-.report > .sysinfo {
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 10px 16px;
-  margin-top: 14px;
+.mobile-details-body {
+  display: grid;
+  padding: 2px 0 16px;
+  font-size: var(--text-ui);
 }
 
 /* The thread: one name over each run of messages, quiet event lines, the typing line last */
@@ -1827,6 +1998,22 @@ button.prop:hover,
 }
 
 /* Narrow screens */
+@media (max-width: 900px) {
+  .issue {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .issue-side {
+    display: none;
+  }
+  .mobile-props {
+    display: flex;
+  }
+  .mobile-details {
+    display: block;
+  }
+}
+
 @media (max-width: 1012px) {
   .home-grid {
     grid-template-columns: minmax(0, 1fr);

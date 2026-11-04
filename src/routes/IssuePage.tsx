@@ -230,18 +230,20 @@ function IssueLoading({ app, number }: { app: AppDetail; number: number }) {
   return (
     <Page>
       <div className="issue">
-        <header className="report">
-          <div className="report-head">
-            <h1 className="report-title">
-              {summary ? summary.title : <span className="skeleton" style={{ width: 320, height: 20 }} />}{" "}
-              <span className="mono report-number">#{number}</span>
-            </h1>
-          </div>
-          <div className="report-body skeleton-lines">
-            <span className="skeleton" style={{ width: "80%", height: 12 }} />
-            <span className="skeleton" style={{ width: "60%", height: 12 }} />
-          </div>
-        </header>
+        <div className="issue-main">
+          <header className="report">
+            <div className="report-head">
+              <h1 className="report-title">
+                {summary ? summary.title : <span className="skeleton" style={{ width: 320, height: 20 }} />}{" "}
+                <span className="mono report-number">#{number}</span>
+              </h1>
+            </div>
+            <div className="report-body skeleton-lines">
+              <span className="skeleton" style={{ width: "80%", height: 12 }} />
+              <span className="skeleton" style={{ width: "60%", height: 12 }} />
+            </div>
+          </header>
+        </div>
       </div>
     </Page>
   )

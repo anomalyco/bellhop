@@ -335,13 +335,13 @@ export function DesignSystem() {
         </div>
 
         <div style={{ gridColumn: "1 / span 2", minHeight: 0 }}>
-          <Section title="Issue list">
-            <IssueList />
+          <Section title="Conversation">
+            <Conversation />
           </Section>
         </div>
         <div style={{ minHeight: 0 }}>
-          <Section title="Conversation">
-            <Conversation />
+          <Section title="Issue list">
+            <IssueList />
           </Section>
         </div>
       </main>
@@ -465,127 +465,186 @@ function IssueList() {
 
 function Conversation() {
   return (
-    <div style={{ display: "grid" }}>
-      <header className="report" style={{ paddingBottom: 14 }}>
-        <div className="report-head">
-          <h1 className="report-title" style={{ fontSize: 18, lineHeight: "26px" }}>
-            Uploads stall at 99% on Safari 18 <span className="mono report-number">#142</span>
-          </h1>
+    <div className="issue" style={{ gridTemplateColumns: "minmax(0, 1fr) 236px", gap: 56 }}>
+      <div className="issue-main">
+        <header className="report" style={{ paddingBottom: 14 }}>
+          <div className="report-head">
+            <h1 className="report-title" style={{ fontSize: 18, lineHeight: "26px" }}>
+              Uploads stall at 99% on Safari 18 <span className="mono report-number">#142</span>
+            </h1>
+          </div>
+          <p className="report-by">
+            <Avatar seed="guest-7f3a" name="Alex" size={18} />
+            <span>
+              <strong className="actor-name">Alex</strong>
+              <span className="guest-marker">Guest</span> opened this 3m ago
+            </span>
+          </p>
+        </header>
+        <div className="thread" style={{ padding: "8px 0 0" }}>
+          <div className="burst">
+            <button type="button" className="burst-toggle">
+              <span className="burst-icons">
+                <span className="event-icon">
+                  <TagIcon size={14} />
+                </span>
+                <span className="event-icon">
+                  <PersonIcon size={14} />
+                </span>
+                <span className="event-icon" data-tone="in_progress">
+                  <StateIcon state="in_progress" size={14} />
+                </span>
+              </span>
+              <span className="burst-text">3 updates by Alex, OpenCode · 2m ago</span>
+              <ChevronDownIcon size={12} />
+            </button>
+          </div>
+          <section className="group">
+            <header className="group-head">
+              <span className="group-avatar">
+                <AgentAvatar size={20} />
+              </span>
+              <strong className="actor-name">OpenCode</strong>
+              <AiBadge />
+              <span className="group-time">1m ago</span>
+            </header>
+            <div className="group-msg markdown">
+              This matches <a href="#">#128</a>. The fix ships in <code>1.4.3</code>.
+            </div>
+          </section>
+          <section className="group">
+            <header className="group-head">
+              <span className="group-avatar" data-reporter>
+                <Avatar seed="guest-7f3a" name="Alex" size={20} />
+              </span>
+              <strong className="actor-name">Alex</strong>
+              <span className="guest-marker">Guest</span>
+              <span className="group-time">just now</span>
+            </header>
+            <div className="group-msg">Thanks, I'll update.</div>
+          </section>
+          <div className="group typing">
+            <header className="group-head">
+              <span className="group-avatar">
+                <Avatar seed="member-ryan" name="Ryan" size={20} />
+              </span>
+              <strong className="actor-name">Ryan</strong>
+              <span className="role-badge">Owner</span>
+              <Dots />
+              <span className="typing-text">Writing a reply</span>
+            </header>
+          </div>
         </div>
-        <p className="report-by">
-          <Avatar seed="guest-7f3a" name="Alex" size={18} />
-          <span>
-            <strong className="actor-name">Alex</strong>
-            <span className="guest-marker">Guest</span> opened this 3m ago
-          </span>
-        </p>
-        <div className="report-props" style={{ marginTop: 12 }}>
-          <button type="button" className="prop">
+        <div className="composer" style={{ position: "relative", zIndex: 0, padding: "10px 0 0", boxShadow: "0 -1px 0 0 var(--border-muted)" }}>
+          <div className="guest-bar">
+            <span>
+              Posting as <strong>Alex</strong>
+            </span>
+            <span>·</span>
+            <button type="button" className="guest-bar-link">
+              Change name
+            </button>
+            <span>·</span>
+            <a href="#" className="guest-bar-link">
+              Sign in
+            </a>
+          </div>
+          <div className="editor" data-variant="chat">
+            <div className="editor-area" style={{ minHeight: 40, color: "var(--fg-faint)" }}>
+              Write a reply…
+            </div>
+            <div className="editor-foot">
+              <div className="editor-tools">
+                <Button variant="invisible" iconOnly aria-label="Attach file" icon={<PaperclipIcon />} />
+                <Button variant="invisible" iconOnly aria-label="Add image" icon={<ImageIcon />} />
+                <Button variant="invisible" iconOnly aria-label="Record screen" icon={<RecordIcon />} />
+                <Button variant="invisible">Preview</Button>
+              </div>
+              <div className="editor-actions">
+                <Button variant="primary" trailing={<kbd className="kbd">⌘↵</kbd>}>
+                  Send
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <aside className="issue-side" style={{ paddingTop: 0 }}>
+        <section className="side-section">
+          <div className="side-head">
+            <h3>Status</h3>
+          </div>
+          <button type="button" className="btn side-select" data-variant="default">
             <StateIcon state="in_progress" size={14} />
-            In progress
-            <ChevronDownIcon size={12} />
+            <span className="side-select-text">In progress</span>
+            <ChevronDownIcon size={14} />
           </button>
-          <button type="button" className="prop">
-            <AgentAvatar size={16} />
+        </section>
+        <section className="side-section">
+          <div className="side-head">
+            <h3>Assignee</h3>
+            <Button iconOnly size="small" variant="invisible" aria-label="Assign" icon={<SettingsIcon size={14} />} />
+          </div>
+          <div className="side-value">
+            <AgentAvatar size={20} />
             <strong className="actor-name">OpenCode</strong>
             <AiBadge />
-          </button>
-          <button type="button" className="prop" data-labels>
+          </div>
+        </section>
+        <section className="side-section">
+          <div className="side-head">
+            <h3>Labels</h3>
+            <Button iconOnly size="small" variant="invisible" aria-label="Edit labels" icon={<SettingsIcon size={14} />} />
+          </div>
+          <div className="side-labels">
             <Label name="bug" color="fa4d56" />
             <Label name="safari" color="ff832b" />
-          </button>
-          <button type="button" className="prop">
-            <LinkIcon size={14} />1 relation
-          </button>
-        </div>
-      </header>
-      <div className="thread" style={{ padding: "8px 0 0" }}>
-        <div className="burst">
-          <button type="button" className="burst-toggle">
-            <span className="burst-icons">
-              <span className="event-icon">
-                <TagIcon size={14} />
-              </span>
-              <span className="event-icon">
-                <PersonIcon size={14} />
-              </span>
-              <span className="event-icon" data-tone="in_progress">
-                <StateIcon state="in_progress" size={14} />
-              </span>
-            </span>
-            <span className="burst-text">3 updates by Alex, OpenCode · 2m ago</span>
-            <ChevronDownIcon size={12} />
-          </button>
-        </div>
-        <section className="group">
-          <header className="group-head">
-            <span className="group-avatar">
-              <AgentAvatar size={20} />
-            </span>
-            <strong className="actor-name">OpenCode</strong>
-            <AiBadge />
-            <span className="group-time">1m ago</span>
-          </header>
-          <div className="group-msg markdown">
-            This matches <a href="#">#128</a>. The fix ships in <code>1.4.3</code>.
           </div>
         </section>
-        <section className="group">
-          <header className="group-head">
-            <span className="group-avatar" data-reporter>
-              <Avatar seed="guest-7f3a" name="Alex" size={20} />
-            </span>
+        <section className="side-section">
+          <div className="side-head">
+            <h3>Reporter</h3>
+          </div>
+          <div className="side-value">
+            <Avatar seed="guest-7f3a" name="Alex" size={20} />
             <strong className="actor-name">Alex</strong>
             <span className="guest-marker">Guest</span>
-            <span className="group-time">just now</span>
-          </header>
-          <div className="group-msg">Thanks, I'll update.</div>
+          </div>
+          <dl className="side-times">
+            <div>
+              <dt>Opened</dt>
+              <dd>3m ago</dd>
+            </div>
+            <div>
+              <dt>Last activity</dt>
+              <dd>just now</dd>
+            </div>
+          </dl>
         </section>
-        <div className="group typing">
-          <header className="group-head">
-            <span className="group-avatar">
-              <Avatar seed="member-ryan" name="Ryan" size={20} />
+        <section className="side-section">
+          <div className="side-head">
+            <h3>3 participants</h3>
+          </div>
+          <div className="side-people">
+            <span className="side-person">
+              <Avatar seed="guest-7f3a" name="Alex" size={22} />
             </span>
-            <strong className="actor-name">Ryan</strong>
-            <span className="role-badge">Owner</span>
-            <Dots />
-            <span className="typing-text">Writing a reply</span>
-          </header>
-        </div>
-      </div>
-      <div className="composer" style={{ position: "static", padding: "10px 0 0", boxShadow: "0 -1px 0 0 var(--border-muted)" }}>
-        <div className="guest-bar">
-          <span>
-            Posting as <strong>Alex</strong>
-          </span>
-          <span>·</span>
-          <button type="button" className="guest-bar-link">
-            Change name
+            <span className="side-person">
+              <AgentAvatar size={22} />
+              <AiBadge />
+            </span>
+            <span className="side-person">
+              <Avatar seed="member-ryan" name="Ryan" size={22} />
+            </span>
+          </div>
+        </section>
+        <section className="side-section side-foot">
+          <button type="button" className="side-copy">
+            <LinkIcon size={14} />
+            Copy link <span className="mono side-copy-number">#142</span>
           </button>
-          <span>·</span>
-          <a href="#" className="guest-bar-link">
-            Sign in
-          </a>
-        </div>
-        <div className="editor" data-variant="chat">
-          <div className="editor-area" style={{ minHeight: 40, color: "var(--fg-faint)" }}>
-            Write a reply…
-          </div>
-          <div className="editor-foot">
-            <div className="editor-tools">
-              <Button variant="invisible" iconOnly aria-label="Attach file" icon={<PaperclipIcon />} />
-              <Button variant="invisible" iconOnly aria-label="Add image" icon={<ImageIcon />} />
-              <Button variant="invisible" iconOnly aria-label="Record screen" icon={<RecordIcon />} />
-              <Button variant="invisible">Preview</Button>
-            </div>
-            <div className="editor-actions">
-              <Button variant="primary" trailing={<kbd className="kbd">⌘↵</kbd>}>
-                Send
-              </Button>
-            </div>
-          </div>
-        </div>
-      </div>
+        </section>
+      </aside>
     </div>
   )
 }
