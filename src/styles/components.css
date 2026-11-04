@@ -407,9 +407,6 @@ img.avatar[data-photo] {
   font-weight: var(--weight-semibold);
   letter-spacing: -0.015em;
 }
-.logo[data-app-icon] .logo-word {
-  color: var(--fg-faint);
-}
 .logo-mark {
   display: inline-flex;
   flex: none;

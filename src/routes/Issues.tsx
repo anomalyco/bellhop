@@ -10,9 +10,11 @@ import { Time, useUntil } from "../lib/time"
 import { ActorAvatar, actorName } from "../ui/Actor"
 import { ChevronDownIcon, CommentIcon, PlusIcon, SearchIcon, TagIcon, XIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
-import { Button, Dots, Label, StateIcon } from "../ui/primitives"
+import { AppIcon, Button, Dots, Label, StateIcon } from "../ui/primitives"
 import { AppLayout, Page } from "../ui/Shell"
 import { AppLink } from "../ui/SiteLink"
+import { NoClosed, NoIssues, NoResults } from "../ui/onboarding/EmptyStates"
+import { SetupChecklist, useSetupChecklistSettled } from "../ui/onboarding/SetupChecklist"
 
 export function Issues({ slug }: { slug: string }) {
   return (
@@ -66,14 +68,16 @@ function IssuesLoading({ slug }: { slug: string }) {
   )
 }
 
-function SearchBox({
+export function SearchBox({
   query,
   filtered,
+  placeholder = "Search issues",
   onSubmit,
   onClear,
 }: {
   query: string
   filtered: boolean
+  placeholder?: string
   onSubmit: (draft: string) => void
   onClear: () => void
 }) {
@@ -89,10 +93,10 @@ function SearchBox({
     <form className="input list-search" onSubmit={submit} role="search">
       <SearchIcon size={14} />
       <input
-        aria-label="Search issues"
+        aria-label={placeholder}
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="Search issues"
+        placeholder={placeholder}
         spellCheck={false}
       />
       {filtered && (
@@ -105,6 +109,13 @@ function SearchBox({
 }
 
 function IssuesBody({ app }: { app: AppDetail }) {
+  // For admins the setup checklist sits above the toolbar; keep the skeleton until it knows whether it shows, so
+  // it never pushes a painted toolbar down.
+  if (!useSetupChecklistSettled(app)) return <IssuesLoading slug={app.slug} />
+  return <IssuesList app={app} />
+}
+
+function IssuesList({ app }: { app: AppDetail }) {
   const slug = app.slug
   const search = useSearch()
   const [, navigate] = useLocation()
@@ -179,6 +190,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
 
   return (
     <Page>
+      <SetupChecklist app={app} />
       <div className="list-toolbar">
         <nav className="segmented list-states" aria-label="Issue state">
           <AppLink slug={slug} href={stateHref("open")} aria-current={filter.state === "open" ? "page" : undefined}>
@@ -211,22 +223,13 @@ function IssuesBody({ app }: { app: AppDetail }) {
         {!!error && !shown && <div className="list-empty">{errorMessage(error)}</div>}
         {!shown && !error && <SkeletonRows />}
         {shown && shown.issues.length === 0 && (
-          <div className="list-empty">
-            {filtered ? (
-              <>
-                No results.{" "}
-                <button type="button" className="link-button" onClick={() => go({ ...filter, label: "", text: "" })}>
-                  Clear filters
-                </button>
-              </>
-            ) : filter.state === "open" ? (
-              <>
-                No open issues. <AppLink slug={slug} href={appPath(slug, "/new")}>Open one</AppLink>
-              </>
-            ) : (
-              "No closed issues."
-            )}
-          </div>
+          filtered ? (
+            <NoResults query={[filter.label && `label:${filter.label}`, filter.text].filter(Boolean).join(" ")} onClear={() => go({ ...filter, label: "", text: "" })} />
+          ) : filter.state === "closed" ? (
+            <NoClosed openHref={stateHref("open")} />
+          ) : (
+            <NoIssues newIssueHref={appPath(slug, "/new")} />
+          )
         )}
         {shown?.issues.map((issue) => (
           <IssueRow key={issue.id} slug={slug} issue={issue} onLabel={onLabel} />
@@ -244,7 +247,7 @@ function IssuesBody({ app }: { app: AppDetail }) {
   )
 }
 
-function SkeletonRows() {
+export function SkeletonRows() {
   return (
     <>
       {[0, 1, 2, 3, 4].map((i) => (
@@ -316,14 +319,17 @@ function LabelFilter({ app, value, onChange }: { app: AppDetail; value: string; 
   )
 }
 
-const IssueRow = memo(function IssueRow({
+/** One issue in a list. In the home feed (`workspace` set) it also names its workspace, and labels don't filter. */
+export const IssueRow = memo(function IssueRow({
   slug,
   issue,
   onLabel,
+  workspace,
 }: {
   slug: string
   issue: IssueSummary
-  onLabel: (name: string) => void
+  onLabel?: (name: string) => void
+  workspace?: { name: string; icon_url: string | null }
 }) {
   const active = useUntil(issue.activity?.expires_at)
   const href = appPath(slug, `/issues/${issue.number}`)
@@ -331,15 +337,27 @@ const IssueRow = memo(function IssueRow({
     <div className="issue-row">
       <StateIcon state={visibleState(issue)} />
       <div className="issue-row-main">
+        {workspace && (
+          <AppLink slug={slug} href={appPath(slug)} className="issue-row-app">
+            <AppIcon src={workspace.icon_url} size={14} />
+            <span className="issue-row-app-name">{workspace.name}</span>
+          </AppLink>
+        )}
         <div className="issue-row-title">
           <AppLink slug={slug} href={href} className="issue-title">
             {issue.title}
           </AppLink>
-          {issue.labels.map((label) => (
-            <button key={label.id} type="button" className="label-button" onClick={() => onLabel(label.name)} title={label.description}>
-              <Label name={label.name} color={label.color} />
-            </button>
-          ))}
+          {issue.labels.map((label) =>
+            onLabel ? (
+              <button key={label.id} type="button" className="label-button" onClick={() => onLabel(label.name)} title={label.description}>
+                <Label name={label.name} color={label.color} />
+              </button>
+            ) : (
+              <span key={label.id} className="label-static" title={label.description}>
+                <Label name={label.name} color={label.color} />
+              </span>
+            ),
+          )}
         </div>
         <div className="issue-meta">
           <span className="mono">#{issue.number}</span> · {actorName(issue.author)} opened <Time iso={issue.created_at} />

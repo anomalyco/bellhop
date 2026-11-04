@@ -84,7 +84,7 @@ function UserMenu() {
           </MenuHeader>
           {(
             [
-              ["Your workspaces", homeUrl()],
+              ["Your workspaces", homeUrl("/workspaces")],
               ["Agents", homeUrl("/agents")],
             ] as const
           ).map(([label, href]) => (
@@ -114,42 +114,57 @@ function UserMenu() {
   )
 }
 
+/** A page inside a workspace, shown after its name in the header: "/ #12", "/ New issue". */
+export interface Crumb {
+  label: string
+  href: string
+  mono?: boolean
+}
+
 export function Header({
   app,
+  slug,
   tab,
   pendingApp,
+  crumb,
 }: {
   app?: AppDetail | CachedAppMeta | { slug: string; name: string }
+  /** The workspace being loaded, when `app` isn't known yet (nothing cached). */
+  slug?: string
   tab?: "issues" | "settings"
   pendingApp?: boolean
+  crumb?: Crumb
 }) {
   const detail = app && "counts" in app ? app : null
   const iconUrl = detail ? detail.icon_url : app && "icon_url" in app ? app.icon_url : null
   const openCount = detail ? detail.counts.open : app && "open" in app ? app.open : null
-  const inApp = !!app || !!pendingApp
+  const workspace = app?.slug ?? slug
   return (
-    <header className="header" data-app={inApp ? "" : undefined}>
+    <header className="header" data-app={workspace || pendingApp ? "" : undefined}>
       <div className="header-inner">
-        <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
-          {iconUrl ? (
-            // An app with its own icon leads with it; Bellhop stays as a quiet word beside it.
-            <span className="logo" data-app-icon>
+        {workspace ? (
+          // Inside a workspace it is the product: its icon and name lead to its issues. Until the name is known
+          // (nothing cached) only the icon shows; the name, crumb and nav arrive together, so nothing moves.
+          <div className="header-crumbs">
+            <AppLink slug={workspace} href={appPath(workspace)} className="header-home" aria-label={app ? undefined : "Issues"}>
               <AppIcon src={iconUrl} size={22} />
-              <span className="logo-word">Bellhop</span>
-            </span>
-          ) : (
-            <Logo size={22} />
-          )}
-        </SiteLink>
-        {app && (
-          <>
-            <span className="header-sep" aria-hidden="true">
-              /
-            </span>
-            <AppLink slug={app.slug} href={appPath(app.slug)} className="header-app">
-              {app.name}
+              {app && <span className="header-app">{app.name}</span>}
             </AppLink>
-          </>
+            {app && crumb && (
+              <span className="header-trail" data-mono={crumb.mono || undefined}>
+                <span className="header-sep" aria-hidden="true">
+                  /
+                </span>
+                <AppLink slug={workspace} href={crumb.href} className="header-crumb">
+                  {crumb.label}
+                </AppLink>
+              </span>
+            )}
+          </div>
+        ) : (
+          <SiteLink href={homeUrl()} className="header-logo" aria-label="Bellhop home">
+            <Logo size={22} />
+          </SiteLink>
         )}
         {app && (
           <nav className="app-nav" aria-label={app.name}>
@@ -190,11 +205,13 @@ export function Page({ children, narrow }: { children: ReactNode; narrow?: boole
 export function AppLayout({
   slug,
   tab,
+  crumb,
   loading,
   children,
 }: {
   slug: string
   tab: "issues" | "settings"
+  crumb?: Crumb
   loading?: ReactNode
   children: (app: AppDetail) => ReactNode
 }) {
@@ -211,14 +228,14 @@ export function AppLayout({
   if (!app) {
     return (
       <>
-        <Header app={cached ?? undefined} pendingApp={!cached} tab={tab} />
+        <Header app={cached ?? undefined} slug={slug} pendingApp={!cached} tab={tab} crumb={crumb} />
         {error ? <ErrorPage error={error} /> : (loading ?? null)}
       </>
     )
   }
   return (
     <>
-      <Header app={app} tab={tab} />
+      <Header app={app} tab={tab} crumb={crumb} />
       {children(app)}
     </>
   )

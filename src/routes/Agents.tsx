@@ -11,7 +11,7 @@ import { AccessEditor, emptyAccess, grantsAnything, type AccessApp } from "../ui
 import { accessApps, accessOf, accessSummary } from "../ui/agents/access"
 import { SecretReveal } from "../ui/agents/SecretReveal"
 import { AgentSetup } from "../ui/onboarding/AgentSetup"
-import { SignIn } from "./Home"
+import { SignIn } from "./home/SignIn"
 import "../styles/agents.css"
 
 /** The account's agents (/agents on the home domain): OAuth connections and token agents, their access, secrets. */

@@ -30,6 +30,19 @@ const write = (key: string) => {
 }
 
 /**
+ * Whether the checklist knows yet if it will show. The list page waits for this (admins only, and only while the
+ * checklist isn't dismissed) so the checklist never appears above an already painted toolbar.
+ */
+export function useSetupChecklistSettled(app: AppDetail) {
+  const slug = app.slug
+  const admin = app.role === "owner" || app.role === "admin"
+  const dismissed = read(flag(slug, "dismissed")) || read(flag(slug, "complete"))
+  const settings = useResource<AppSettings>(admin && !dismissed ? keys.settings(slug) : null, () => api.settings(slug), 10_000)
+  const agents = useResource<ConnectedAgent[]>(admin && !dismissed ? keys.agents : null, api.agents, 10_000)
+  return !admin || dismissed || ((!!settings.data || !!settings.error) && (!!agents.data || !!agents.error))
+}
+
+/**
  * "Get your workspace ready": five steps for a new workspace's admins, each done from real data. Hides when
  * dismissed, and on its own once everything is done (with a short "ready" moment if that happened just now).
  */
@@ -89,6 +102,8 @@ export function SetupChecklist({ app }: { app: AppDetail }) {
   }, [ready, complete, slug])
 
   if (!admin || dismissed || !ready) return null
+  // Already complete on arrival: the effect above hides it for good; don't flash it for a frame first.
+  if (complete && !celebrating && !sawIncomplete.current) return null
 
   if (celebrating)
     return (

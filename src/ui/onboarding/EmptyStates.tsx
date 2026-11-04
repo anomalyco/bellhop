@@ -35,6 +35,40 @@ export function NoIssues({ newIssueHref }: { newIssueHref: string }) {
   )
 }
 
+/** The home feed when no workspace is public yet: start one, or sign in to. */
+export function NoPublicWorkspaces({ signedIn }: { signedIn: boolean }) {
+  return (
+    <Empty
+      icon={<IssueOpenIcon size={20} />}
+      title="No public workspaces yet"
+      action={
+        <SiteLink href={signedIn ? "/new" : "/signin?next=%2Fnew"} className="btn" data-variant="primary">
+          {signedIn ? "Create a workspace" : "Sign in to create one"}
+        </SiteLink>
+      }
+    >
+      Issues from public workspaces show up here as people report them.
+    </Empty>
+  )
+}
+
+/** The home feed's Open tab when everything public is closed. */
+export function NoOpen({ closedHref }: { closedHref: string }) {
+  return (
+    <Empty
+      icon={<StateIcon state="open" size={20} />}
+      title="No open issues"
+      action={
+        <SiteLink href={closedHref} className="btn" data-variant="invisible">
+          View closed issues
+        </SiteLink>
+      }
+    >
+      Everything in public workspaces has been answered.
+    </Empty>
+  )
+}
+
 /** A search or label filter that matches nothing. */
 export function NoResults({ query, onClear }: { query: string; onClear: () => void }) {
   return (

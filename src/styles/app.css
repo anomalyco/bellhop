@@ -34,7 +34,7 @@
   text-underline-offset: 0.2em;
 }
 
-/* Header: logo, app, its nav, account */
+/* Header: the Bellhop logo on home pages; inside a workspace, its icon and name (plus a crumb), its nav, account */
 .header {
   border-bottom: 1px solid var(--border-muted);
 }
@@ -55,22 +55,60 @@
 .header-logo:hover {
   text-decoration: none;
 }
-.header-sep {
-  color: var(--fg-faint);
-  font-size: 16px;
+.header-crumbs {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.header-home {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg);
+  border-radius: var(--radius);
+}
+.header-home > :is(.app-icon, .logo-mark) {
+  flex: none;
+}
+.header-home:hover,
+.header-crumb:hover {
+  color: var(--fg);
+  text-decoration: none;
 }
 .header-app {
   min-width: 0;
   overflow: hidden;
-  color: var(--fg);
   font-size: var(--text-body);
   font-weight: var(--weight-semibold);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
-.header-app:hover {
-  color: var(--fg);
-  text-decoration: none;
+.header-sep {
+  flex: none;
+  color: var(--fg-faint);
+  font-size: 16px;
+}
+.header-crumb {
+  flex: none;
+  color: var(--fg-muted);
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+.header-trail {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+}
+.header-trail[data-mono] .header-crumb {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: var(--weight-regular);
 }
 .app-nav {
   display: flex;
@@ -573,6 +611,7 @@ a.box-row:hover {
 .list-label {
   grid-area: label;
   display: flex;
+  justify-content: flex-end;
   min-width: 0;
 }
 .list-new {
@@ -672,6 +711,38 @@ a.box-row:hover {
 }
 .label-button:hover .label {
   filter: brightness(1.2);
+}
+.label-static {
+  display: inline-flex;
+  margin: 0 4px 0 0;
+  vertical-align: 1px;
+}
+/* The home feed names each issue's workspace above its title */
+.issue-row-app {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 100%;
+  margin-bottom: 2px;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.issue-row-app:hover {
+  color: var(--fg);
+  text-decoration: none;
+}
+.issue-row-app > :is(.app-icon, .logo-mark) {
+  flex: none;
+}
+.issue-row-app-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .issue-row-side {
   display: flex;
@@ -2189,12 +2260,13 @@ button.prop:hover,
     height: 48px;
     padding: 0 16px;
   }
-  .header[data-app] .logo-word,
-  .header-sep {
-    display: none;
-  }
   .app-nav {
     margin-left: auto;
+  }
+  /* Phones keep the issue number but not a worded crumb ("New issue"): the page's title already says it, and the
+     workspace name needs the room */
+  .header-trail:not([data-mono]) {
+    display: none;
   }
   .app-nav a {
     padding: 0 8px;
@@ -2271,5 +2343,68 @@ button.prop:hover,
   .textarea,
   .editor-area {
     font-size: 16px;
+  }
+}
+
+/* Touch screens: every control gets a tap target at least 40 px tall (and wide, for small icon buttons) without
+   looking any different. Small controls get an invisible ::after centred on them; inputs grow to 40 px inside their
+   unchanged field, overflowing it evenly. */
+@media (pointer: coarse) {
+  :is(
+      .btn,
+      .segmented > button,
+      .segmented > a,
+      .app-nav a,
+      .header-logo,
+      .header-home,
+      .header-crumb,
+      .header-avatar,
+      .prop:not([data-static]),
+      .report-edit-body,
+      .guest-bar-link,
+      .issue-row-comments,
+      .input-clear,
+      .label-toggle,
+      .color-swatch,
+      .settings-nav a,
+      .feed-rail a,
+      :is(.home-agents, .settings-main, .create, .signin, .oauth, .feed) a:not(.btn, .box-row, .issue-title, p a, li a)
+    ) {
+    position: relative;
+  }
+  :is(
+      .btn,
+      .segmented > button,
+      .segmented > a,
+      .app-nav a,
+      .header-logo,
+      .header-home,
+      .header-crumb,
+      .header-avatar,
+      .prop:not([data-static]),
+      .report-edit-body,
+      .guest-bar-link,
+      .issue-row-comments,
+      .input-clear,
+      .label-toggle,
+      .color-swatch,
+      .settings-nav a,
+      .feed-rail a,
+      :is(.home-agents, .settings-main, .create, .signin, .oauth, .feed) a:not(.btn, .box-row, .issue-title, p a, li a)
+    )::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - 20px));
+    right: min(0px, calc(50% - 20px));
+    bottom: min(0px, calc(50% - 20px));
+    left: min(0px, calc(50% - 20px));
+  }
+  .input input {
+    height: 40px;
+  }
+  /* Label chips and the feed's workspace name are small text inside the row; on touch the whole row opens the
+     issue instead (workspaces are a tap away in the rail). */
+  .issue-row :is(.label-button, .issue-row-app) {
+    pointer-events: none;
   }
 }

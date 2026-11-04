@@ -136,6 +136,12 @@ export const ChevronDownIcon = (p: IconProps) => (
   </Icon>
 )
 
+export const ArrowUpIcon = (p: IconProps) => (
+  <Icon {...p}>
+    <path d="M8 13V3M4 7l4-4 4 4" />
+  </Icon>
+)
+
 export const XIcon = (p: IconProps) => (
   <Icon {...p}>
     <path d="m4 4 8 8M12 4l-8 8" />

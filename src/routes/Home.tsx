@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react"
-import { useSearch } from "wouter"
+import type { ReactNode } from "react"
+import { useLocation } from "wouter"
 import type { App, ConnectedAgent } from "../../shared/api"
 import { api, errorMessage, keys } from "../lib/api"
 import { useResource } from "../lib/cache"
-import { appLabel, appPath, homeUrl, isAbsolute } from "../lib/site"
+import { appLabel, appPath, homeUrl } from "../lib/site"
 import { PlusIcon } from "../ui/icons"
-import { AgentAvatar, AppIcon, Button } from "../ui/primitives"
+import { AgentAvatar, AppIcon } from "../ui/primitives"
 import { Header, Page, useMe } from "../ui/Shell"
 import { SiteLink } from "../ui/SiteLink"
 import { AgentSetup } from "../ui/onboarding/AgentSetup"
@@ -13,64 +13,55 @@ import { accessSummary } from "../ui/agents/access"
 import { RoleBadge } from "../ui/roles/RoleSelect"
 import "../styles/agents.css"
 import { CreateWorkspace } from "./home/CreateWorkspace"
-import { Landing, SignInActions } from "./home/Landing"
+import { SignIn } from "./home/SignIn"
 import "../styles/onboarding.css"
 
-/** Where ?next= may send you after signing in: a path here, or an absolute URL (an app subdomain) the Worker vets. */
-function safeNext(raw: string | null) {
-  const next = raw ?? "/"
-  return (next.startsWith("/") && !next.startsWith("//")) || isAbsolute(next) ? next : "/"
-}
-
-export function Home() {
+/** Pages for signed-in accounts only: the sign-in panel (returning here) until then. */
+function Account({ back, children }: { back: string; children: () => ReactNode }) {
   const { data: me, error } = useMe()
-  const back = new URLSearchParams(useSearch()).get("next")
-  // Already signed in and sent here to sign in (e.g. from an app subdomain): go straight back.
-  useEffect(() => {
-    if (!me?.user || !back) return
-    const url = new URL(back, window.location.href)
-    const host = window.location.hostname
-    if (url.hostname === host || url.hostname.endsWith(`.${host}`)) window.location.replace(url.href)
-  }, [me?.user, back])
-  if (!me) {
+  if (!me)
     return (
       <>
         <Header />
         {error ? <p className="page muted-text">{errorMessage(error)}</p> : null}
       </>
     )
-  }
-  if (me.user) return <Workspaces />
-  // Sent here to sign in from somewhere else: just the sign-in. A first visit: the landing.
-  return back ? <SignIn /> : <Landing next="/" />
+  if (!me.user) return <SignIn back={back} />
+  return <>{children()}</>
 }
 
-/** The plain sign-in page. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
-export function SignIn({ back }: { back?: string }) {
-  const search = useSearch()
-  const next = safeNext(back ?? new URLSearchParams(search).get("next"))
+/** /workspaces: your workspaces and agents. A new account with none gets the create step right here. */
+export function WorkspacesPage() {
+  return <Account back="/workspaces">{() => <Workspaces />}</Account>
+}
+
+/** /new: create a workspace, then land on its issue list. */
+export function NewWorkspacePage() {
+  return <Account back="/new">{() => <NewWorkspace />}</Account>
+}
+
+function NewWorkspace() {
+  const { data: apps } = useResource<App[]>(keys.apps, api.apps, 5_000)
+  const [, navigate] = useLocation()
   return (
-    <main className="signin">
-      <div className="signin-inner">
-        <AgentAvatar size={36} />
-        <h1 className="signin-title">Sign in to Bellhop</h1>
-        <SignInActions next={next} />
-      </div>
-    </main>
+    <>
+      <Header />
+      <main className="create-page">
+        {apps && <CreateWorkspace first={apps.length === 0} onCancel={() => (history.length > 1 ? history.back() : navigate("/workspaces"))} />}
+      </main>
+    </>
   )
 }
 
-/** Signed in: the first-workspace step for a new account, otherwise the workspace list and connected agents. */
 function Workspaces() {
   const { data: apps, error } = useResource<App[]>(keys.apps, api.apps, 5_000)
-  const [creating, setCreating] = useState(false)
 
-  if (apps && (apps.length === 0 || creating))
+  if (apps && apps.length === 0)
     return (
       <>
         <Header />
         <main className="create-page">
-          <CreateWorkspace first={apps.length === 0} onCancel={apps.length ? () => setCreating(false) : undefined} />
+          <CreateWorkspace first />
         </main>
       </>
     )
@@ -81,9 +72,10 @@ function Workspaces() {
       <Page narrow>
         <div className="home-head">
           <h1 className="page-title home-title">Your workspaces</h1>
-          <Button variant="primary" icon={<PlusIcon size={14} />} onClick={() => setCreating(true)} disabled={!apps}>
+          <SiteLink href="/new" className="btn" data-variant="primary">
+            <PlusIcon size={14} />
             New workspace
-          </Button>
+          </SiteLink>
         </div>
         <div className="box home-apps">
           {!apps && !error && <div className="box-row skeleton-row" />}
@@ -102,7 +94,8 @@ function Workspaces() {
             </SiteLink>
           ))}
         </div>
-        <ConnectedAgents />
+        {/* Below the list, so it waits for the list rather than being pushed down by it */}
+        {(!!apps || !!error) && <ConnectedAgents />}
       </Page>
     </>
   )

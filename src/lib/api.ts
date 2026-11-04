@@ -7,6 +7,8 @@ import type {
   Comment,
   Config,
   ConnectedAgent,
+  FeedApp,
+  FeedList,
   Issue,
   IssueList,
   IssuePatch,
@@ -122,9 +124,16 @@ export const api = {
   me: () => get<Me>("/api/me"),
   setGuestName: (name: string) => request<Me>("PUT", "/api/me/guest", { name }),
   apps: () => get<App[]>("/api/apps"),
+  feed: (params: { state: "open" | "closed"; q?: string; cursor?: string }) => {
+    const qs = new URLSearchParams({ state: params.state })
+    if (params.q) qs.set("q", params.q)
+    if (params.cursor) qs.set("cursor", params.cursor)
+    return get<FeedList>(`/api/feed?${qs}`)
+  },
+  feedApps: () => get<FeedApp[]>("/api/feed/apps"),
   createApp: (input: NewApp) => request<AppDetail>("POST", "/api/apps", input),
   app: (slug: string) => get<AppDetail>(app(slug)),
-  patchApp: (slug: string, input: { name?: string; description?: string }) => request<AppDetail>("PATCH", app(slug), input),
+  patchApp: (slug: string, input: { name?: string; description?: string; public?: boolean }) => request<AppDetail>("PATCH", app(slug), input),
   settings: (slug: string) => get<AppSettings>(`${app(slug)}/settings`),
   putWebhook: (slug: string, url: string | null) => request<AppSettings>("PUT", `${app(slug)}/webhook`, { url }),
   rotateWebhook: (slug: string) => request<AppSettings>("POST", `${app(slug)}/webhook/rotate`),
@@ -185,6 +194,9 @@ export const keys = {
   me: "me",
   apps: "apps",
   agents: "agents",
+  /** Every page of the home feed shares this prefix; the rest is the state and search. */
+  feed: "feed:",
+  feedApps: "feed-apps",
   app: (slug: string) => `app:${slug}`,
   settings: (slug: string) => `settings:${slug}`,
   appAgents: (slug: string) => `app-agents:${slug}`,

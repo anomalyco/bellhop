@@ -6,7 +6,7 @@ import { useResource } from "../lib/cache"
 import { AccessEditor, emptyAccess, grantsAnything } from "../ui/agents/AccessEditor"
 import { Button } from "../ui/primitives"
 import { Header, useMe } from "../ui/Shell"
-import { SignIn } from "./Home"
+import { SignIn } from "./home/SignIn"
 
 /** Pages an agent sends you to: sign in first, then return here. */
 function SignedIn({ children }: { children: () => ReactNode }) {

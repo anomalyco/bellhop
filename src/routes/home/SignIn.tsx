@@ -1,52 +1,50 @@
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
+import { useLocation, useSearch } from "wouter"
 import type { Config } from "../../../shared/api"
-import { api, keys } from "../../lib/api"
+import { api, errorMessage, keys } from "../../lib/api"
 import { useResource } from "../../lib/cache"
-import { addressParts } from "../../lib/site"
-import { Button, Logo } from "../../ui/primitives"
-import shot from "../../assets/landing-issue.webp"
-import shotNarrow from "../../assets/landing-issue-narrow.webp"
+import { isAbsolute } from "../../lib/site"
+import { AgentAvatar, Button } from "../../ui/primitives"
+import { useMe } from "../../ui/Shell"
 import "../../styles/onboarding.css"
 
-/** blhp.app signed out: what Bellhop is, the three things that make it different, and the way in. */
-export function Landing({ next }: { next: string }) {
-  const { prefix, suffix } = addressParts()
+/** Where ?next= may send you after signing in: a path here, or an absolute URL (an app subdomain) the Worker vets. */
+function safeNext(raw: string | null) {
+  const next = raw ?? "/"
+  return (next.startsWith("/") && !next.startsWith("//")) || isAbsolute(next) ? next : "/"
+}
+
+/** /signin: sign in, then back to ?next= (or the feed). Already signed in: straight there. */
+export function SignInPage() {
+  const { data: me, error } = useMe()
+  const [, navigate] = useLocation()
+  const back = new URLSearchParams(useSearch()).get("next")
+  useEffect(() => {
+    if (!me?.user) return
+    if (!back) return navigate("/", { replace: true })
+    const url = new URL(back, window.location.href)
+    const host = window.location.hostname
+    if (url.hostname === host || url.hostname.endsWith(`.${host}`)) window.location.replace(url.href)
+  }, [me?.user, back, navigate])
+  if (error && !me) return <p className="page muted-text">{errorMessage(error)}</p>
+  // Signed in: on the way back (the effect above). Loading: nothing yet, the panel is centred on its own.
+  if (!me || me.user) return null
+  return <SignIn />
+}
+
+/** The sign-in panel. `back` overrides ?next= (pages like the OAuth consent sign in and return to themselves). */
+export function SignIn({ back }: { back?: string }) {
+  const search = useSearch()
+  const next = safeNext(back ?? new URLSearchParams(search).get("next"))
+  // Which sign-in methods show depends on the config; the panel is centred, so wait for it rather than re-centre.
+  const { data: config, error } = useResource<Config>(keys.config, api.config, 60_000)
+  if (!config && !error) return <main className="signin" />
   return (
-    <main className="landing">
-      <div className="landing-inner">
-        <div className="landing-copy">
-          <Logo size={26} />
-          <h1 className="landing-title">A live support site for your product</h1>
-          <p className="landing-lede">Your AI agent answers issues as they come in, and your team steps in when it's needed.</p>
-          <ul className="landing-points">
-            <li>People report bugs and questions without an account.</li>
-            <li>Your agent works them live over MCP: it replies, labels and closes.</li>
-            <li>
-              Every workspace gets its own address, like{" "}
-              <code className="landing-address">
-                {prefix}name{suffix}
-              </code>
-              .
-            </li>
-          </ul>
-          <div className="landing-actions">
-            <SignInActions next={next} />
-          </div>
-        </div>
-        <figure className="landing-shot">
-          <picture>
-            {/* Phones get the conversation alone, laid out at phone width, so it stays readable. */}
-            <source media="(max-width: 640px)" srcSet={shotNarrow} width={720} height={823} />
-            <img
-              src={shot}
-              width={1200}
-              height={600}
-              alt="A Bellhop workspace: a guest's question about MCP servers, answered by the OpenCode agent, which then marks it as waiting on the reporter"
-              decoding="async"
-              loading="lazy"
-            />
-          </picture>
-        </figure>
+    <main className="signin">
+      <div className="signin-inner">
+        <AgentAvatar size={36} />
+        <h1 className="signin-title">Sign in to Bellhop</h1>
+        <SignInActions next={next} />
       </div>
     </main>
   )

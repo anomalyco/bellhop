@@ -1,0 +1,176 @@
+/* The home feed: public issues beside a rail of workspaces. The rows are the issue list's own (app.css). */
+
+.feed {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 272px;
+  align-items: start;
+  gap: 48px;
+}
+.feed-main {
+  min-width: 0;
+}
+.list-toolbar.feed-toolbar {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "states search";
+}
+/* Until the counts arrive the toolbar keeps its place but isn't painted, so the tabs never widen on screen */
+.feed-toolbar[data-loading] {
+  visibility: hidden;
+}
+
+/* New or newly active issues wait behind this, floating, so the list never moves under the reader */
+.feed-newer-slot {
+  position: sticky;
+  top: 12px;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  height: 0;
+}
+.feed-newer {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+  height: var(--control-medium);
+  padding: 0 14px;
+  font: inherit;
+  font-size: var(--text-ui);
+  font-weight: var(--weight-button);
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  border: 0;
+  border-radius: var(--radius-full);
+  box-shadow: var(--elevation-floating);
+  cursor: pointer;
+  animation: feed-newer-in 180ms var(--ease);
+}
+.feed-newer .icon {
+  color: inherit;
+}
+@keyframes feed-newer-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+/* Rail */
+.feed-rail {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 28px;
+  min-width: 0;
+}
+.rail-section {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+.rail-title {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  font-weight: var(--weight-medium);
+}
+.rail-list {
+  display: grid;
+  margin: 0 -8px;
+  padding: 0;
+  list-style: none;
+}
+.rail-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 36px;
+  padding: 0 8px;
+  color: var(--fg);
+  font-size: var(--text-ui);
+  border-radius: var(--radius);
+}
+.rail-row:hover {
+  color: var(--fg);
+  text-decoration: none;
+  background: var(--hover);
+}
+.rail-row > :is(.app-icon, .logo-mark) {
+  flex: none;
+}
+.rail-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.rail-count {
+  flex: none;
+  color: var(--fg-faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.rail-more {
+  color: var(--fg-muted);
+}
+.rail-prompt {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+}
+.rail-prompt-text {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+
+@media (pointer: coarse) {
+  .rail-row {
+    height: 40px;
+  }
+}
+
+/* Narrow: the feed comes first; the rail follows it, after a hairline */
+@media (max-width: 1024px) {
+  .feed {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 32px;
+  }
+  .feed-rail {
+    position: static;
+    padding-top: 24px;
+    border-top: 1px solid var(--border-muted);
+  }
+  .feed-rail:empty {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  .list-toolbar.feed-toolbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "states"
+      "search";
+  }
+  .feed-toolbar .list-states {
+    justify-self: start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .feed-newer {
+    animation: none;
+  }
+}

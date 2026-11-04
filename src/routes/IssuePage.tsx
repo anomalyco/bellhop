@@ -5,6 +5,7 @@ import { load, peek, setData, useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
 import { appendTimeline, applyActivity, applyActorUpdate, applySummary, findSummary, storeIssue } from "../lib/issues"
 import { useLive } from "../lib/live"
+import { appPath } from "../lib/site"
 import { loadMarkdown } from "../ui/Markdown"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
 import { IssueView } from "./issue/IssueView"
@@ -16,7 +17,12 @@ export function IssuePage({ slug, number }: { slug: string; number: number }) {
     void loadMarkdown()
   }, [])
   return (
-    <AppLayout slug={slug} tab="issues" loading={<IssueLoading slug={slug} number={number} />}>
+    <AppLayout
+      slug={slug}
+      tab="issues"
+      crumb={{ label: `#${number}`, href: appPath(slug, `/issues/${number}`), mono: true }}
+      loading={<IssueLoading slug={slug} number={number} />}
+    >
       {(app) => <IssueBody key={number} app={app} number={number} />}
     </AppLayout>
   )

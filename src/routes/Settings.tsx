@@ -13,6 +13,7 @@ import { RoleBadge, RoleSelect } from "../ui/roles/RoleSelect"
 import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel, roleText, teamRoles } from "../lib/roles"
 import { appLabel, appPath, homeUrl, signInHref } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
+import { PublicToggle, VisibilityValue } from "../ui/workspace/Visibility"
 import "../styles/agents.css"
 import "../styles/onboarding.css"
 import "../styles/settings.css"
@@ -130,6 +131,7 @@ function General({ app }: { app: AppDetail }) {
   const admin = canSetup(app.role)
   const [name, setName] = useState(app.name)
   const [description, setDescription] = useState(app.description)
+  const [isPublic, setPublic] = useState(!!app.public)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -140,9 +142,14 @@ function General({ app }: { app: AppDetail }) {
     setError(null)
     setSaved(false)
     try {
-      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim() })
+      const next = await api.patchApp(app.slug, { name: name.trim(), description: description.trim(), public: isPublic })
       setData(keys.app(app.slug), next)
-      setData<App[]>(keys.apps, (apps) => apps?.map((a) => (a.id === next.id ? { ...a, name: next.name, description: next.description } : a)))
+      setData<App[]>(keys.apps, (apps) =>
+        apps?.map((a) => (a.id === next.id ? { ...a, name: next.name, description: next.description, public: next.public } : a)),
+      )
+      // The feed's workspace list changes when this one goes public or private.
+      invalidate(keys.feedApps)
+      invalidate(keys.feed)
       setSaved(true)
     } catch (err) {
       setError(errorMessage(err))
@@ -171,6 +178,10 @@ function General({ app }: { app: AppDetail }) {
             </label>
             <textarea id="set-description" className="textarea" rows={3} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={500} />
           </div>
+          <div className="field">
+            <span className="field-label">Visibility</span>
+            <PublicToggle value={isPublic} onChange={setPublic} id="set-public" />
+          </div>
         </>
       ) : (
         <>
@@ -181,6 +192,10 @@ function General({ app }: { app: AppDetail }) {
           <div className="field">
             <span className="field-label">Description</span>
             <p className="settings-value">{app.description || <span className="muted-text">No description</span>}</p>
+          </div>
+          <div className="field">
+            <span className="field-label">Visibility</span>
+            <VisibilityValue value={!!app.public} />
           </div>
         </>
       )}

@@ -1,92 +1,8 @@
-/* Onboarding: the signed-out landing, the create-workspace step, the setup checklist, agent setup snippets and
+/* Onboarding: the sign-in actions, the create-workspace step, the setup checklist, agent setup snippets and
    empty states. Flat on the off-black page: hairlines, no filled panels, no gradients. Loaded before app.css, so
    it only uses its own class names. */
 
-/* Landing */
-.landing {
-  display: grid;
-  align-items: center;
-  min-height: 100vh;
-  min-height: 100dvh;
-  padding: 48px 24px;
-}
-.landing-inner {
-  display: grid;
-  grid-template-columns: minmax(0, 400px) minmax(0, 1fr);
-  align-items: center;
-  gap: 64px;
-  width: 100%;
-  max-width: 1200px;
-  margin: 0 auto;
-}
-.landing-copy {
-  display: grid;
-  justify-items: start;
-  gap: 18px;
-}
-.landing-title {
-  margin: 14px 0 0;
-  font-size: 32px;
-  font-weight: var(--weight-semibold);
-  line-height: 38px;
-  letter-spacing: -0.025em;
-  text-wrap: balance;
-}
-.landing-lede {
-  margin: -6px 0 0;
-  color: var(--fg-muted);
-  font-size: var(--text-title);
-  line-height: 24px;
-  text-wrap: pretty;
-}
-.landing-points {
-  display: grid;
-  gap: 10px;
-  margin: 4px 0 0;
-  padding: 16px 0 0;
-  list-style: none;
-  border-top: 1px solid var(--border-muted);
-}
-.landing-points li {
-  position: relative;
-  padding-left: 18px;
-  color: var(--fg);
-  line-height: 20px;
-}
-.landing-points li::before {
-  content: "";
-  position: absolute;
-  top: 8px;
-  left: 2px;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--fg-faint);
-}
-.landing-address {
-  font-size: 12.5px;
-  color: var(--fg-muted);
-}
-.landing-actions {
-  width: 100%;
-  max-width: 340px;
-  margin-top: 6px;
-}
-.landing-shot {
-  margin: 0;
-  overflow: hidden;
-  border-radius: var(--radius-xl);
-  box-shadow: 0 0 0 1px var(--border);
-  aspect-ratio: 2 / 1;
-  background: var(--bg);
-}
-.landing-shot img {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-/* Sign-in actions, shared by the landing and the plain sign-in page */
+/* Sign-in actions on the sign-in page (and the OAuth pages' sign-in) */
 .signin-actions {
   display: grid;
   gap: 14px;
@@ -100,9 +16,6 @@
 }
 .signin-actions > .signin-note {
   margin-top: 2px;
-}
-.landing .signin-actions > .signin-note {
-  text-align: left;
 }
 
 /* Signed-in home */
@@ -182,6 +95,40 @@
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* Public or private: a checkbox with what each means (create step and Settings) */
+.visibility {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.visibility input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0;
+  accent-color: var(--primary-bg);
+  cursor: pointer;
+}
+.visibility-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.visibility-title {
+  font-weight: var(--weight-medium);
+}
+.visibility-hint {
+  color: var(--fg-faint);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.visibility-value {
+  display: grid;
+  gap: 2px;
 }
 
 /* Copy buttons, snippets and copyable values */
@@ -431,6 +378,11 @@
   align-self: center;
 }
 
+/* On the issue list it sits above the toolbar */
+.page > .setup {
+  margin-bottom: 20px;
+}
+
 /* Everything done: one calm line, then the checklist goes away */
 .setup-done {
   display: flex;
@@ -525,23 +477,9 @@
   }
 }
 
-/* Touch screens: every control on these pages gets a hit area at least 40 px tall (and wide, for small icon
-   buttons) from an invisible ::after, so nothing changes visually; fields grow to 40 px. */
+/* Touch screens: fields on these focused pages grow to 40 px (tap targets elsewhere: the touch section in app.css) */
 @media (pointer: coarse) {
-  :is(.landing, .signin, .create, .home-head, .home-agents, .setup, .empty, .oauth, .agents-page, .settings)
-    :is(.btn, .segmented > button, a:not(.btn, .box-row)) {
-    position: relative;
-  }
-  :is(.landing, .signin, .create, .home-head, .home-agents, .setup, .empty, .oauth, .agents-page, .settings)
-    :is(.btn, .segmented > button, a:not(.btn, .box-row))::after {
-    content: "";
-    position: absolute;
-    top: min(0px, calc(50% - 20px));
-    right: min(0px, calc(50% - 20px));
-    bottom: min(0px, calc(50% - 20px));
-    left: min(0px, calc(50% - 20px));
-  }
-  :is(.landing, .signin, .create, .setup, .oauth, .agents-page, .settings-main) .input[class] {
+  :is(.signin, .create, .setup, .oauth, .agents-page, .settings-main) .input[class] {
     height: 40px;
   }
 }
@@ -551,20 +489,6 @@
   .setup-done,
   .setup-done-mark {
     animation: none;
-  }
-}
-
-@media (max-width: 900px) {
-  .landing {
-    align-items: start;
-    padding: 32px 20px 40px;
-  }
-  .landing-inner {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 40px;
-  }
-  .landing-actions {
-    max-width: none;
   }
 }
 
@@ -584,13 +508,6 @@
     line-height: 18px;
     white-space: normal;
     overflow-wrap: anywhere;
-  }
-  .landing-shot {
-    aspect-ratio: 720 / 823;
-  }
-  .landing-title {
-    font-size: 27px;
-    line-height: 33px;
   }
   .create-page {
     padding: 40px 16px 40px;

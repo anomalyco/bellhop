@@ -5,6 +5,7 @@ import { ApiFailure, api, errorMessage, keys } from "../../lib/api"
 import { setData } from "../../lib/cache"
 import { addressParts, appPath, isAbsolute } from "../../lib/site"
 import { Button } from "../../ui/primitives"
+import { PublicToggle } from "../../ui/workspace/Visibility"
 import "../../styles/onboarding.css"
 
 const slugify = (name: string) =>
@@ -19,7 +20,7 @@ const slugify = (name: string) =>
 
 // The Worker's reserved slugs (they double as subdomains), plus the home domain's own pages.
 const reserved = new Set(
-  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device agents _design".split(" "),
+  "admin api app assets auth blog cdn dev docs help icon mail mcp media new settings static status support www oauth device agents signin workspaces feed _design".split(" "),
 )
 
 function slugProblem(slug: string, strict: boolean) {
@@ -39,6 +40,7 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
   const [taken, setTaken] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [isPublic, setPublic] = useState(false)
   const { prefix, suffix } = addressParts()
 
   const address = edited ? slug : slugify(name)
@@ -51,7 +53,7 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
     setSaving(true)
     setError(null)
     try {
-      const app = await api.createApp({ name: name.trim(), slug: address })
+      const app = await api.createApp({ name: name.trim(), slug: address, public: isPublic })
       setData(keys.app(app.slug), app)
       setData<App[]>(keys.apps, (apps) => [...(apps ?? []), app].sort((a, b) => a.name.localeCompare(b.name)))
       // Straight to the issue list, where the setup checklist picks up.
@@ -122,6 +124,7 @@ export function CreateWorkspace({ first, onCancel }: { first?: boolean; onCancel
           </p>
         )}
       </div>
+      <PublicToggle value={isPublic} onChange={setPublic} />
       {error && (
         <p className="flash" data-tone="danger">
           {error}

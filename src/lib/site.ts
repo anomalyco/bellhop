@@ -30,8 +30,11 @@ export const isAbsolute = (href: string) => /^https?:\/\//.test(href)
 /** Sign-in lives on the home domain; from an app subdomain it returns to the full URL, otherwise to a path. */
 export function signInHref() {
   const back = hostSlug ? window.location.href : window.location.pathname + window.location.search
-  return homeUrl(back === "/" ? "/" : `/?next=${encodeURIComponent(back)}`)
+  return homeUrl(back === "/" || back.startsWith("/signin") ? "/signin" : `/signin?next=${encodeURIComponent(back)}`)
 }
+
+/** The home domain as people read it: "blhp.app" in production, this host in path mode. */
+export const homeLabel = () => domain || window.location.host
 
 /** How an app's public address reads: "acme.blhp.app" in production, "/acme" in path mode. */
 export const appLabel = (slug: string) => (domain ? `${slug}.${domain}` : `/${slug}`)

@@ -41,17 +41,6 @@
   .settings .settings-main .textarea {
     font-size: 16px;
   }
-  .settings-main :is(.color-swatch, .label-toggle) {
-    position: relative;
-  }
-  .settings-main :is(.color-swatch, .label-toggle)::after {
-    content: "";
-    position: absolute;
-    top: min(0px, calc(50% - 20px));
-    right: min(0px, calc(50% - 20px));
-    bottom: min(0px, calc(50% - 20px));
-    left: min(0px, calc(50% - 20px));
-  }
   /* The native colour picker: a 40 px target that still draws a 28 px swatch in the same spot */
   .settings-main .color-native {
     width: 40px;

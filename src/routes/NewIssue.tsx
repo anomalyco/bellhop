@@ -23,6 +23,7 @@ export function NewIssue({ slug }: { slug: string }) {
     <AppLayout
       slug={slug}
       tab="issues"
+      crumb={{ label: "New issue", href: appPath(slug, "/new") }}
       loading={
         <Page narrow>
           <h1 className="page-title">New issue</h1>
