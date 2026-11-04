@@ -105,8 +105,7 @@ async function throttle(c: Ctx, key: string, count: number, interval: number) {
   ])
   if (!result?.meta.changes) {
     c.header("Retry-After", String(until - t))
-    if (c.req.path.startsWith("/api/")) fail(429, "rate_limited", "Too many attempts")
-    throw new OAuthError("slow_down", "Too many requests", 429)
+    fail(429, "rate_limited", "Too many attempts")
   }
 }
 const ip = (c: Ctx) => c.req.header("CF-Connecting-IP") ?? "local"

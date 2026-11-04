@@ -34,11 +34,11 @@ const aliasesFor = (cookie: string | null, origins: string) =>
   Promise.all((cookie ? (JSON.parse(origins) as string[]) : []).map((id) => scopedGuestId(cookie!, id)))
 
 // One authenticated scope lookup for reporter-aware counts/lists, restricted media and sockets.
-export async function viewerApp(c: Ctx, slug: string) {
+export async function viewerApp(c: Ctx, slug: string, ownCookies?: string[]) {
   const hash = await sessionHash(c),
     row = await sql(
       c.env,
-      `SELECT ${appCols},m.role,s.user_id,CASE WHEN s.user_id IS NULL THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
+      `SELECT ${appCols},m.role,s.user_id,CASE WHEN ${ownCookies?.length ? "1" : "s.user_id IS NULL"} THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
     LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
       hash,
       now(),
@@ -54,7 +54,13 @@ export async function viewerApp(c: Ctx, slug: string) {
     viewer: {
       team: can(app.role, "read"),
       actorId,
-      aliases: await aliasesFor(user_id ? null : cookie, origins),
+      aliases: ownCookies?.length
+        ? (
+            await Promise.all(
+              ownCookies.map(async (raw) => [await scopedGuestId(raw, app.id), ...(await aliasesFor(raw, origins))])
+            )
+          ).flat()
+        : await aliasesFor(user_id ? null : cookie, origins),
       voter: user_id ?? (cookie ? "g:" + (await sha256(cookie)) : null)
     },
     user: user_id,

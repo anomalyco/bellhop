@@ -33,6 +33,10 @@
 //   GET    /api/feed?state=open|closed&q=<text>&cursor=  -> FeedList           public: issues in public workspaces,
 //                                                                             most recently active first (blhp.app home)
 //   GET    /api/feed/apps                                -> FeedApp[]          public: the public workspaces
+//   GET    /api/me/reports?state=open|closed&cursor=     -> FeedList           issues this browser (any guest id it
+//          has used) or the signed-in account opened, across workspaces, newest activity first; includes their own
+//          private issues, never hidden or deleted ones
+//   List search also takes author:@me (this browser's guest id or the account in that workspace).
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description?, public?, visibility? } -> AppDetail   admin
@@ -156,7 +160,9 @@
 //   DELETE /api/me/agents/:id                           -> { ok: true }       revokes it and all its tokens
 //
 // Errors: non-2xx responses carry ApiError. 401 = sign in, 403 = not allowed, 404, 409 (slug taken), 413 (too
-// large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited. A guest posting without a
+// large), 428 = Turnstile needed (no or expired bh_human cookie), 429 = rate limited (code "rate_limited", with a
+// Retry-After header): per IP and per workspace on posting, voting, uploads, Turnstile checks, live connections,
+// OAuth endpoints and MCP calls. A guest posting without a
 // display name (none saved and no guest_name sent) gets 400 with code "name_required".
 
 export type IssueStatus = "open" | "in_progress" | "waiting" | "closed"

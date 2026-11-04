@@ -176,7 +176,13 @@ const pageSize = 30
 // Issue visibility within a selected workspace. Discovery additionally requires a public
 // workspace; direct links intentionally do not. Add future issue-level visibility rules here.
 export const visibleIssues = (workspace: string, v: Viewer = outsider) => `i.app_id=${workspace} AND ${visibleSQL(v)}`
-function issueFilter(workspace: string, options: { label?: unknown; query?: unknown }, v: Viewer = outsider) {
+export const myAuthorFilter = (q: unknown) => typeof q === "string" && /(?:^|\s)author:@me(?=\s|$)/i.test(q)
+function issueFilter(
+  workspace: string,
+  options: { label?: unknown; query?: unknown },
+  v: Viewer = outsider,
+  mine = false
+) {
   const where = [visibleIssues(workspace, v)],
     values: unknown[] = [...actorBindings(v)]
   if (options.label) {
@@ -187,6 +193,11 @@ function issueFilter(workspace: string, options: { label?: unknown; query?: unkn
   }
   if (options.query) {
     let query = str(options.query, "query", 512)
+    if (mine) {
+      where.push("i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?))")
+      values.push(JSON.stringify(actorIds(v)))
+      query = query.replace(/(?:^|\s)author:@me(?=\s|$)/gi, " ").trim()
+    }
     const hidden = /(?:^|\s)is:hidden(?=\s|$)/i.test(query)
     if (hidden) {
       where.push("i.hidden IS NOT NULL")
@@ -198,7 +209,7 @@ function issueFilter(workspace: string, options: { label?: unknown; query?: unkn
       where.push(`(i.rowid IN (SELECT rowid FROM issue_fts WHERE issue_fts MATCH ?) OR i.id IN
         (SELECT c.issue_id FROM comments c JOIN comment_fts f ON f.rowid=c.rowid WHERE comment_fts MATCH ? ${v.team ? "" : "AND c.hidden IS NULL AND c.internal=0"}))`)
       values.push(phrase, phrase)
-    } else if (!hidden || query) where.push("0")
+    } else if ((!hidden && !mine) || query) where.push("0")
   }
   return { where: where.join(" AND "), values }
 }
@@ -216,7 +227,8 @@ export async function listIssues(
   },
   viewer: Viewer = outsider
 ): Promise<IssueList> {
-  const filter = issueFilter(appIdSQL(scope), options, viewer),
+  const mine = myAuthorFilter(options.query),
+    filter = issueFilter(appIdSQL(scope), options, viewer, mine),
     values = [appKey(scope), ...filter.values]
   const base = ` FROM issues i WHERE ${filter.where}`
   const totals = sql(
@@ -264,10 +276,10 @@ export async function listIssues(
     teamQuery(env, scope),
     sql(
       env,
-      `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
+      `WITH ${viewerCTE} SELECT ${fields(viewer.team)} FROM issues i WHERE i.pinned=1 AND ${mine ? filter.where : visibleIssues(appIdSQL(scope), viewer)} ORDER BY i.number DESC LIMIT ?`,
       ...viewerArgs(viewer),
       appKey(scope),
-      ...actorBindings(viewer),
+      ...(mine ? filter.values : actorBindings(viewer)),
       options.cursor === undefined ? 3 : 0
     )
   ])
@@ -307,10 +319,16 @@ export async function publicFeedIssue(env: Env, id: string) {
 export async function feed(
   env: Env,
   options: { state?: string; q?: string; cursor?: string },
-  voter: string | null = null
+  voter: string | null = null,
+  reportIds?: string[]
 ): Promise<FeedList> {
   const closed = Number(choice(options.state ?? "open", ["open", "closed"] as const, "state") === "closed"),
-    filter = issueFilter("a.id", { query: options.q })
+    filter = reportIds
+      ? {
+          where: "i.hidden IS NULL AND json_extract(i.author,'$.id') IN (SELECT value FROM json_each(?))",
+          values: [JSON.stringify(reportIds)]
+        }
+      : issueFilter("a.id", { query: options.q })
   let boundary = "",
     keys: string[] = []
   if (options.cursor !== undefined) {
@@ -319,28 +337,32 @@ export async function feed(
     boundary = "AND (i.updated_at,i.id)<(?,?)"
     keys = [match[1]!, match[2]!]
   }
-  // Seek at most one page per public workspace. A global updated_at index would walk
-  // arbitrarily many private issues when there are few publicly listed workspaces.
+  // Personal discovery starts at the indexed author IDs, not the workspace directory.
+  // Public discovery seeks one page per listed workspace so private backlogs don't dominate it.
+  const candidates = reportIds
+    ? `SELECT i.id,i.updated_at FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
+      ORDER BY i.updated_at DESC,i.id DESC LIMIT ?`
+    : `SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
+      WHERE a.public=1 AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
+        ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?`
   const [page, totals] = await env.DB.batch<unknown>([
     sql(
       env,
-      `WITH ${viewerCTE}, page AS MATERIALIZED (SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
-      WHERE a.public=1 AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${filter.where} AND (i.status='closed')=? ${boundary}
-        ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?)
+      `WITH ${viewerCTE}, page AS MATERIALIZED (${candidates})
       SELECT ${feedFields(true)} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id
       ORDER BY p.updated_at DESC,p.id DESC`,
       voter,
-      "[]",
+      JSON.stringify(reportIds ?? []),
       ...filter.values,
       closed,
       ...keys,
-      pageSize + 1,
+      ...(reportIds ? [] : [pageSize + 1]),
       pageSize + 1
     ),
     sql(
       env,
       `SELECT count(*) FILTER(WHERE i.status!='closed') open,count(*) FILTER(WHERE i.status='closed') closed
-      FROM apps a CROSS JOIN issues i WHERE a.public=1 AND ${filter.where}`,
+      FROM ${reportIds ? "issues i WHERE" : "apps a CROSS JOIN issues i WHERE a.public=1 AND"} ${filter.where}`,
       ...filter.values
     )
   ])

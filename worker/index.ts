@@ -1,12 +1,14 @@
-import { Hono } from "hono"
+import { Hono, type MiddlewareHandler } from "hono"
 import { bodyLimit } from "hono/body-limit"
 import { apps, detail, loadApp, viewerApp } from "./apps"
-import { auth, browserGuest, currentUser, firstContact, sessionHash } from "./auth"
+import { auth, browserGuest, currentUser, firstContact, reportCookies, sessionHash } from "./auth"
+import { reportActors } from "./guest-history"
+import { clientIP, enforce, workspaceLimit } from "./rate-limits"
 import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { appRoom, feedRoom, issueRoom } from "./events"
 import { icons } from "./icons"
-import { feed, feedApps, getIssue, issueNumber, listIssues } from "./issues"
+import { feed, feedApps, getIssue, issueNumber, listIssues, myAuthorFilter } from "./issues"
 import { bySlug } from "./read-scope"
 import { issues } from "./mutations"
 import { media } from "./media"
@@ -52,6 +54,34 @@ api.use("*", async (c, next) => {
     c.req.path === "/oauth/authorize"
   )
     await currentUser(c)
+  await next()
+})
+// Route matching is shared with the handlers. Charge before body buffering, Turnstile,
+// object storage or writes. Only a verified membership in *this* app buys the team budget.
+const writeBase = "/api/apps/:slug/issues",
+  post = `${writeBase}/:number`,
+  marks = [`${post}/vote`, `${post}/comments/:id/helpful`]
+const writeLimit =
+  (upload = false): MiddlewareHandler<Bindings> =>
+  async (c, next) => {
+    if (c.var.user) await loadApp(c)
+    await workspaceLimit(c, c.req.param("slug")!, !!c.var.app?.role, upload)
+    await next()
+  }
+api.on("POST", [writeBase, `${post}/comments`, ...marks], writeLimit())
+api.on("DELETE", marks, writeLimit())
+api.post("/api/apps/:slug/uploads", writeLimit(true))
+api.post("/api/human", async (c, next) => {
+  await enforce(c, "RL_HUMAN", clientIP(c))
+  await next()
+})
+const oauthLimit: MiddlewareHandler<Bindings> = async (c, next) => {
+  await enforce(c, "RL_IP", `oauth:${clientIP(c)}`)
+  await next()
+}
+api.get("/oauth/authorize", oauthLimit)
+api.on("POST", ["/oauth/register", "/oauth/device", "/oauth/token"], oauthLimit)
+api.use("*", async (c, next) => {
   if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
     return limit(c, next)
   await next()
@@ -74,9 +104,21 @@ async function feedViewer(c: Ctx) {
 }
 api.get("/api/feed", async (c) => c.json(await feed(c.env, c.req.query(), (await feedViewer(c)).voter)))
 api.get("/api/feed/apps", async (c) => c.json(await feedApps(c.env)))
+api.get("/api/me/reports", async (c) => {
+  const cookie = browserGuest(c),
+    ids = await reportActors(c, reportCookies(c))
+  return c.json(
+    await feed(
+      c.env,
+      { state: c.req.query("state"), cursor: c.req.query("cursor") },
+      c.var.user?.id ?? (cookie ? "g:" + (await sha256(cookie)) : null),
+      ids
+    )
+  )
+})
 api.get("/api/apps/:slug/issues", async (c) => {
   const { state, label, cursor, q, sort } = c.req.query()
-  const { app, viewer } = await viewerApp(c, c.req.param("slug"))
+  const { app, viewer } = await viewerApp(c, c.req.param("slug"), myAuthorFilter(q) ? reportCookies(c) : undefined)
   return c.json(await listIssues(c.env, app.id, { state, label, cursor, query: q, sort }, viewer))
 })
 api.get("/api/apps/:slug/issues/:number", async (c) => {
@@ -89,7 +131,7 @@ api.get("/api/apps/:slug/issues/:number", async (c) => {
   )
 })
 api.use("/api/apps/:slug/*", async (c, next) => {
-  await loadApp(c)
+  if (!c.var.app) await loadApp(c)
   await next()
 })
 api.route("/", auth)
@@ -101,10 +143,11 @@ api.route("/", icons)
 api.route("/", issues)
 api.route("/", media)
 async function live(c: Ctx, number?: string) {
+  const caller = c.req.header("Authorization") ? await authenticate(c) : null
+  await enforce(c, "RL_TEAM", caller ? `socket:agent:${caller.actor.id}` : `socket:ip:${clientIP(c)}`)
   const { app, viewer, session } = await viewerApp(c, c.req.param("slug")!)
   let bearer: string | null = null
   if (c.req.header("Authorization")) {
-    const caller = await authenticate(c)
     if (!caller?.apps.some((a) => a.id === app.id)) missing()
     viewer.team = true
     viewer.actorId = caller.actor.id
@@ -130,6 +173,8 @@ async function live(c: Ctx, number?: string) {
 api.get("/api/live/apps/:slug", (c) => live(c))
 api.get("/api/live/apps/:slug/issues/:number", (c) => live(c, c.req.param("number")))
 api.get("/api/live/feed", async (c) => {
+  const caller = c.req.header("Authorization") ? await authenticate(c) : null
+  await enforce(c, "RL_TEAM", caller ? `socket:agent:${caller.actor.id}` : `socket:ip:${clientIP(c)}`)
   const headers = new Headers(c.req.raw.headers)
   headers.set("X-Bellhop-Viewer", JSON.stringify({ ...(await feedViewer(c)), app: "", bearer: null }))
   return feedRoom(c.env).fetch(new Request(new URL('/__bellhop_conversation_socket',c.req.url), { headers }))
@@ -159,6 +204,7 @@ api.get("*", (c) => {
 api.notFound((c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404))
 api.onError((e, c) => {
   const err = e instanceof ApiFailure ? e : dbError(e)
+  if (err?.status === 429 && !c.res.headers.has("Retry-After")) c.header("Retry-After", "3600") // Existing hourly D1 guards.
   if (err)
     return c.json(
       { error: { code: err.code, message: err.message, ...(err.moved_to && { moved_to: err.moved_to }) } },

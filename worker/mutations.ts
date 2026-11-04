@@ -181,6 +181,15 @@ async function createIssue(a: Access, b: Record<string, unknown>) {
     ...guestNameGuard(a)
   ]
   const templateEvents = new Set<string>()
+  if (actor.type === "guest")
+    q.push(
+      sql(
+        env,
+        "UPDATE guest_report_authors SET guest_hash=?,name=NULL WHERE actor_id=? AND guest_hash IS NULL",
+        a.guestHash!,
+        actor.id
+      )
+    )
   for (const label of labels) {
     const eventId = uid()
     templateEvents.add(eventId)

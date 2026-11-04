@@ -12,6 +12,14 @@
   "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
   "services": [{ "binding": "OG", "service": "bellhop-og" }],
+  "ratelimits": [
+    { "name": "RL_UPLOAD", "namespace_id": "741301", "simple": { "limit": 10, "period": 60 } },
+    { "name": "RL_HUMAN", "namespace_id": "741302", "simple": { "limit": 6, "period": 60 } },
+    { "name": "RL_WRITE", "namespace_id": "741303", "simple": { "limit": 15, "period": 60 } },
+    { "name": "RL_IP", "namespace_id": "741304", "simple": { "limit": 30, "period": 60 } },
+    { "name": "RL_TEAM", "namespace_id": "741305", "simple": { "limit": 60, "period": 60 } },
+    { "name": "RL_AGENT", "namespace_id": "741306", "simple": { "limit": 120, "period": 60 } }
+  ],
   "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }],
   "queues": {
@@ -19,6 +27,7 @@
     "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
   },
   "vars": {
+    "RATE_LIMIT_TEST_BYPASS": "0",
     // Cloudflare's always-pass test key; replace per environment.
     "TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
     // Empty: apps live under /<slug>. Production serves each app on <slug>.APP_DOMAIN.
@@ -48,12 +57,20 @@
       ],
       "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],
       "services": [{ "binding": "OG", "service": "bellhop-og" }],
+      "ratelimits": [
+        { "name": "RL_UPLOAD", "namespace_id": "741401", "simple": { "limit": 10, "period": 60 } },
+        { "name": "RL_HUMAN", "namespace_id": "741402", "simple": { "limit": 6, "period": 60 } },
+        { "name": "RL_WRITE", "namespace_id": "741403", "simple": { "limit": 15, "period": 60 } },
+        { "name": "RL_IP", "namespace_id": "741404", "simple": { "limit": 30, "period": 60 } },
+        { "name": "RL_TEAM", "namespace_id": "741405", "simple": { "limit": 60, "period": 60 } },
+        { "name": "RL_AGENT", "namespace_id": "741406", "simple": { "limit": 120, "period": 60 } }
+      ],
       "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
       "queues": {
         "producers": [{ "binding": "WEBHOOKS", "queue": "bellhop-webhooks" }],
         "consumers": [{ "queue": "bellhop-webhooks", "max_retries": 6, "max_batch_size": 10, "max_batch_timeout": 1 }]
       },
-      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22", "APP_DOMAIN": "blhp.app" },
+      "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFyiw9jNJFZ6Fa22", "APP_DOMAIN": "blhp.app", "RATE_LIMIT_TEST_BYPASS": "0" },
       "observability": { "enabled": true }
     }
   }

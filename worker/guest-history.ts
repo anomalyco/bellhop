@@ -3,6 +3,50 @@ import { fail, memberActor, now, rows, scopedGuestId, sha256, sql } from "./core
 import type { Ctx, User } from "./core"
 import { actorUpdated } from "./events"
 
+export async function reportActors(c: Ctx, cookies: string[]) {
+  const found = await Promise.all(
+    cookies.map(async (cookie) => {
+      const hash = await sha256(cookie)
+      const [bound, legacy] = await c.env.DB.batch<{ actor_id: string; origin_app: string }>([
+        sql(c.env, "SELECT actor_id FROM guest_report_authors WHERE guest_hash=?", hash),
+        sql(
+          c.env,
+          `SELECT DISTINCT origin_app FROM guest_report_authors WHERE guest_hash IS NULL
+        AND name IS (SELECT name FROM guest_names WHERE guest_hash=?)`,
+          hash
+        )
+      ])
+      const verified = bound!.results.map((r) => r.actor_id)
+      // Only origins having *unbound guest reports with this name* are probed. No apps scan.
+      for (let i = 0; i < legacy!.results.length; i += 128) {
+        const candidates = await Promise.all(
+          legacy!.results.slice(i, i + 128).map((r) => scopedGuestId(cookie, r.origin_app))
+        )
+        const matched = await rows<{ actor_id: string }>(
+          sql(
+            c.env,
+            `SELECT actor_id FROM guest_report_authors WHERE actor_id IN (SELECT value FROM json_each(?)) AND (guest_hash IS NULL OR guest_hash=?)`,
+            JSON.stringify(candidates),
+            hash
+          )
+        )
+        if (matched.length) {
+          const ids = matched.map((r) => r.actor_id)
+          verified.push(...ids)
+          await sql(
+            c.env,
+            "UPDATE guest_report_authors SET guest_hash=?,name=NULL WHERE guest_hash IS NULL AND actor_id IN(SELECT value FROM json_each(?))",
+            hash,
+            JSON.stringify(ids)
+          ).run()
+        }
+      }
+      return verified
+    })
+  )
+  return [...new Set([...found.flat(), ...(c.var.user ? [c.var.user.id] : [])])]
+}
+
 // Raw browser IDs and cross-app identifiers are never written to posts. Derive the scoped IDs
 // a page at a time. Claims include even empty apps: they can own pending, unattached uploads.
 async function* scopes(c: Ctx, user?: User) {

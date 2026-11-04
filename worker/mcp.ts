@@ -1,4 +1,5 @@
 import { Hono } from "hono"
+import { allowed, clientIP } from "./rate-limits"
 import type { AgentRole, App, Label, Template } from "../shared/api"
 import {
   appCols,
@@ -552,8 +553,27 @@ export const mcp = new Hono<Bindings>()
 function challenge(c: Ctx) {
   c.header("WWW-Authenticate", `Bearer resource_metadata="${oauthOrigin(c)}/.well-known/oauth-protected-resource"`)
 }
+function mcpLimited(c: Ctx, id: string | number | null, tool: boolean, seconds: number) {
+  const error = { code: "rate_limited", message: "Rate limit reached; retry later" }
+  c.header("Retry-After", String(seconds))
+  return c.json(
+    {
+      jsonrpc: "2.0",
+      id,
+      ...(tool
+        ? { result: { ...textResult({ error }), structuredContent: { error }, isError: true } }
+        : { error: { code: -32029, message: error.message, data: { code: error.code } } })
+    },
+    429
+  )
+}
 mcp.on(["GET", "DELETE"], "/mcp", async (c) => {
-  if (!(await authenticate(c))) {
+  const caller = await authenticate(c)
+  if (
+    !(await allowed(c, caller ? "RL_AGENT" : "RL_IP", caller ? `mcp:${caller.actor.id}` : `mcp:invalid:${clientIP(c)}`))
+  )
+    return mcpLimited(c, null, false, 60)
+  if (!caller) {
     challenge(c)
     return c.json({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Invalid or missing agent token" } }, 401)
   }
@@ -567,15 +587,25 @@ mcp.post("/mcp", async (c) => {
   const result = (value: unknown) => c.json({ jsonrpc: "2.0", id, result: value })
   const a = await authenticate(c)
   if (!a) {
+    if (!(await allowed(c, "RL_IP", `mcp:invalid:${clientIP(c)}`))) return mcpLimited(c, null, false, 60)
     challenge(c)
     return error(-32001, "Invalid or missing agent token", 401)
   }
+  const admitted = await allowed(c, "RL_AGENT", `mcp:${a.actor.id}`)
   let req: unknown
   try {
     req = await c.req.json()
   } catch {
+    if (!admitted) return mcpLimited(c, null, false, 60)
     return error(-32700, "Parse error", 400)
   }
+  if (!admitted)
+    return mcpLimited(
+      c,
+      object(req) && (typeof req.id === "number" || typeof req.id === "string") ? req.id : null,
+      object(req) && req.method === "tools/call",
+      60
+    )
   if (!object(req) || req.jsonrpc !== "2.0" || typeof req.method !== "string")
     return error(-32600, "Invalid request", 400)
   if (req.id === undefined && req.method.startsWith("notifications/")) return c.body(null, 202)
@@ -602,6 +632,7 @@ mcp.post("/mcp", async (c) => {
         return result(await call(c, a, p.name, p.arguments === undefined ? {} : input(p.arguments)))
       } catch (e) {
         const failure = e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null
+        if (failure?.status === 429) return mcpLimited(c, id, true, 3600)
         if (failure?.code === "humans_only")
           return c.json(
             { jsonrpc: "2.0", id, error: { code: -32003, message: failure.message, data: { code: "humans_only" } } },

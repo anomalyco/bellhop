@@ -26,6 +26,12 @@ export function browserGuest(c: Ctx) {
   }
   return id && /^[0-9a-f]{64}$/.test(id) ? id : null
 }
+// A pre-subdomain host-only cookie and the shared cookie can both be presented. Reports
+// are a read-only union; never use the duplicate to change the active write identity.
+export function reportCookies(c:Ctx) {
+  const ids=Array.from((c.req.header('Cookie')??'').matchAll(/(?:^|;\s*)bh_guest=([0-9a-f]{64})(?=;|$)/g),m=>m[1]!)
+  return ids.length?[...new Set([ids[0]!,ids.at(-1)!])]:[]
+}
 export function firstContact(c: Ctx) {
   let id = browserGuest(c)
   if (!id) {
