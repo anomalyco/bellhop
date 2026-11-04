@@ -1,5 +1,6 @@
-/* Buttons: OpenCode's button-v2. data-variant: primary (contrast) | default (neutral) | danger | outline | invisible
-   (ghost). data-size: small (24) | medium (28, default) | large (32). data-demo forces a state on the design page. */
+/* Buttons: every button is a pill (icon-only ones are circles); fields, menus and labels keep the 6 px corner.
+   data-variant: primary (flat white) | default (neutral) | danger | outline | invisible (ghost).
+   data-size: small (24) | medium (30, default) | large (36). data-demo forces a state on the design page. */
 .btn {
   position: relative;
   display: inline-flex;
@@ -7,7 +8,7 @@
   justify-content: center;
   gap: 6px;
   height: var(--control-medium);
-  padding: 0 11px;
+  padding: 0 14px;
   min-width: max-content;
   font: inherit;
   font-size: var(--text-ui);
@@ -17,7 +18,7 @@
   color: var(--fg);
   background-color: var(--bg-neutral);
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-full);
   box-shadow: var(--elevation-neutral);
   font-variant-numeric: tabular-nums;
   cursor: pointer;
@@ -38,12 +39,12 @@ a.btn:hover {
 }
 .btn:hover:not(:disabled),
 .btn[data-demo="hover"] {
-  background-image: linear-gradient(var(--hover), var(--hover));
+  background-color: rgb(255 255 255 / 0.09);
 }
 .btn:active:not(:disabled),
 .btn[aria-expanded="true"],
 .btn[data-demo="active"] {
-  background-image: linear-gradient(var(--pressed), var(--pressed));
+  background-color: rgb(255 255 255 / 0.13);
 }
 .btn:focus-visible,
 .btn[data-demo="focus"] {
@@ -58,13 +59,12 @@ a.btn:hover {
 
 .btn[data-size="small"] {
   height: var(--control-small);
-  padding: 0 9px;
+  padding: 0 10px;
   gap: 4px;
-  border-radius: var(--radius-small);
 }
 .btn[data-size="large"] {
   height: var(--control-large);
-  padding: 0 15px;
+  padding: 0 18px;
 }
 
 /* Primary: flat white with dark text, the one main action on a screen */
@@ -82,12 +82,10 @@ a.btn[data-variant="primary"]:hover {
 .btn[data-variant="primary"]:hover:not(:disabled),
 .btn[data-variant="primary"][data-demo="hover"] {
   background-color: var(--primary-hover);
-  background-image: none;
 }
 .btn[data-variant="primary"]:active:not(:disabled),
 .btn[data-variant="primary"][data-demo="active"] {
   background-color: var(--primary-pressed);
-  background-image: none;
 }
 .btn[data-variant="primary"]:disabled {
   opacity: 0.4;
@@ -100,7 +98,15 @@ a.btn[data-variant="primary"]:hover {
 
 .btn[data-variant="outline"] {
   background-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--border-muted);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+.btn[data-variant="outline"]:hover:not(:disabled),
+.btn[data-variant="outline"][data-demo="hover"] {
+  background-color: var(--hover);
+}
+.btn[data-variant="outline"]:active:not(:disabled),
+.btn[data-variant="outline"][data-demo="active"] {
+  background-color: var(--pressed);
 }
 
 .btn[data-variant="invisible"] {
@@ -114,7 +120,6 @@ a.btn[data-variant="primary"]:hover {
 .btn[data-variant="invisible"]:hover:not(:disabled),
 .btn[data-variant="invisible"][data-demo="hover"] {
   color: var(--fg);
-  background-image: none;
   background-color: var(--hover);
 }
 .btn[data-variant="invisible"]:active:not(:disabled),
@@ -122,7 +127,6 @@ a.btn[data-variant="primary"]:hover {
 .btn[data-variant="invisible"][aria-expanded="true"],
 .btn[data-variant="invisible"][data-demo="active"] {
   color: var(--fg);
-  background-image: none;
   background-color: var(--pressed);
 }
 
@@ -137,11 +141,11 @@ a.btn[data-variant="primary"]:hover {
   width: var(--control-large);
 }
 
-/* Split button: an action and its menu sharing one neutral surface */
+/* Split button: an action and its menu sharing one neutral pill */
 .split,
 .btn-group {
   display: inline-flex;
-  border-radius: var(--radius);
+  border-radius: var(--radius-full);
   box-shadow: var(--elevation-neutral);
 }
 .split .btn,
@@ -151,12 +155,14 @@ a.btn[data-variant="primary"]:hover {
 }
 .split > .btn:first-child,
 .btn-group > .btn:first-child {
-  border-radius: var(--radius) 0 0 var(--radius);
+  padding-right: 10px;
+  border-radius: var(--radius-full) 0 0 var(--radius-full);
 }
 .split .menu-root .btn,
 .btn-group > .btn:last-child {
-  width: 24px;
-  border-radius: 0 var(--radius) var(--radius) 0;
+  width: 30px;
+  padding-right: 2px;
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
   box-shadow: inset 0.5px 0 0 var(--border-strong);
 }
 .split .btn:focus-visible,
@@ -180,7 +186,7 @@ a.btn[data-variant="primary"]:hover {
   color: var(--fg-muted);
   background: var(--layer-2);
   box-shadow: inset 0 0 0 0.5px var(--border);
-  border-radius: var(--radius-small);
+  border-radius: var(--radius-full);
   font-variant-numeric: tabular-nums;
 }
 
@@ -451,13 +457,13 @@ img.avatar[data-photo] {
   color: var(--fg-muted);
 }
 
-/* Segmented control: OpenCode's segmented-control-v2 */
+/* Segmented control: a pill track with the selected option raised as a pill */
 .segmented {
   display: inline-flex;
   align-items: center;
   height: var(--control-medium);
   background: var(--layer-1);
-  border-radius: var(--radius);
+  border-radius: var(--radius-full);
   box-shadow: 0 0 0 0.5px var(--border);
 }
 .segmented > button,
@@ -467,7 +473,7 @@ img.avatar[data-photo] {
   justify-content: center;
   gap: 6px;
   height: var(--control-medium);
-  padding: 0 11px;
+  padding: 0 13px;
   font: inherit;
   font-size: var(--text-ui);
   font-weight: var(--weight-medium);
@@ -475,7 +481,7 @@ img.avatar[data-photo] {
   white-space: nowrap;
   background: transparent;
   border: 0;
-  border-radius: var(--radius);
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: color 85ms ease-out;
 }

@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react"
-import { Link } from "wouter"
-import type { Activity, Actor, AppDetail, Attachment, CloseReason, Comment, Issue, IssueStatus, LiveEvent, Relation } from "../../shared/api"
+import { useCallback, useEffect, useRef, useState } from "react"
+import { Link, useSearch } from "wouter"
+import type { Activity, Actor, AppDetail, Comment, Issue, IssueStatus, CloseReason, LiveEvent, Relation } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { load, peek, useResource } from "../lib/cache"
 import { ensureHuman } from "../lib/human"
@@ -8,14 +8,17 @@ import { appendTimeline, applyActivity, applySummary, findSummary, stateText, st
 import { useLive } from "../lib/live"
 import { Time } from "../lib/time"
 import { ActorName } from "../ui/Actor"
-import { Editor } from "../ui/Editor"
-import { ChevronDownIcon, PersonIcon } from "../ui/icons"
-import { Menu, MenuItem } from "../ui/Menu"
+import { PersonIcon } from "../ui/icons"
 import { AppLayout, ErrorPage, Page, useMe } from "../ui/Shell"
-import { Button, StateIcon, StateLabel } from "../ui/primitives"
+import { Button, StateLabel } from "../ui/primitives"
 import { relationRequest, Sidebar, type IssueActions, type RelationKind } from "./issue/Sidebar"
 import { ActivityRow, CommentItem, EventItem, Message } from "./issue/Timeline"
 import { appPath } from "../lib/site"
+import { CardLayout } from "./issue/CardLayout"
+import { ChatLayout } from "./issue/ChatLayout"
+import { Composer } from "./issue/Composer"
+import { BodyForm, TitleForm } from "./issue/Editing"
+import type { IssueModel } from "./issue/model"
 
 export function IssuePage({ slug, number }: { slug: string; number: number }) {
   return (
@@ -42,6 +45,8 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
   const [pending, setPending] = useState<Pending[]>([])
   const [actionError, setActionError] = useState<string | null>(null)
   const member = !!app.role
+  // Temporary: ?layout=chat or ?layout=card tries an alternative issue page; no param keeps the current one.
+  const layout = new URLSearchParams(useSearch()).get("layout")
   // The room's hello can beat the first fetch; hold its activity until the issue is known.
   const helloActivity = useRef<Activity | null | undefined>(undefined)
   const issueId = issue?.id
@@ -175,13 +180,58 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
       : { type: "guest", id: me.guest.id, handle: me.guest.handle, name: me.guest.name ?? null }
     : null
 
+  const discard = (id: string) => setPending((l) => l.filter((x) => x.id !== id))
+  const model: IssueModel = {
+    app,
+    issue,
+    me,
+    viewers,
+    member,
+    canEdit: member || issue.viewer_is_author,
+    viewer: viewerActor,
+    actions,
+    actionError,
+    pending: pending.map((p) => ({
+      id: p.id,
+      body: p.body,
+      note: p.error ? (
+        <span className="pending-error">
+          Not sent: {p.error}{" "}
+          <button type="button" className="link-button" onClick={() => send(p)}>
+            Retry
+          </button>{" "}
+          <button type="button" className="link-button" onClick={() => discard(p.id)}>
+            Discard
+          </button>
+        </span>
+      ) : (
+        "Sending…"
+      ),
+    })),
+    onComment: postComment,
+    onStatus: (status, reason) => setStatus(status, reason),
+    onDuplicate: async (other) => {
+      setActionError(null)
+      await addRelation("duplicate_of", other)
+      await setStatus("closed", "duplicate")
+    },
+  }
+
+  if (layout === "chat") return <ChatLayout model={model} />
+  if (layout === "card") return <CardLayout model={model} />
+  return <ClassicLayout model={model} />
+}
+
+function ClassicLayout({ model }: { model: IssueModel }) {
+  const { app, issue, me, viewers, canEdit, viewer, actions, actionError } = model
+  const slug = app.slug
   return (
     <Page>
-      <IssueHeader app={app} issue={issue} viewers={viewers} canEdit={member || issue.viewer_is_author} />
+      <IssueHeader app={app} issue={issue} viewers={viewers} canEdit={canEdit} />
       <div className="issue-layout">
         <div className="issue-main">
           <div className="thread">
-            <IssueBodyBox app={app} issue={issue} canEdit={member || issue.viewer_is_author} />
+            <IssueBodyBox app={app} issue={issue} canEdit={canEdit} />
             {issue.timeline.map((item) =>
               item.kind === "comment" ? (
                 <CommentItem key={item.comment.id} slug={slug} comment={item.comment} />
@@ -189,31 +239,17 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
                 <EventItem key={item.event.id} slug={slug} event={item.event} />
               ),
             )}
-            {viewerActor &&
-              pending.map((p) => (
+            {viewer &&
+              model.pending.map((p) => (
                 <Message
                   key={p.id}
                   slug={slug}
-                  author={viewerActor}
+                  author={viewer}
                   createdAt={new Date().toISOString()}
                   body={p.body}
                   attachments={[]}
                   byAuthor={issue.viewer_is_author}
-                  pending={
-                    p.error ? (
-                      <span className="pending-error">
-                        Not sent: {p.error}{" "}
-                        <button type="button" className="link-button" onClick={() => send(p)}>
-                          Retry
-                        </button>{" "}
-                        <button type="button" className="link-button" onClick={() => setPending((l) => l.filter((x) => x.id !== p.id))}>
-                          Discard
-                        </button>
-                      </span>
-                    ) : (
-                      "Sending…"
-                    )
-                  }
+                  pending={p.note}
                 />
               ))}
             <ActivityRow activity={issue.activity} />
@@ -223,17 +259,7 @@ function IssueBody({ app, number }: { app: AppDetail; number: number }) {
               {actionError}
             </p>
           )}
-          <Composer
-            app={app}
-            issue={issue}
-            onComment={postComment}
-            onStatus={(status, reason) => setStatus(status, reason)}
-            onDuplicate={async (other) => {
-              setActionError(null)
-              await addRelation("duplicate_of", other)
-              await setStatus("closed", "duplicate")
-            }}
-          />
+          <Composer app={app} issue={issue} onComment={model.onComment} onStatus={model.onStatus} onDuplicate={model.onDuplicate} />
         </div>
         <Sidebar app={app} issue={issue} me={me} actions={actions} />
       </div>
@@ -277,42 +303,11 @@ function IssueLoading({ app, number }: { app: AppDetail; number: number }) {
 
 function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: Issue; viewers: number | null; canEdit: boolean }) {
   const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState(issue.title)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const save = async (e: FormEvent) => {
-    e.preventDefault()
-    const next = title.trim()
-    if (!next || next === issue.title) return setEditing(false)
-    setSaving(true)
-    setError(null)
-    try {
-      storeIssue(app.slug, await api.patchIssue(app.slug, issue.number, { title: next }))
-      setEditing(false)
-    } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const comments = issue.comment_count
   return (
     <div className="issue-header">
       {editing ? (
-        <form className="issue-title-form" onSubmit={save}>
-          <div className="input" data-size="large" style={{ flex: 1 }}>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} aria-label="Title" autoFocus maxLength={256} />
-          </div>
-          <Button type="submit" disabled={saving}>
-            Save
-          </Button>
-          <Button variant="invisible" onClick={() => setEditing(false)}>
-            Cancel
-          </Button>
-          {error && <p className="field-error">{error}</p>}
-        </form>
+        <TitleForm app={app} issue={issue} onDone={() => setEditing(false)} />
       ) : (
         <div className="issue-title-row">
           <h1 className="issue-heading">
@@ -320,13 +315,7 @@ function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: 
           </h1>
           <div className="issue-title-actions">
             {canEdit && (
-              <Button
-                variant="invisible"
-                onClick={() => {
-                  setTitle(issue.title)
-                  setEditing(true)
-                }}
-              >
+              <Button variant="invisible" onClick={() => setEditing(true)}>
                 Edit
               </Button>
             )}
@@ -355,25 +344,6 @@ function IssueHeader({ app, issue, viewers, canEdit }: { app: AppDetail; issue: 
 
 function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; canEdit: boolean }) {
   const [editing, setEditing] = useState(false)
-  const [body, setBody] = useState(issue.body)
-  const [busy, setBusy] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const save = async () => {
-    if (busy) return
-    setSaving(true)
-    setError(null)
-    try {
-      storeIssue(app.slug, await api.patchIssue(app.slug, issue.number, { body }))
-      setEditing(false)
-    } catch (err) {
-      setError(errorMessage(err))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   return (
     <Message
       slug={app.slug}
@@ -385,199 +355,13 @@ function IssueBodyBox({ app, issue, canEdit }: { app: AppDetail; issue: Issue; c
       verb="opened"
       actions={
         canEdit && !editing ? (
-          <Button
-            size="small"
-            variant="invisible"
-            onClick={() => {
-              setBody(issue.body)
-              setEditing(true)
-            }}
-          >
+          <Button size="small" variant="invisible" onClick={() => setEditing(true)}>
             Edit
           </Button>
         ) : undefined
       }
     >
-      {editing ? (
-        <div className="msg-edit">
-          <Editor
-            slug={app.slug}
-            value={body}
-            onChange={setBody}
-            member={!!app.role}
-            onAttachment={() => {}}
-            onBusyChange={setBusy}
-            onSubmit={save}
-            autoFocus
-            label="Description"
-            actions={
-              <>
-                <Button variant="invisible" onClick={() => setEditing(false)}>
-                  Cancel
-                </Button>
-                <Button variant="primary" onClick={save} disabled={saving || busy}>
-                  {saving ? "Saving…" : "Save"}
-                </Button>
-              </>
-            }
-          />
-          {error && <p className="field-error">{error}</p>}
-        </div>
-      ) : undefined}
+      {editing ? <BodyForm app={app} issue={issue} onDone={() => setEditing(false)} /> : undefined}
     </Message>
-  )
-}
-
-const closeOptions: { reason: CloseReason; label: string; description: string }[] = [
-  { reason: "completed", label: "Close as completed", description: "Done, closed, fixed, resolved" },
-  { reason: "not_planned", label: "Close as not planned", description: "Won't fix, can't reproduce, stale" },
-  { reason: "duplicate", label: "Close as duplicate", description: "Duplicate of another issue" },
-]
-
-const sendKey = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘↵" : "Ctrl ↵"
-
-/** The reply box docked under the thread, with close/reopen beside Send. */
-function Composer({
-  app,
-  issue,
-  onComment,
-  onStatus,
-  onDuplicate,
-}: {
-  app: AppDetail
-  issue: Issue
-  onComment: (body: string, attachmentIds: string[]) => Promise<boolean>
-  onStatus: (status: IssueStatus, reason?: CloseReason) => Promise<void>
-  onDuplicate: (other: number) => Promise<void>
-}) {
-  const member = !!app.role
-  const [body, setBody] = useState("")
-  const [attachments, setAttachments] = useState<Attachment[]>([])
-  const [busy, setBusy] = useState(false)
-  const [reason, setReason] = useState<CloseReason>("completed")
-  const [dupOf, setDupOf] = useState("")
-  const [dupError, setDupError] = useState<string | null>(null)
-  const [working, setWorking] = useState(false)
-  const hasText = !!body.trim()
-
-  const comment = async () => {
-    if (!hasText || busy) return true
-    const text = body
-    const ids = attachments.filter((a) => text.includes(a.url)).map((a) => a.id)
-    setBody("")
-    setAttachments([])
-    return onComment(text, ids)
-  }
-
-  const close = async () => {
-    setDupError(null)
-    if (reason === "duplicate") {
-      const n = Number(dupOf.replace(/^#/, ""))
-      if (!Number.isInteger(n) || n < 1) return setDupError("Enter the issue this duplicates.")
-      setWorking(true)
-      try {
-        if (!(await comment())) return
-        await onDuplicate(n)
-        setDupOf("")
-        setReason("completed")
-      } catch (e) {
-        setDupError(e instanceof Error ? e.message : "Couldn't close as duplicate.")
-      } finally {
-        setWorking(false)
-      }
-      return
-    }
-    if (!(await comment())) return
-    onStatus("closed", reason).catch(() => {})
-  }
-
-  const reopen = async () => {
-    if (!(await comment())) return
-    onStatus("open").catch(() => {})
-  }
-
-  const option = closeOptions.find((o) => o.reason === reason)!
-  const closeLabel = reason === "completed" ? (hasText ? "Close with comment" : "Close issue") : option.label
-  const reopenLabel = hasText ? "Reopen with comment" : "Reopen issue"
-
-  const statusControl = !member ? null : issue.status === "closed" ? (
-    <Button icon={<StateIcon state="open" size={14} />} onClick={reopen} disabled={busy} aria-label={reopenLabel} title={reopenLabel}>
-      <span className="close-label">{reopenLabel}</span>
-    </Button>
-  ) : (
-    <span className="split">
-      <Button
-        icon={<StateIcon state={reason === "completed" ? "closed" : "not_planned"} size={14} />}
-        onClick={close}
-        disabled={busy || working}
-        aria-label={closeLabel}
-        title={hasText ? `${closeLabel} (posts your reply first)` : closeLabel}
-      >
-        <span className="close-label">{closeLabel}</span>
-      </Button>
-      <Menu
-        align="end"
-        width={300}
-        trigger={(p) => <Button iconOnly aria-label="More close options" icon={<ChevronDownIcon size={14} />} {...p} />}
-      >
-        {(dismiss) =>
-          closeOptions.map((o) => (
-            <MenuItem
-              key={o.reason}
-              checked={reason === o.reason}
-              description={o.description}
-              onSelect={() => {
-                setReason(o.reason)
-                setDupError(null)
-                dismiss()
-              }}
-            >
-              {o.label}
-            </MenuItem>
-          ))
-        }
-      </Menu>
-    </span>
-  )
-
-  return (
-    <div className="composer">
-      <Editor
-        variant="chat"
-        slug={app.slug}
-        value={body}
-        onChange={setBody}
-        member={member}
-        onAttachment={(a) => setAttachments((l) => [...l, a])}
-        onBusyChange={setBusy}
-        onSubmit={() => void comment()}
-        label="Reply"
-        minHeight={44}
-        extra={
-          member &&
-          reason === "duplicate" &&
-          issue.status !== "closed" && (
-            <div className="dup-form">
-              <label className="field-label" htmlFor="dup-of">
-                Duplicate of
-              </label>
-              <div className="input" data-size="small">
-                <span className="input-prefix mono">#</span>
-                <input id="dup-of" className="mono" inputMode="numeric" value={dupOf} onChange={(e) => setDupOf(e.target.value)} placeholder="123" autoFocus />
-              </div>
-              {dupError && <span className="field-error">{dupError}</span>}
-            </div>
-          )
-        }
-        actions={
-          <>
-            {statusControl}
-            <Button variant="primary" onClick={() => void comment()} disabled={!hasText || busy} trailing={<kbd className="kbd">{sendKey}</kbd>}>
-              {busy ? "Uploading…" : "Send"}
-            </Button>
-          </>
-        }
-      />
-    </div>
   )
 }

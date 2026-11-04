@@ -120,8 +120,8 @@
   --radius-xl: 12px;
   --radius-full: 999px;
   --control-small: 24px;
-  --control-medium: 28px;
-  --control-large: 32px;
+  --control-medium: 30px;
+  --control-large: 36px;
   --ease: cubic-bezier(0.2, 0, 0, 1);
 
   --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -186,6 +186,41 @@ pre,
   font-family: var(--font-mono);
   font-feature-settings: "calt" 0;
   letter-spacing: 0;
+}
+
+/* Scrollbars: a thin flat pill on a clear track, for the page and every scroll area. Safari and Chromium take the
+   ::-webkit-scrollbar rules (they allow the hover state); Firefox, which has no such selector, takes the standard
+   properties. Chromium ignores ::-webkit-scrollbar once scrollbar-color is set, hence the split. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.18) transparent;
+  }
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+  background: transparent;
+}
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.18);
+  background-clip: padding-box;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  min-height: 32px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 0.3);
+}
+::-webkit-scrollbar-thumb:active {
+  background-color: rgb(255 255 255 / 0.36);
+}
+::-webkit-scrollbar-button {
+  display: none;
 }
 
 ::selection {

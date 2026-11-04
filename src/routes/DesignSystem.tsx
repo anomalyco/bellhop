@@ -184,6 +184,7 @@ export function DesignSystem() {
                 <ButtonRow key={variant} variant={variant} name={name} text={text} />
               ))}
             </div>
+            <div style={caption}>Buttons are pills, 30 px tall; icon-only ones are circles. Fields, menus and labels keep the 6 px corner.</div>
           </Section>
 
           <Section title="Sizes, icons and split">

@@ -87,7 +87,7 @@
   color: var(--fg-muted);
   font-size: var(--text-ui);
   font-weight: var(--weight-medium);
-  border-radius: var(--radius);
+  border-radius: var(--radius-full);
 }
 .app-nav a .icon {
   color: var(--icon-muted);
@@ -129,6 +129,10 @@
 }
 .page[data-narrow] {
   max-width: 800px;
+}
+/* The issue page ends at its pinned composer; the slot already reserves the space. */
+.page:has(.composer-slot) {
+  padding-bottom: 0;
 }
 .page-title {
   display: flex;
@@ -1168,7 +1172,7 @@ a.box-row:hover {
 .attachment:hover {
   color: var(--fg);
   text-decoration: none;
-  background-image: linear-gradient(var(--hover), var(--hover));
+  background-color: rgb(255 255 255 / 0.09);
 }
 .attachment-name {
   min-width: 0;
@@ -1254,14 +1258,19 @@ a.box-row:hover {
   font-weight: 400;
 }
 
-/* Composer: docked at the bottom of the thread */
-.composer {
-  position: sticky;
-  bottom: 0;
-  z-index: 5;
+/* Composer: pinned to the bottom of the viewport at the thread column's width (Composer.tsx measures the slot).
+   The slot keeps its height in the flow so the end of the thread is never hidden behind it. */
+.composer-slot {
+  height: var(--composer-h, 0px);
   margin: 8px -14px 0;
-  padding: 16px 0;
+}
+.composer {
+  position: fixed;
+  bottom: 0;
+  z-index: 20;
+  padding: 12px 0 max(12px, env(safe-area-inset-bottom));
   background: var(--bg);
+  box-shadow: 0 -1px 0 0 var(--border-muted);
 }
 .dup-form {
   display: flex;
@@ -1687,6 +1696,13 @@ a.box-row:hover {
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
   }
+  /* The sidebar stacks under the thread here, so the composer's space moves to the end of the page. */
+  .issue-main .composer-slot {
+    height: 0;
+  }
+  .page:has(.issue-main .composer-slot) {
+    padding-bottom: calc(var(--composer-h, 0px) + 24px);
+  }
   .issue-sidebar {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
     gap: 20px 32px;
@@ -1789,19 +1805,28 @@ a.box-row:hover {
     padding-left: 10px;
     padding-right: 10px;
   }
-  .composer {
+  .composer-slot {
     margin: 8px -10px 0;
-    padding: 12px 0 max(12px, env(safe-area-inset-bottom));
+  }
+  .composer {
+    padding: 8px 0 max(8px, env(safe-area-inset-bottom));
+  }
+  .editor[data-variant="chat"] .editor-area {
+    max-height: calc(22px * 5 + 17px);
+    padding: 10px 12px 4px;
+  }
+  .editor[data-variant="chat"] .editor-foot {
+    padding: 2px 6px 6px;
   }
   .editor[data-variant="chat"] .close-label {
     display: none;
   }
   .editor[data-variant="chat"] .split > .btn:first-child {
-    width: 32px;
-    padding: 0;
+    width: 34px;
+    padding: 0 0 0 4px;
   }
   .editor[data-variant="chat"] .editor-actions > .btn:not([data-variant="primary"]) {
-    width: 32px;
+    width: var(--control-medium);
     padding: 0;
   }
   .issue-sidebar {

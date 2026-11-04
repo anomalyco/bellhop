@@ -143,7 +143,8 @@ function relationText(rel: Relation, removed: boolean): string {
   return removed ? "removed the link to" : "linked this to"
 }
 
-export function EventItem({ slug, event }: { slug: string; event: IssueEvent }) {
+/** What an event says (after the actor's name), its icon and its state tone. */
+export function eventContent(slug: string, event: IssueEvent): { icon: ReactNode; tone?: string; body: ReactNode } {
   const d = event.data
   let icon: ReactNode = <LinkIcon size={14} />
   let tone: string | undefined
@@ -207,7 +208,11 @@ export function EventItem({ slug, event }: { slug: string; event: IssueEvent }) 
     default:
       body = "updated this"
   }
+  return { icon, tone, body }
+}
 
+export function EventItem({ slug, event }: { slug: string; event: IssueEvent }) {
+  const { icon, tone, body } = eventContent(slug, event)
   return (
     <div className="event" data-tone={tone}>
       <span className="event-icon">{icon}</span>
