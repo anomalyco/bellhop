@@ -1,0 +1,66 @@
+/* Settings on narrow screens. The section tabs become a sideways strip (app.css, under 768 px); here it gets inset
+   padding, snap points, room for 40 px tap targets, and a masked fade on whichever edge has more tabs. */
+@media (max-width: 768px) {
+  .settings > .settings-nav {
+    margin: -6px -16px 0;
+    padding: 6px 16px;
+    scroll-padding-inline: 16px;
+    scroll-snap-type: x proximity;
+    overscroll-behavior-x: contain;
+  }
+  .settings > .settings-nav a {
+    scroll-snap-align: start;
+  }
+  .settings > .settings-nav[data-more="end"] {
+    mask-image: linear-gradient(to right, #000 calc(100% - 48px), transparent);
+  }
+  .settings > .settings-nav[data-more="start"] {
+    mask-image: linear-gradient(to left, #000 calc(100% - 48px), transparent);
+  }
+  .settings > .settings-nav[data-more="start end"] {
+    mask-image: linear-gradient(to right, transparent, #000 48px, #000 calc(100% - 48px), transparent);
+  }
+}
+
+/* Phones: a label's description goes under it, so Edit and Delete stay beside the label and the text has the width */
+@media (max-width: 640px) {
+  .label-row .settings-row-main {
+    order: 1;
+    flex-basis: 100%;
+    margin-top: -6px;
+  }
+  .label-row .settings-row-actions {
+    margin-left: auto;
+  }
+}
+
+/* Touch screens: settings forms keep 16 px text in every field (iOS zooms below that, mono fields included) and
+   40 px tap targets; small controls get an invisible hit area, so they look the same. */
+@media (pointer: coarse) {
+  .settings .settings-main .input input,
+  .settings .settings-main .textarea {
+    font-size: 16px;
+  }
+  .settings-main :is(.color-swatch, .label-toggle) {
+    position: relative;
+  }
+  .settings-main :is(.color-swatch, .label-toggle)::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - 20px));
+    right: min(0px, calc(50% - 20px));
+    bottom: min(0px, calc(50% - 20px));
+    left: min(0px, calc(50% - 20px));
+  }
+  /* The native colour picker: a 40 px target that still draws a 28 px swatch in the same spot */
+  .settings-main .color-native {
+    width: 40px;
+    height: 40px;
+    margin: -6px;
+    padding: 6px;
+    font-size: 16px;
+  }
+  .settings-main label.checkbox {
+    min-height: 40px;
+  }
+}

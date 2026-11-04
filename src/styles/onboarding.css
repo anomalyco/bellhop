@@ -525,6 +525,27 @@
   }
 }
 
+/* Touch screens: every control on these pages gets a hit area at least 40 px tall (and wide, for small icon
+   buttons) from an invisible ::after, so nothing changes visually; fields grow to 40 px. */
+@media (pointer: coarse) {
+  :is(.landing, .signin, .create, .home-head, .home-agents, .setup, .empty, .oauth, .agents-page, .settings)
+    :is(.btn, .segmented > button, a:not(.btn, .box-row)) {
+    position: relative;
+  }
+  :is(.landing, .signin, .create, .home-head, .home-agents, .setup, .empty, .oauth, .agents-page, .settings)
+    :is(.btn, .segmented > button, a:not(.btn, .box-row))::after {
+    content: "";
+    position: absolute;
+    top: min(0px, calc(50% - 20px));
+    right: min(0px, calc(50% - 20px));
+    bottom: min(0px, calc(50% - 20px));
+    left: min(0px, calc(50% - 20px));
+  }
+  :is(.landing, .signin, .create, .setup, .oauth, .agents-page, .settings-main) .input[class] {
+    height: 40px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .setup-step-body,
   .setup-done,
@@ -548,6 +569,25 @@
 }
 
 @media (max-width: 640px) {
+  /* Snippets wrap instead of scrolling sideways, so URLs and secrets stay in view */
+  .snippet-code {
+    overflow-x: visible;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .copy-field {
+    align-items: flex-start;
+    padding: 6px 4px 6px 12px;
+  }
+  .copy-field-value {
+    padding: 2px 0;
+    line-height: 18px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .landing-shot {
+    aspect-ratio: 720 / 823;
+  }
   .landing-title {
     font-size: 27px;
     line-height: 33px;

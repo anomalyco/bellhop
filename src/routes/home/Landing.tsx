@@ -5,6 +5,7 @@ import { useResource } from "../../lib/cache"
 import { addressParts } from "../../lib/site"
 import { Button, Logo } from "../../ui/primitives"
 import shot from "../../assets/landing-issue.webp"
+import shotNarrow from "../../assets/landing-issue-narrow.webp"
 import "../../styles/onboarding.css"
 
 /** blhp.app signed out: what Bellhop is, the three things that make it different, and the way in. */
@@ -33,14 +34,18 @@ export function Landing({ next }: { next: string }) {
           </div>
         </div>
         <figure className="landing-shot">
-          <img
-            src={shot}
-            width={1200}
-            height={600}
-            alt="A Bellhop workspace: a guest's question about MCP servers, answered by the OpenCode agent, which then marks it as waiting on the reporter"
-            decoding="async"
-            loading="lazy"
-          />
+          <picture>
+            {/* Phones get the conversation alone, laid out at phone width, so it stays readable. */}
+            <source media="(max-width: 640px)" srcSet={shotNarrow} width={720} height={823} />
+            <img
+              src={shot}
+              width={1200}
+              height={600}
+              alt="A Bellhop workspace: a guest's question about MCP servers, answered by the OpenCode agent, which then marks it as waiting on the reporter"
+              decoding="async"
+              loading="lazy"
+            />
+          </picture>
         </figure>
       </div>
     </main>

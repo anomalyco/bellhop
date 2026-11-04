@@ -14,6 +14,8 @@ import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel
 import { appLabel, appPath, homeUrl, signInHref } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 import "../styles/agents.css"
+import "../styles/onboarding.css"
+import "../styles/settings.css"
 
 type Section = "general" | "labels" | "templates" | "agents" | "webhook" | "members"
 
@@ -56,14 +58,32 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
   const visible = sections.filter((s) => atLeast(app.role, s.min))
   const active = visible.some((s) => s.id === section) ? section : "general"
   const nav = useRef<HTMLElement>(null)
-  // On phones the section list scrolls sideways; keep the current one in view.
+  // On phones the section list scrolls sideways: center the current one, and mark which edges have more (settings.css
+  // fades those edges).
+  const edges = () => {
+    const n = nav.current
+    if (!n) return
+    const more = [n.scrollLeft > 1 && "start", n.scrollLeft + n.clientWidth < n.scrollWidth - 1 && "end"].filter(Boolean).join(" ")
+    if (more) n.dataset.more = more
+    else delete n.dataset.more
+  }
   useEffect(() => {
-    nav.current?.querySelector("[aria-current=page]")?.scrollIntoView({ block: "nearest", inline: "nearest" })
+    const n = nav.current
+    const current = n?.querySelector<HTMLElement>("[aria-current=page]")
+    if (n && current && n.scrollWidth > n.clientWidth) n.scrollLeft = current.offsetLeft - (n.clientWidth - current.offsetWidth) / 2
+    edges()
   }, [active])
+  useEffect(() => {
+    const n = nav.current
+    if (!n) return
+    const observer = new ResizeObserver(edges)
+    observer.observe(n)
+    return () => observer.disconnect()
+  }, [])
   return (
     <Page>
       <div className="settings">
-        <nav className="settings-nav" aria-label="Settings" ref={nav}>
+        <nav className="settings-nav" aria-label="Settings" ref={nav} onScroll={edges}>
           {visible.map((s) => (
             <Link key={s.id} href={appPath(app.slug, s.id === "general" ? "/settings" : `/settings/${s.id}`)} aria-current={active === s.id ? "page" : undefined}>
               {s.label}
@@ -329,7 +349,7 @@ function Labels({ app }: { app: AppDetail }) {
               }}
             />
           ) : (
-            <div key={label.id} className="box-row settings-row">
+            <div key={label.id} className="box-row settings-row label-row">
               <div className="settings-row-label">
                 <Label name={label.name} color={label.color} />
               </div>
@@ -767,9 +787,28 @@ function AppAgentRow({ slug, agent }: { slug: string; agent: AppAgent }) {
             }))}
             onChange={setRole}
           />
-          <Button size="small" variant="invisible" onClick={() => setConfirming(true)}>
+          <Button size="small" variant="invisible" data-wide-only onClick={() => setConfirming(true)}>
             Remove
           </Button>
+          <div className="narrow-only">
+            <Menu
+              align="end"
+              width={220}
+              trigger={(p) => <Button iconOnly size="small" variant="invisible" aria-label={`More for ${agent.client_name}`} icon={<KebabIcon />} {...p} />}
+            >
+              {(close) => (
+                <MenuItem
+                  danger
+                  onSelect={() => {
+                    close()
+                    setConfirming(true)
+                  }}
+                >
+                  Remove
+                </MenuItem>
+              )}
+            </Menu>
+          </div>
         </div>
       )}
     </div>

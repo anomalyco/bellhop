@@ -269,8 +269,8 @@ function AgentItem({
         ) : (
           mode !== "rename" && (
             <div className="agent-row-actions">
-              <Button size="small" onClick={() => open(mode === "edit" ? null : "edit")} aria-expanded={mode === "edit"}>
-                Edit access
+              <Button size="small" onClick={() => open(mode === "edit" ? null : "edit")} aria-expanded={mode === "edit"} aria-label={`Edit access for ${agent.client_name}`}>
+                Edit<span className="wide-only"> access</span>
               </Button>
               <Menu
                 align="end"

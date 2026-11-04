@@ -34,15 +34,16 @@
   align-items: center;
   gap: 12px;
   min-height: 52px;
-  padding: 10px 0;
   border-bottom: 1px solid var(--border-muted);
 }
 .access-check {
   display: flex;
   flex: 1;
+  align-self: stretch;
   align-items: flex-start;
   gap: 12px;
   min-width: 0;
+  padding: 10px 0;
   cursor: pointer;
 }
 .access input[type="checkbox"] {
@@ -86,12 +87,12 @@
   align-items: center;
   gap: 12px;
   min-height: 48px;
-  padding: 6px 0;
   border-bottom: 1px solid var(--border-muted);
 }
 .access-name {
   display: flex;
   flex: 1;
+  align-self: stretch;
   align-items: center;
   gap: 10px;
   min-width: 0;
@@ -224,6 +225,7 @@
 }
 .agent-main {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 2px;
   flex: 1;
   min-width: 0;
@@ -235,7 +237,11 @@
   gap: 4px 10px;
 }
 .agent-name {
+  max-width: 100%;
+  overflow: hidden;
   font-weight: var(--weight-medium);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .agent-kind {
   color: var(--fg-faint);
@@ -347,6 +353,15 @@
   align-items: center;
 }
 
+/* Home: long workspace and agent names stay on one line */
+.app-row .app-row-name,
+.home-agent-row .app-row-name {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
 /* Home: the agents summary */
 .home-agents-head {
   display: flex;
@@ -372,20 +387,65 @@ a.home-agents-more:hover {
   font-size: var(--text-ui);
 }
 
+/* Lists whose rows truncate: one column no wider than the page, whatever a row's unbroken text would need */
+:is(.settings-main, .agents-page, .home-agents) .box,
+.box.home-apps {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* Shown on wide screens only, or on phones only */
+.narrow-only {
+  display: none;
+}
+
+/* Phones: rows keep avatar, name and actions on one line; names and emails truncate; selects size to their value.
+   Inline confirms are the exception: they take a line of their own under the name. */
 @media (max-width: 640px) {
-  .agent-item > .agent-row,
-  .app-agent-row,
-  .member-row {
+  .wide-only,
+  .btn[data-wide-only] {
+    display: none;
+  }
+  .narrow-only {
+    display: flex;
+  }
+  .box-row.member-row,
+  .box-row.app-agent-row,
+  .agent-item > .agent-row {
+    flex-wrap: nowrap;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+  .box-row.member-row:has(.agent-confirm-inline),
+  .box-row.app-agent-row:has(.agent-confirm-inline),
+  .agent-item > .agent-row:has(.agent-confirm-inline) {
     flex-wrap: wrap;
   }
-  .agent-row-actions,
-  .agent-confirm-inline,
+  .member-row .settings-row-main > *,
+  .app-agent-row .settings-row-main > :not(.field-error) {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+  .member-actions,
   .app-agent-row .settings-row-actions,
-  .member-actions {
+  .agent-row-actions {
+    flex: none;
+    gap: 2px;
+  }
+  .member-row .btn.role-select,
+  .app-agent-row .btn.role-select {
+    width: auto;
+    min-width: 0;
+  }
+  .access .btn.role-select {
+    width: 112px;
+    min-width: 0;
+  }
+  .agent-confirm-inline {
     width: 100%;
     max-width: none;
     justify-content: flex-start;
-    padding-left: 40px;
+    padding-left: 38px;
   }
   .agent-panel {
     padding: 0 12px 14px;

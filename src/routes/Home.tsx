@@ -85,7 +85,7 @@ function Workspaces() {
             New workspace
           </Button>
         </div>
-        <div className="box">
+        <div className="box home-apps">
           {!apps && !error && <div className="box-row skeleton-row" />}
           {!!error && <div className="box-row muted-text">{errorMessage(error)}</div>}
           {apps?.map((app) => (
