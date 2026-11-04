@@ -36,6 +36,8 @@ import { t as td, useT as useDeskT } from "../i18n/helpdesk"
 import { isDesk } from "../lib/helpdesk"
 import { HelpdeskSettings } from "./settings/Helpdesk"
 import { IdentityKeys } from "./settings/IdentityKeys"
+import { ApiKeys } from "./settings/ApiKeys"
+import { WidgetSettings } from "./settings/Widget"
 
 type Section =
   | "general"
@@ -53,6 +55,8 @@ type Section =
   | "audit"
   | "helpdesk"
   | "identity-keys"
+  | "api-keys"
+  | "widget"
 
 // `min`: the least role that sees the section. Below admin, General, Labels, Templates and Members are read-only.
 // `desk`: only for workspaces in help desk mode.
@@ -68,14 +72,17 @@ const sections: { id: Section; min: Role; desk?: boolean }[] = [
   { id: "report-keys", min: "admin" },
   { id: "helpdesk", min: "admin" },
   { id: "identity-keys", min: "admin", desk: true },
+  { id: "api-keys", min: "admin", desk: true },
+  { id: "widget", min: "admin", desk: true },
   { id: "tiers", min: "member" },
   { id: "blocked", min: "member" },
   { id: "data", min: "admin" },
   { id: "audit", min: "admin" },
 ]
 // The help desk's sections are named in its own namespace, with the rest of their copy
-const sectionLabel = (id: Section) =>
-  id === "helpdesk" ? td("settings.title") : id === "identity-keys" ? td("keys.title") : tKey(`section.${id as Exclude<Section, "helpdesk" | "identity-keys">}`)
+const deskLabels = { helpdesk: "settings.title", "identity-keys": "keys.title", "api-keys": "apiKeys.title", widget: "widget.title" } as const
+type DeskSection = keyof typeof deskLabels
+const sectionLabel = (id: Section) => (id in deskLabels ? td(deskLabels[id as DeskSection]) : tKey(`section.${id as Exclude<Section, DeskSection>}`))
 
 export default function Settings({ slug, section }: { slug: string; section?: string }) {
   return (
@@ -153,6 +160,8 @@ function SettingsLayout({ app, section }: { app: AppDetail; section: Section }) 
           {active === "report-keys" && <ReportKeys app={app} />}
           {active === "helpdesk" && <HelpdeskSettings app={app} />}
           {active === "identity-keys" && <IdentityKeys app={app} />}
+          {active === "api-keys" && <ApiKeys app={app} />}
+          {active === "widget" && <WidgetSettings app={app} />}
           {active === "members" && <Members app={app} />}
           {active === "tiers" && <Tiers app={app} />}
           {active === "blocked" && <Blocked app={app} />}

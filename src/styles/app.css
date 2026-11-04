@@ -2533,6 +2533,7 @@ button.prop:hover,
       .desk-signin-back,
       .requester-name,
       .code-flow-links .link-button,
+      .widget-docs a,
       :is(.home-agents, .settings-main, .create, .signin, .oauth, .feed) a:not(.btn, .box-row, .issue-title, p a, li a)
     ) {
     position: relative;
@@ -2562,6 +2563,7 @@ button.prop:hover,
       .desk-signin-back,
       .requester-name,
       .code-flow-links .link-button,
+      .widget-docs a,
       :is(.home-agents, .settings-main, .create, .signin, .oauth, .feed) a:not(.btn, .box-row, .issue-title, p a, li a)
     )::after {
     content: "";
