@@ -1,4 +1,5 @@
 import { appUrl, rows, sql } from "./core"
+import { deliverFormCode, formMailPrefix } from "./email-codes"
 import type { Locale, IssueStatus } from "../shared/api"
 import { mailCopy, formatMail } from "./mail-copy"
 import {
@@ -37,6 +38,13 @@ export async function enqueueDue(env: Env) {
     )
   )
   if (reviews.length) await env.MAIL.sendBatch(reviews.map((r) => ({ body: { id: "review-" + r.id } })))
+  const codes = await rows<{ id: string }>(
+    sql(
+      env,
+      `UPDATE form_code_mail SET wake=unixepoch()+300 WHERE id IN(SELECT j.id FROM form_code_mail j JOIN email_codes v ON v.id=j.id WHERE j.wake<=unixepoch() AND v.state='pending' AND v.expires>unixepoch() ORDER BY j.wake LIMIT 100) RETURNING id`
+    )
+  )
+  if (codes.length) await env.MAIL.sendBatch(codes.map((r) => ({ body: { id: formMailPrefix + r.id } })))
 }
 type Recipient = TokenRow & {
   mode: string
@@ -52,6 +60,7 @@ type Recipient = TokenRow & {
 }
 type Item = { kind: string; description: string | null; author: string | null; internal: number }
 export async function deliverBatch(env: Env, id: string) {
+  if (id.startsWith(formMailPrefix)) return deliverFormCode(env, id.slice(formMailPrefix.length))
   if (id.startsWith("review-")) {
     const key = id.slice(7),
       r = await sql(
@@ -90,7 +99,8 @@ export async function deliverBatch(env: Env, id: string) {
       CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') ELSE substr(c.body,1,4096) END description
       FROM mail_items n JOIN mail_batches b ON b.id=n.batch_id AND b.sealed=1 JOIN mail_people p ON p.id=b.sub_id AND p.state='on' JOIN issues i ON i.id=p.issue_id
       LEFT JOIN comments c ON c.id=n.ref AND c.issue_id=i.id LEFT JOIN issue_events e ON n.kind='status' AND e.id=n.ref AND e.issue_id=i.id
-      WHERE b.id=? AND n.actor!=p.actor_id AND (c.id IS NULL OR json_extract(c.author,'$.id')!=p.actor_id) AND ((p.role IS NULL AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=p.app_id AND m.email=p.address AND m.user_id IS NOT NULL)
+      WHERE b.id=? AND NOT EXISTS(SELECT 1 FROM held_replies h WHERE h.id=n.ref AND h.issue_id=i.id)
+      AND n.actor!=p.actor_id AND (c.id IS NULL OR json_extract(c.author,'$.id')!=p.actor_id) AND ((p.role IS NULL AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=p.app_id AND m.email=p.address AND m.user_id IS NOT NULL)
          AND (p.reason='manual' OR (p.reason='opened' AND p.opened) OR (p.reason='replied' AND p.replied)) AND ((n.kind='reply' AND c.id IS NOT NULL AND c.hidden IS NULL AND c.internal=0) OR (n.kind='status' AND e.type='status_changed')))
        OR (p.role IS NOT NULL AND ((n.kind='assigned' AND p.assigned AND json_extract(i.assignee,'$.id')=p.actor_id) OR (n.kind='mention' AND p.mentions AND c.hidden IS NULL AND (c.id IS NOT NULL OR n.ref=i.id)
        AND EXISTS(SELECT 1 FROM json_each(CASE WHEN n.ref=i.id THEN i.mentions ELSE c.mentions END) WHERE json_extract(value,'$.actor.id')=p.actor_id))))) ORDER BY n.id`,
@@ -166,10 +176,25 @@ export async function mailQueue(batch: MessageBatch<{ id: string }>, env: Env) {
         batch: m.body.id,
         status: e instanceof ProviderError ? e.status : null
       })
-      if (e instanceof ProviderError && [400, 409, 413, 422].includes(e.status)) {
+      const permanent = e instanceof ProviderError && [400, 409, 413, 422].includes(e.status)
+      if (m.body.id.startsWith(formMailPrefix)) {
+        if (!permanent && m.attempts < 7) {
+          m.retry({ delaySeconds: Math.min(60, 2 ** m.attempts) })
+          continue
+        }
+        const id = m.body.id.slice(formMailPrefix.length)
+        await sql(
+          env,
+          `UPDATE email_codes SET state=CASE WHEN expires<=unixepoch() THEN 'expired' ELSE 'failed' END,digest=NULL WHERE id=? AND state='pending' AND EXISTS(SELECT 1 FROM form_code_mail WHERE id=email_codes.id)`,
+          id
+        ).run()
+        m.ack()
+        continue
+      }
+      if (permanent) {
         // Invalid/screened content or an ambiguous idempotency conflict: never try a different key.
-        if (m.body.id.startsWith('review-')) {
-          await sql(env, 'UPDATE review_mail SET wake=9223372036854775807 WHERE id=?', m.body.id.slice(7)).run()
+        if (m.body.id.startsWith("review-")) {
+          await sql(env, "UPDATE review_mail SET wake=9223372036854775807 WHERE id=?", m.body.id.slice(7)).run()
           m.ack()
           continue
         }

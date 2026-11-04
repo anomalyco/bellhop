@@ -1675,8 +1675,8 @@ issues.post(base, async (c) => {
   return c.json(
     await createIssue(a, b, {
       c,
-      operator: can(c.var.app.role, "respond") ? c.var.actor : a.actor,
-      staff: can(c.var.app.role, "respond")
+      operator: can(c.var.app.role, "triage") ? c.var.actor : a.actor,
+      staff: can(c.var.app.role, "triage")
     }),
     201
   )

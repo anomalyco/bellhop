@@ -5,7 +5,7 @@ import { body, denied, fail, missing, now, secret, sql, str, uid, type Bindings,
 import { can } from "./permissions"
 
 const enc = new TextEncoder()
-type KeyPurpose = "host-identity/v1" | "approval-signing/v1"
+type KeyPurpose = "host-identity/v1" | "approval-signing/v1" | "form-verification-mail/v1"
 async function wrappingKey(env: Env, purpose: KeyPurpose) {
   const secret = purpose === "approval-signing/v1" ? env.APPROVAL_KEK : env.COOKIE_SECRET
   if (!secret || secret.length < 32)

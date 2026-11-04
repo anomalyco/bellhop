@@ -12,7 +12,7 @@ import {
 import type { Access } from "./mutations"
 import { agentAccessSQL } from "./permissions"
 import { clientIP, enforce } from "./rate-limits"
-import { prepareCode } from "./email-codes"
+import { formMailPrefix, prepareCode } from "./email-codes"
 
 export type FormCaller = { c: Ctx; operator: Actor; staff: boolean; serverKey?: string }
 type Previous = {
@@ -80,7 +80,7 @@ export async function prepareForm(
       q.push(retireFormReplays(env, app, "issue_id", issue))
   }
   q.push(...routingWrites(env, app, issue, t, answers, caller.operator, event))
-  const deliveries: { index: number; plan: Awaited<ReturnType<typeof prepareCode>> }[] = []
+  const deliveries: string[] = []
   if (!prev) {
     if (answers.verify.length > (caller.staff ? 5 : 3))
       fail(429, "code_limit", "Too many verification addresses on one request")
@@ -97,9 +97,10 @@ export async function prepareForm(
         caller.staff,
         caller.serverKey
       )
-      deliveries.push({ index: q.length + plan.index, plan })
+      deliveries.push(plan.id)
       q.push(
         ...plan.statements,
+        await plan.reserveFormMail(),
         typeGuard(env, "EXISTS(SELECT 1 FROM email_codes WHERE app_id=? AND issue_id=? AND id=?)", app, issue, plan.id)
       )
     }
@@ -115,12 +116,12 @@ export async function prepareForm(
     typeId: t.id,
     statements: q,
     committed(rows: D1Result<Record<string, unknown>>[]) {
-      for (const { index, plan } of deliveries) {
-        const row = rows[index]!.results[0] as { state: string; trusted: number | null }
+      if (deliveries.length)
         caller.c.executionCtx.waitUntil(
-          plan.deliver(row).catch(() => console.error("request_form.verification_delivery_failed", { id: plan.id }))
-        )
-      }
+          env.MAIL.sendBatch(deliveries.map((id) => ({ body: { id: formMailPrefix + id } }))).catch(() =>
+            console.error("request_form.verification_enqueue_deferred")
+          )
+        ) // Cron recovers committed reservations.
       const r = rows.at(-1)!.results[0]!
       return {
         event: {

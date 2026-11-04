@@ -67,7 +67,7 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
   if ((auth === "widget" || auth === "email") && m[2] === "sk") denied()
   if (!["shared", "server", "widget", "email"].includes(auth) && (auth === "session") !== session) return rejected()
   const hash = await sha256(m[1]!),
-    origin = c.req.header("origin") ?? null,
+    suppliedOrigin = c.req.header("origin"),
     env = c.env
   const row = session
     ? await sql(
@@ -97,6 +97,18 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
       ).first<Workspace & Pick<Scope, "key" | "kind"> & { actor: null }>()
   if (!row) return rejected()
   checkHost(c, row.slug)
+  // Same-origin browser GETs omit Origin. Trust only the canonical HTTPS host for
+  // this credential's workspace, never api.*, a sibling, or a forwarded host.
+  const requestOrigin = new URL(c.req.url).origin
+  const origin =
+    suppliedOrigin ??
+    (env.APP_DOMAIN &&
+    c.req.header("Sec-Fetch-Site") === "same-origin" &&
+    requestOrigin === `https://${row.slug}.${env.APP_DOMAIN}` &&
+    requestOrigin !== `https://api.${env.APP_DOMAIN}`
+      ? requestOrigin
+      : null)
+  if (m[2] === "sk" && origin !== null) denied()
   if (row.kind === "publishable" && !origin) denied()
   if (origin !== null) {
     if ("bound" in row && row.bound !== null && row.bound !== origin) denied()
@@ -108,7 +120,7 @@ export async function authorize(c: Ctx, auth: Exclude<Auth, "public">): Promise<
       row.kind,
       row.key
     ).first()
-    if (!allowed && !ownOrigin(env, row.slug, origin, new URL(c.req.url).origin)) denied()
+    if (!allowed && !ownOrigin(env, row.slug, origin, requestOrigin)) denied()
     cors(c, origin)
   }
   if (row.mode !== "helpdesk") fail(403, "helpdesk_only", "Help desk workspace required")

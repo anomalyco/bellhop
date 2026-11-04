@@ -3,7 +3,7 @@ import { DEFAULT_WEBHOOK_EVENTS, LOCALES } from "../shared/api"
 import { toolRoles, tools } from "./mcp"
 import { reportLimits } from "./reports"
 import { webhookEvents } from "./webhooks"
-import { routes } from "./v1"
+import { document } from "./v1"
 import { uploadSpec } from "./media"
 import { contactTTL } from "./contact-session"
 import uploadsSource from "./v1/uploads.ts?raw"
@@ -268,7 +268,7 @@ type JsonSchema = {
   maximum?: number
   pattern?: string
 }
-const api = () => ((routes.openapi ?? fail("no openapi route")).run as unknown as () => Api)()
+const api = () => document() as Api
 const operations: Record<string, [group: string, title: string, summary: string]> = {
   createSession: ["Sessions", "Start a session", "With a secret key, for a user your server vouches for. With a publishable key, from an identity token or anonymously (where the workspace allows it)."],
   startEmail: ["Sessions", "Send an email sign-in code", "Needs a Turnstile token, so it works only where the workspace's human check runs. Returns `Challenge-Token`; keep it in this browser."],

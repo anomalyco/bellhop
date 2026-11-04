@@ -242,7 +242,7 @@ const security = {
     email: [{ publishable: [] }, { session: [] }]
   },
   media = (name: string) => ({ "application/json": { schema: ref(name) } })
-function document() {
+export function document() {
   const paths: Record<string, Record<string, unknown>> = {}
   for (const [name, r] of Object.entries(routes)) {
     const path = r.path.replace(/:(\w+)/g, "{$1}")
