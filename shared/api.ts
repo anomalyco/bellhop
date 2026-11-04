@@ -29,10 +29,13 @@
 //   GET    /api/me                                       -> Me
 //   POST   /api/human              { token }             -> { ok: true }       Turnstile check, sets bh_human (1 hour)
 //   PUT    /api/me/guest           { name }              -> Me                 guest + human; sets the display name
-//   GET    /api/apps                                     -> App[]              member: applications I own or belong to
+//   GET    /api/apps                                     -> App[]              signed in: workspaces I'm on
+//   GET    /api/feed?state=open|closed&q=<text>&cursor=  -> FeedList           public: issues in public workspaces,
+//                                                                             most recently active first (blhp.app home)
+//   GET    /api/feed/apps                                -> FeedApp[]          public: the public workspaces
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
-//   PATCH  /api/apps/:slug         { name?, description? } -> AppDetail        admin
+//   PATCH  /api/apps/:slug         { name?, description?, public? } -> AppDetail   admin
 //   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
 //   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  admin
 //   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
@@ -68,6 +71,12 @@
 //   GET    /media/:attachment_id/:file_name              -> the file, with Range support (video seeking)
 //   GET    /api/live/apps/:slug                          WebSocket, list page: LiveEvent
 //   GET    /api/live/apps/:slug/issues/:number           WebSocket, issue page: LiveEvent
+//   GET    /api/live/feed                                WebSocket, home feed: LiveEvent (feed.issue, activity)
+// Search engines, answered by the Worker per host:
+//   GET    /robots.txt    home and public workspaces: allow all, with a Sitemap line; private workspaces: Disallow: /
+//   GET    /sitemap.xml   home: a sitemap index of the public workspaces; a public workspace: its issue URLs (lastmod)
+//   Page requests (HTML) go through the Worker, which serves the SPA's index.html unchanged except for status and
+//   headers: private workspaces get X-Robots-Tag: noindex, and an unknown workspace subdomain answers 404.
 //   GET    /auth/google  ->  Google OAuth  ->  /auth/google/callback  (then redirect to ?next= or /)
 //   GET    /auth/dev?email=<email>&next=<path>           only when DEV_LOGIN=1
 //   POST   /auth/logout
@@ -148,12 +157,39 @@ export interface App {
   icon_url: string | null
   /** The viewer's role in this application; null for guests and accounts not on the team. */
   role: Role | null
+  /**
+   * Public workspaces are listed in the blhp.app feed and indexed by search engines. Private ones still work for
+   * anyone with the link, but are never listed, in the feed, in sitemaps or indexed.
+   */
+  public: boolean
 }
 
 export interface NewApp {
   name: string
   slug: string
   description?: string
+  /** Defaults to false (private). */
+  public?: boolean
+}
+
+/** A public workspace, for the home feed. */
+export interface FeedApp {
+  slug: string
+  name: string
+  description: string
+  icon_url: string | null
+  open_count: number
+}
+
+/** An issue in the home feed, with the workspace it belongs to. */
+export interface FeedIssue extends IssueSummary {
+  app: { slug: string; name: string; icon_url: string | null }
+}
+
+export interface FeedList {
+  issues: FeedIssue[]
+  counts: { open: number; closed: number }
+  next_cursor: string | null
 }
 
 export interface AppDetail extends App {
@@ -387,6 +423,7 @@ export type LiveEvent =
   // An actor changed identity: a guest renamed, or a guest's posts moved to their account on sign-in. Sent to the
   // app room and every issue room where `previous_id` appears; clients replace that actor everywhere they show it.
   | { type: "actor.updated"; previous_id: string; actor: Actor }
+  | { type: "feed.issue"; issue: FeedIssue } // feed room: an issue in a public workspace was opened or changed
 
 // Webhooks. POST to the application's URL with JSON WebhookPayload and headers:
 //   Bellhop-Event: <type>          Bellhop-Delivery: <delivery id>

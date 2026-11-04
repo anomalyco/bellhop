@@ -23,6 +23,7 @@ import type { AttachmentRow } from "./issues"
 import { addComment, relate, removeLabel, updateIssue } from "./mutations"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
+import { fromAppRow, type AppRow } from "./read-scope"
 import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
 
 const number = { type: "integer", minimum: 1 },
@@ -98,7 +99,11 @@ const templateFields = {
 }
 const workspaceTools = [
   tool("get_app", "Read workspace details, counts, labels, and templates.", {}),
-  tool("update_app", "Update workspace name or description (admin).", { name: text, description: text }),
+  tool("update_app", "Update workspace name, description, or public listing (admin).", {
+    name: text,
+    description: text,
+    public: { type: "boolean" }
+  }),
   tool("get_webhook", "Read webhook configuration and recent deliveries (admin).", {}),
   tool("set_webhook", "Set an HTTPS webhook URL, or remove it (admin).", { url: { type: ["string", "null"] } }, [
     "url"
@@ -140,7 +145,7 @@ const tools = [
   tool(
     "create_app",
     "Create a workspace owned by your account. Requires separate permission to create workspaces.",
-    { name: text, slug: text, description: text },
+    { name: text, slug: text, description: text, public: { type: "boolean" } },
     ["name", "slug"]
   ),
   tool("list_issues", "List issues by state, label, or search terms.", {
@@ -432,7 +437,7 @@ async function authenticate(c: Ctx): Promise<Caller | null> {
         agent.id
       ).run()
     )
-  const apps = scopes!.results as Workspace[]
+  const apps = (scopes!.results as AppRow<Workspace>[]).map(fromAppRow)
   return {
     apps,
     user: agent.user_id,

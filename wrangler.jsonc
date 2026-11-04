@@ -7,7 +7,7 @@
   "assets": {
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/auth/*", "/media/*", "/icon/*", "/mcp", "/.well-known/*", "/oauth/*", "/device", "/device/"]
+    "run_worker_first": ["/*", "!/assets/*", "!/fonts/*", "!/favicon.svg", "!/apple-touch-icon.png"]
   },
   "d1_databases": [{ "binding": "DB", "database_name": "bellhop", "database_id": "local", "migrations_dir": "migrations" }],
   "r2_buckets": [{ "binding": "MEDIA", "bucket_name": "bellhop-media" }],

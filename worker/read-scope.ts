@@ -2,7 +2,11 @@ import type { App } from "../shared/api"
 import { missing, sql } from "./core"
 import type { Ctx } from "./core"
 
-export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url`
+export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url,a.public`
+export type AppRow<T extends { public: boolean } = App> = Omit<T, "public"> & { public: number }
+export function fromAppRow<T extends { public: number }>({ public: listed, ...rest }: T) {
+  return { ...rest, public: !!listed }
+}
 // HTTP reads know a slug; MCP and mutations already have a validated app ID. In the former
 // case, resolve the app and viewer role in the same D1 batch as the child queries.
 export const bySlug = (c: Ctx) => ({ slug: c.req.param("slug")!, user: c.var.user?.id ?? null, guest: c.var.guestId })
@@ -23,7 +27,8 @@ export async function readBatch<T extends unknown[]>(
   statements: { [K in keyof T]: D1PreparedStatement }
 ) {
   const result = await env.DB.batch(typeof scope === "string" ? statements : [appStatement(env, scope), ...statements])
-  const app = typeof scope === "string" ? null : ((result.shift()!.results[0] as App | undefined) ?? missing())
+  const app =
+    typeof scope === "string" ? null : fromAppRow((result.shift()!.results[0] as AppRow | undefined) ?? missing())
   // Each caller describes the row type of its statements in order; D1 types all batch results alike.
   return { app, data: result.map((r) => r.results) as { [K in keyof T]: T[K][] } }
 }

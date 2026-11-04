@@ -26,7 +26,7 @@ import type { AttachmentRow } from "./issues"
 export interface Access {
   env: Env
   ctx: Work
-  app: Pick<App, "id" | "slug" | "name">
+  app: Pick<App, "id" | "slug" | "name" | "public">
   actor: Actor
   roles?: ReturnType<typeof appRoles>
   guestHash?: string

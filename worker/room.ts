@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers"
 import type { LiveEvent } from "../shared/api"
 import { expireActivity, refreshActivity } from "./events"
-import { readActivity } from "./issues"
+import { publicFeedIssue, readPresence } from "./issues"
 
 export class Room extends DurableObject<Env> {
   constructor(ctx: DurableObjectState, env: Env) {
@@ -32,7 +32,7 @@ export class Room extends DurableObject<Env> {
         { status: 426 }
       )
     const issueId = this.issueId
-    const activity = issueId ? await readActivity(this.env, issueId) : null
+    const activity = issueId ? ((await readPresence(this.env, issueId))?.activity ?? null) : null
     const [client, server] = Object.values(new WebSocketPair()) as [WebSocket, WebSocket]
     this.ctx.acceptWebSocket(server, [issueId ? "issue" : "app"])
     server.serializeAttachment({ at: Date.now() })
@@ -60,10 +60,25 @@ export class Room extends DurableObject<Env> {
     this.pending = next.catch(() => {})
     return next
   }
+  // A queued write can arrive after an admin unlists its workspace. Never trust that write's
+  // payload in the global room: re-read the public projection immediately before broadcasting.
+  refreshFeed(issueId: string, type: "feed.issue" | "activity") {
+    return this.serialize(async () => {
+      if (this.ctx.id.name !== "feed" || !this.ctx.getWebSockets().length) return
+      if (type === "feed.issue") {
+        const issue = await publicFeedIssue(this.env, issueId)
+        if (issue) this.publish([{ type, issue }])
+      } else {
+        const presence = await readPresence(this.env, issueId, undefined, true)
+        if (presence) this.publish([{ type, issue_id: issueId, activity: presence.activity }])
+      }
+    })
+  }
   refreshPresence(appId: string, issueId: string) {
     return this.serialize(() =>
       refreshActivity(
         this.env,
+        this.ctx,
         appId,
         issueId,
         (e) => this.publish([e]),
@@ -80,7 +95,7 @@ export class Room extends DurableObject<Env> {
     return this.serialize(async () => {
       const scope = await this.ctx.storage.get<{ appId: string; issueId: string }>("scope")
       if (scope) {
-        const next = await expireActivity(this.env, scope.appId, scope.issueId, (e) => this.publish([e]))
+        const next = await expireActivity(this.env, this.ctx, scope.appId, scope.issueId, (e) => this.publish([e]))
         if (next) await this.ctx.storage.setAlarm(next)
       }
     })

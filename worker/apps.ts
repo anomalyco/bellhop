@@ -6,13 +6,12 @@ import { guestActor } from "./auth"
 import { can, requireTeam, teamRole } from "./permissions"
 import { changeMember, invite, roster } from "./members"
 import { configureWebhook, rotateWebhook, testWebhook } from "./webhooks"
-import { appCols, appIdSQL, appKey, appStatement, bySlug, readBatch } from "./read-scope"
-import type { ReadScope } from "./read-scope"
+import { appCols, appIdSQL, appKey, appStatement, bySlug, fromAppRow, readBatch } from "./read-scope"
+import type { AppRow, ReadScope } from "./read-scope"
 export { appCols } from "./read-scope"
 
 export async function loadApp(c: Ctx) {
-  const app = await appStatement(c.env, bySlug(c)).first<App>()
-  if (!app) missing()
+  const app = fromAppRow((await appStatement(c.env, bySlug(c)).first<AppRow>()) ?? missing())
   c.set("app", app)
   c.set(
     "actor",
@@ -131,13 +130,15 @@ export const apps = new Hono<Bindings>()
 apps.get("/api/apps", async (c) => {
   if (!c.var.user) fail(401, "sign_in", "Sign in to list your apps")
   return c.json(
-    await rows<App>(
-      sql(
-        c.env,
-        `SELECT ${appCols},m.role FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
-        c.var.user.id
+    (
+      await rows<AppRow>(
+        sql(
+          c.env,
+          `SELECT ${appCols},m.role FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
+          c.var.user.id
+        )
       )
-    )
+    ).map(fromAppRow)
   )
 })
 apps.post("/api/apps", async (c) => {
@@ -156,17 +157,19 @@ export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unk
     description: str(b.description ?? "", "description", 4000, true),
     created_at: now(),
     icon_url: null,
-    role: "owner"
+    role: "owner",
+    public: b.public === undefined ? false : publicFlag(b.public)
   }
   const q = [
     sql(
       c.env,
-      "INSERT INTO apps(id,slug,name,description,created_at) VALUES(?,?,?,?,?)",
+      "INSERT INTO apps(id,slug,name,description,created_at,public) VALUES(?,?,?,?,?,?)",
       app.id,
       slug,
       app.name,
       app.description,
-      app.created_at
+      app.created_at,
+      Number(app.public)
     ),
     sql(
       c.env,
@@ -201,11 +204,22 @@ export async function createApp(c: Ctx, u: { id: string }, b: Record<string, unk
   await c.env.DB.batch(q)
   return detail(c, grant ? { ...app, role: "admin" } : app)
 }
+function publicFlag(v: unknown) {
+  if (typeof v !== "boolean") bad("public must be a boolean")
+  return v
+}
 export async function updateApp(env: Env, app: App, b: Record<string, unknown>): Promise<App> {
-  const name = str(b.name === undefined ? app.name : b.name, "name", 120).trim(),
-    description = str(b.description === undefined ? app.description : b.description, "description", 4000, true)
-  await sql(env, "UPDATE apps SET name=?,description=? WHERE id=?", name, description, app.id).run()
-  return { ...app, name, description }
+  // An unrelated edit must not undo a concurrent decision to unlist the workspace.
+  const changed = await sql(
+    env,
+    `UPDATE apps SET name=coalesce(?,name),description=coalesce(?,description),public=coalesce(?,public)
+    WHERE id=? RETURNING name,description,public`,
+    b.name === undefined ? null : str(b.name, "name", 120).trim(),
+    b.description === undefined ? null : str(b.description, "description", 4000, true),
+    b.public === undefined ? null : Number(publicFlag(b.public)),
+    app.id
+  ).first<{ name: string; description: string; public: number }>()
+  return { ...app, ...fromAppRow(changed ?? missing()) }
 }
 apps.patch("/api/apps/:slug", async (c) => {
   requireTeam(c, "setup")

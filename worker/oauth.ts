@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 import type { OAuthRequest } from "../shared/api"
 import { attachScopes, createFlag, defaultRole, selection } from "./agents"
+import { page } from "./pages"
 import { bad, body, denied, fail, missing, rows, secret, sha256, sql, uid } from "./core"
 import type { Bindings, Ctx } from "./core"
 
@@ -117,8 +118,7 @@ oauth.onError((e, c) => {
 // The pages themselves belong to the SPA. Protect the actual HTML document (not just the JSON
 // endpoints) against framing consent buttons and leaking a device/user code via Referer.
 oauth.on("GET", ["/oauth/consent", "/oauth/consent/", "/device", "/device/"], async (c) => {
-  const asset = await c.env.ASSETS.fetch(c.req.raw)
-  const res = new Response(asset.body, asset)
+  const res = await page(c)
   res.headers.append("Content-Security-Policy", "frame-ancestors 'none'")
   res.headers.set("X-Frame-Options", "DENY")
   res.headers.set("Referrer-Policy", "no-referrer")
