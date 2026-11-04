@@ -34,6 +34,7 @@ curl -X POST https://blhp.app/api/apps/acme/metadata \
 | Build your own chat, or sync help desk requests with your backend | The help desk API v1 and its JS SDK | [Public API](/docs/api) |
 | Attach logs and system specs to bug reports from your app | The report metadata API and a report key | [Report metadata](/docs/reports) |
 | Have an agent triage, answer and close issues | MCP, with OAuth or a token agent | [Agents over MCP](/docs/mcp) |
+| Run an agent on a help desk, with held replies and signed approvals for refunds and account changes | MCP, request types and approval tokens | [Running support agents](/docs/agents) |
 | React to new issues, comments and status changes | Webhooks | [Webhooks](/docs/webhooks) |
 | Follow a workspace in a feed reader, embed an issue, show link previews | Atom, oEmbed and preview images | [Feeds, embeds and previews](/docs/feeds) |
 
@@ -102,6 +103,7 @@ Limits are counted per minute, per IP address, per key or per agent. When you go
 - [Public API](/docs/api): keys, end-user sessions, conversations, uploads, realtime and the server API, with the full reference.
 - [Report metadata](/docs/reports): upload diagnostics from an app and open the review page.
 - [Agents over MCP](/docs/mcp): connect an agent, roles, and every tool.
+- [Running support agents](/docs/agents): routing, autonomy, approvals and verifying approval tokens.
 - [Webhooks](/docs/webhooks): events, payloads and signature verification.
 - [Feeds, embeds and previews](/docs/feeds): Atom, oEmbed and link-preview images.
 

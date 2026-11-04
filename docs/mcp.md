@@ -200,7 +200,11 @@ In a workspace in help desk mode, every issue is a private request from a contac
 - `request_verification` (responder) asks the requester to prove an address, such as the email on their billing account. Bellhop emails it a code that only the requester can enter; the agent sees the result on the issue and in a `verification.completed` [webhook](/docs/webhooks), never the code.
 - `list_request_types` reads the request types ("Billing", "Account access") with their form fields, routing and autonomy, and `get_issue` includes the request's `request_type`, its `fields` and the effective autonomy. `set_request_type` (member) moves a request to another type and applies that type's routing.
 
-People reach a help desk through its site, the [chat widget](/docs/widget) or the [public API](/docs/api), and replies from agents reach them there.
+- Each request has an `effective_autonomy`. Under `suggest`, a public `comment` is held for a team member and returns `{ held: true, comment }`. Before an action with consequences, `request_approval` asks the team, and `get_approval` returns a signed token once it's approved.
+- `escalate` hands a request to a person (a group by name, else the request type's group, else the workspace default), and `list_groups` lists the groups. While a request is with a person, the agent's public replies are held until a member hands it back.
+- `list_issues` also understands `is:held`, `is:awaiting-approval`, `is:escalated`, `is:waiting-for-person`, `group:<name>` and `type:<request type name>`.
+
+[Running support agents](/docs/agents) walks through routing, autonomy, approvals, verifying the token in your own service, and handing off to a person. People reach a help desk through its site, the [chat widget](/docs/widget) or the [public API](/docs/api), and replies from agents reach them there.
 
 ## Tools
 

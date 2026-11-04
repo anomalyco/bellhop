@@ -184,6 +184,25 @@ main {
 .prose li + li {
   margin-top: 6px;
 }
+/* A rule to remember, written as a Markdown blockquote: a quiet raised note on the code blocks' surface */
+.prose blockquote {
+  margin: 0 0 20px;
+  padding: 14px 16px 16px;
+  border-radius: var(--radius);
+  background: var(--layer-1);
+}
+.prose blockquote::before {
+  content: "Important";
+  display: block;
+  margin-bottom: 6px;
+  color: var(--fg-faint);
+  font-family: var(--font-accent);
+  font-size: var(--text-small);
+  line-height: 16px;
+}
+.prose blockquote p:last-child {
+  margin-bottom: 0;
+}
 .prose li::marker {
   color: var(--fg-faint);
 }

@@ -192,4 +192,6 @@ const server = createClient({ key: process.env.BELLHOP_SECRET_KEY })
 const { token } = await server.createSession({ id: user.id, email: user.email, email_verified: true, name: user.name })
 ```
 
+A custom chat can offer "Talk to a person" with `` session.request({ method: "POST", path: `/conversations/${id}/escalate`, body: { reason } }) ``: the conversation's `with_person` then turns `true` (see [Talking to a person](/docs/api#talking-to-a-person)). The built-in widget doesn't have that button yet.
+
 Errors are `BellhopError`s with the API's `status` and `code`. Every call is described in the [API reference](/docs/api#reference).
