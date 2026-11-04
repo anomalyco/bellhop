@@ -132,6 +132,17 @@ const messages: Translation<typeof en> = {
   "field.number": "Gib eine Zahl ein.",
   "field.option": "Wähle eine der Optionen.",
   "field.invalid": "Prüfe dieses Feld.",
+
+  // Asking for a person instead of the assistant, in an open conversation
+  "handoff.action": "Mit einem Menschen sprechen",
+  "handoff.reason": "Wobei brauchst du Hilfe?",
+  "handoff.reasonHint": "Optional",
+  "handoff.send": "Nach einem Menschen fragen",
+  "handoff.cancel": "Abbrechen",
+  "handoff.sending": "Wird angefragt…",
+  "handoff.status": "Beim Team",
+  "handoff.already": "Du hast in diesem Chat schon nach einem Menschen gefragt.",
+  "event.escalated": "Ab hier kümmert sich ein Mensch darum",
 }
 
 export default messages

@@ -132,6 +132,17 @@ const messages: Translation<typeof en> = {
   "field.number": "请输入数字。",
   "field.option": "请选择其中一个选项。",
   "field.invalid": "请检查此字段。",
+
+  // Asking for a person instead of the assistant, in an open conversation
+  "handoff.action": "联系人工客服",
+  "handoff.reason": "你需要哪方面的帮助？",
+  "handoff.reasonHint": "选填",
+  "handoff.send": "请求人工客服",
+  "handoff.cancel": "取消",
+  "handoff.sending": "正在请求…",
+  "handoff.status": "人工客服处理中",
+  "handoff.already": "你已在此对话中请求过人工客服。",
+  "event.escalated": "接下来将由人工客服为你处理",
 }
 
 export default messages

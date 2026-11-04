@@ -143,3 +143,11 @@ export function uploadErrorKind(e: unknown): "too_large" | "quota" | "type" | "r
   if (e.status === 429) return "rate_limited"
   return null
 }
+
+/** Why "Talk to a person" failed: already with a person (or asked before), or too many asks; null otherwise. */
+export function escalateErrorKind(e: unknown): "already" | "rate_limited" | null {
+  if (!(e instanceof BellhopError)) return null
+  if (e.code === "handoff_unavailable") return "already"
+  if (e.status === 429) return "rate_limited"
+  return null
+}

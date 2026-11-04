@@ -256,6 +256,16 @@ export class SessionClient {
     return this.request({ method: "POST", path: `/conversations/${encodeURIComponent(conversationId)}/messages`, body: input, ...options })
   }
 
+  /**
+   * "Talk to a person": hands the conversation to the team, with an optional reason for them. Returns the conversation
+   * with `with_person: true`, and an `escalated` item appears in it. Once per conversation: asking again, or while
+   * a person already has it, is 409 handoff_unavailable; too many asks are 429. See `escalateErrorKind`.
+   */
+  escalate(conversationId: string, options: { reason?: string } = {}): Promise<Conversation> {
+    const reason = options.reason?.trim()
+    return this.request({ method: "POST", path: `/conversations/${encodeURIComponent(conversationId)}/escalate`, body: reason ? { reason } : {} })
+  }
+
   /** Marks everything up to and including an item as read. */
   async markRead(conversationId: string, itemId: string): Promise<void> {
     await this.request({ method: "POST", path: `/conversations/${encodeURIComponent(conversationId)}/read`, body: { item_id: itemId } })

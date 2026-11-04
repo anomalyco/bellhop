@@ -361,12 +361,12 @@ It returns the request, as `get_issue` does. Abridged:
 ```
 
 - **Which group.** The `group` named in the call (the agent can read them with `list_groups`), else the group the request type routes to, else the workspace's default group. With none of these, the request waits unassigned and the workspace admins are told.
-- **Who.** The group picks one available member, in turn or whoever is least busy, within its working hours, assigns them and emails them. Outside its hours, or when everyone is away, `escalation.waiting` says `hours` or `nobody_available` and it's assigned as soon as someone can take it. If the group has a response window and the assignee hasn't replied publicly by `respond_by`, it passes once to the next member.
-- **The requester** sees only that a person will take it from here, never the reason or the group.
+- **Who.** The group picks an available member, in turn or whoever is least busy. Outside working hours the request waits quietly until the next opening. If nobody is available during working hours, the admins are told once. When an assigned member misses the response window, the request passes once if there is an alternative. If the next window is missed, or there is no alternative, the assignee gets one reminder and the admins are told once. The timer then stops. Handoff email is limited to 20 messages per member per UTC day.
+- **The requester** sees that a person will take it from here, not the assignee, reason or group. They see who actually replies on each reply.
 - **The agent stays on.** It can still read the request, write internal notes and triage, but its public replies are held for a person to send, whatever the autonomy. It can't escalate the same request again while it's with a person (`409 {{handoff.code}}`).
 - **Handing back.** When the person is done, a team member hands the request back to agents (in the request, or `DELETE /api/apps/<slug>/issues/<number>/escalation`). `escalation` becomes `null` and the agent's replies go out under its normal autonomy again.
 
-Webhooks get `issue.escalated`, with the same `escalation`, when a request is handed to a person and again if it passes to the next member, and `issue.handed_back` when it comes back. Requesters can ask for a person themselves through the public API, for example from a "Talk to a person" button in your own chat: see [Talking to a person](/docs/api#talking-to-a-person).
+Webhooks get `issue.escalated`, with the same `escalation`, when a request is handed to a person and again if it passes to the next member, and `issue.handed_back` when it comes back. Requesters can ask for a person themselves, with **Talk to a person** in the [chat widget](/docs/widget#behavior) or through the [public API](/docs/api#talking-to-a-person).
 
 ## Verifying an email
 

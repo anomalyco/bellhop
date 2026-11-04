@@ -33,7 +33,7 @@ export interface Subscription {
   close(): void
 }
 
-type Seen = { updated_at: string; unread: number; status: string; last: string | null }
+type Seen = { updated_at: string; unread: number; status: string; with_person?: boolean; last: string | null }
 
 export function subscribe(session: SessionClient, handler: RealtimeHandler, options: SubscribeOptions = {}): Subscription {
   const pollInterval = options.pollInterval ?? 4000,
@@ -73,7 +73,7 @@ export function subscribe(session: SessionClient, handler: RealtimeHandler, opti
     }
   }
   const remember = (c: Conversation) =>
-    seen.set(c.id, { updated_at: c.updated_at, unread: c.unread, status: c.status, last: c.last_item?.id ?? null })
+    seen.set(c.id, { updated_at: c.updated_at, unread: c.unread, status: c.status, with_person: c.with_person, last: c.last_item?.id ?? null })
   const hidden = () => g.document?.visibilityState === "hidden"
   const later = (fn: () => void, ms: number) => timers.push(setTimeout(fn, ms))
   const clearTimers = () => (timers.forEach(clearTimeout), (timers = []))
@@ -88,7 +88,7 @@ export function subscribe(session: SessionClient, handler: RealtimeHandler, opti
         const page = await session.listConversations()
         for (const c of page.data) {
           const before = seen.get(c.id)
-          if (!before || before.updated_at !== c.updated_at || before.unread !== c.unread || before.status !== c.status)
+          if (!before || before.updated_at !== c.updated_at || before.unread !== c.unread || before.status !== c.status || before.with_person !== c.with_person)
             emit({ type: "conversation.updated", conversation: c })
           else remember(c)
         }

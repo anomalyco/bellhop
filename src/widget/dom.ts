@@ -28,5 +28,6 @@ export const icons = {
   back: () => svg('<path d="M15 5l-7 7 7 7"/>'),
   send: () => svg('<path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/>'),
   plus: () => svg('<path d="M12 5v14M5 12h14"/>'),
+  person: () => svg('<circle cx="12" cy="8" r="3.5"/><path d="M5 20a7 7 0 0 1 14 0"/>'),
   clip: () => svg('<path d="m20 11.5-8.2 8.2a5 5 0 0 1-7.1-7.1l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7l-8.6 8.6a1.7 1.7 0 0 1-2.4-2.4l7.9-7.9"/>'),
 }

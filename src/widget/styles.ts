@@ -133,6 +133,16 @@ input,textarea{cursor:text}
 .field select.input{appearance:auto}
 .field .help{color:var(--bw-muted);font-size:13px}
 .input[aria-invalid=true]{border-color:var(--bw-danger)}
+.handoff{flex:none;padding:0 8px;display:flex;flex-direction:column}
+.handoff[hidden],.handoff:empty{display:none}
+.handoff-open{align-self:flex-start;gap:6px;font-size:13px;padding:0 8px}
+.handoff-open svg{width:16px;height:16px}
+.handoff-status{display:flex;align-items:center;gap:8px;min-height:36px;padding:0 8px;font-size:13px;color:var(--bw-muted)}
+.handoff-status .dot{width:6px;height:6px;border-radius:50%;background:var(--bw-ok);flex:none}
+.handoff-form{display:flex;flex-direction:column;gap:6px;padding:8px 4px}
+.handoff-form label{font-size:13px;font-weight:600}
+.handoff-form .input{flex:none;width:100%}
+.handoff-actions{display:flex;justify-content:flex-end;gap:6px}
 .attachments{flex:none;display:flex;flex-wrap:wrap;gap:6px;padding:8px 8px 0;border-top:1px solid var(--bw-border)}
 .attachments .err{flex-basis:100%;padding:0 4px 2px}
 .chip{display:inline-flex;align-items:center;max-width:100%;min-height:44px;padding-left:12px;border-radius:6px;background:var(--bw-surface);font-size:13px}

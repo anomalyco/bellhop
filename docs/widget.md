@@ -141,6 +141,7 @@ It's translated into {{locales}}. Without `locale`, it uses the signed-in user's
 - Conversations open at the newest messages; older ones load as you scroll up.
 - Replies, typing and an agent's activity ("Looking up your invoice…") arrive live. Without a socket, it polls.
 - A message that fails to send stays in the thread with a Retry button, and is never sent twice.
+- In an open conversation, **Talk to a person** hands it to your team, with an optional line about what they need. The thread then says "A person will take it from here" and the button becomes "With the team". People can ask once per conversation; your team, an agent or another tab asking flips it too, live. See [Handing off to a person](/docs/agents#handing-off-to-a-person) for where it goes.
 - Files: images up to {{v1.uploadImage}}, videos up to {{v1.uploadVideo}}, other files up to {{v1.uploadFile}}.
 - Long-lived pages stay signed in: the session is refreshed before it expires, for up to {{v1.sessionCap}}.
 - The loader at `/widget/v1.js` is cached only briefly, and recovers by itself if a deploy replaced the version it points to.
@@ -150,7 +151,7 @@ It's translated into {{locales}}. Without `locale`, it uses the signed-in user's
 The widget is built only on the JS SDK, so you can build your own chat UI, or use the API from Node, with the same calls. Import it as an ES module:
 
 ```ts
-import { createClient, BellhopError, uploadErrorKind } from "https://blhp.app/sdk/v1.js"
+import { createClient, BellhopError, escalateErrorKind, uploadErrorKind } from "https://blhp.app/sdk/v1.js"
 
 const client = createClient({ key: "bh_pk_…" })
 const workspace = await client.workspace() // name, icon_url, which sign-ins this origin offers
@@ -181,6 +182,15 @@ try {
   if (uploadErrorKind(e) === "too_large") alert("That file is too big.")
   else throw e
 }
+
+// "Talk to a person": once per conversation; afterwards conversation.with_person is true
+try {
+  const handed = await session.escalate(conversation.id, { reason: "My account is locked" })
+  showStatus(handed.with_person ? "With the team" : "")
+} catch (e) {
+  if (escalateErrorKind(e) === "already") showStatus("You've already asked for a person here.")
+  else throw e
+}
 ```
 
 From your server, the same SDK starts sessions with a secret key:
@@ -192,6 +202,6 @@ const server = createClient({ key: process.env.BELLHOP_SECRET_KEY })
 const { token } = await server.createSession({ id: user.id, email: user.email, email_verified: true, name: user.name })
 ```
 
-A custom chat can offer "Talk to a person" with `` session.request({ method: "POST", path: `/conversations/${id}/escalate`, body: { reason } }) ``: the conversation's `with_person` then turns `true` (see [Talking to a person](/docs/api#talking-to-a-person)). The built-in widget doesn't have that button yet.
+`session.escalate(id, { reason })` is the widget's "Talk to a person": it returns the conversation with `with_person: true`, and live updates bring an `escalated` item to every open tab. `escalateErrorKind(e)` says `"already"` (asked before, or a person already has it) or `"rate_limited"`. See [Talking to a person](/docs/api#talking-to-a-person).
 
 Errors are `BellhopError`s with the API's `status` and `code`. Every call is described in the [API reference](/docs/api#reference).

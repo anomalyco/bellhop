@@ -205,7 +205,7 @@ curl -X POST https://api.blhp.app/v1/conversations/$CONVERSATION/escalate \
   -d '{"reason": "I would like to talk to a person."}'
 ```
 
-It returns the conversation with `with_person: true`, and an `escalated` event appears in its items. Abridged:
+It returns the conversation with `with_person: true`, and an `escalated` event appears in its items. For an end-user session, `assignee` is always `null`; assignment events do not identify the member either. The workspace view still includes the assignee. Abridged:
 
 ```json
 {
@@ -223,7 +223,7 @@ It returns the conversation with `with_person: true`, and an `escalated` event a
 }
 ```
 
-A person from the right group is assigned and emailed (see [Handing off to a person](/docs/agents#handing-off-to-a-person)). The requester never sees the team's reasons or groups, only that a person has it. A session can ask once per conversation; asking again, or while it's already with a person, is `409 {{handoff.code}}`. With a secret key, your server escalates as the workspace.
+A person from the right group is assigned and emailed (see [Handing off to a person](/docs/agents#handing-off-to-a-person)). The requester never sees the team's reasons or groups, only that a person has it. A session can ask once per conversation; asking again, or while it's already with a person, is `409 {{handoff.code}}`. With a secret key, your server escalates as the workspace. The [chat widget](/docs/widget#behavior) has this as **Talk to a person**, and the SDK as `session.escalate(id, { reason })`.
 
 ### Request types
 
