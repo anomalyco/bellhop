@@ -1032,40 +1032,29 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
     app = a.app.id,
     env = a.env
   if (b.hide_content !== undefined && typeof b.hide_content !== "boolean") bad("Invalid hide_content")
-  const u = await sql(env, "SELECT id,name,avatar_url FROM users WHERE id=?", actorId).first<{
-    id: string
-    name: string
-    avatar_url: string | null
-  }>()
-  let actor: Actor
-  if (u) actor = { type: "member", ...u, role: null }
-  else {
-    const raw = await sql(
-      env,
-      `SELECT author FROM issues WHERE app_id=?1 AND json_extract(author,'$.type')='guest' AND json_extract(author,'$.id')=?2
-      UNION ALL SELECT c.author FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?1 AND json_extract(c.author,'$.type')='guest' AND json_extract(c.author,'$.id')=?2 LIMIT 1`,
-      app,
-      actorId
-    ).first<string>("author")
-    if (!raw && !/^[a-f0-9]{32}$/.test(actorId)) missing()
-    actor = raw ? JSON.parse(raw) : { type: "guest", id: actorId, handle: `guest-${actorId.slice(0, 4)}`, name: null }
+  const raw = await sql(
+    env,
+    `SELECT author FROM issues WHERE app_id=?1 AND json_extract(author,'$.type')!='agent' AND json_extract(author,'$.id')=?2
+      UNION ALL SELECT c.author FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?1 AND json_extract(c.author,'$.type')!='agent' AND json_extract(c.author,'$.id')=?2 LIMIT 1`,
+    app,
+    actorId
+  ).first<string>("author")
+    const actor: Actor = JSON.parse(raw ?? missing())
     if (actor.type === "guest") actor.name ??= null
-  }
   const hidden = JSON.stringify({ reason: "spam", by: a.actor, at }),
     target = "SELECT id FROM issues WHERE app_id=?1",
     auth = "json_extract(author,'$.id')=?2"
   const q = [
     sql(
       env,
-      `INSERT INTO blocks SELECT ?,?,?,?, ?,? WHERE NOT EXISTS(SELECT 1 FROM members WHERE app_id=? AND user_id=?)`,
+      `INSERT INTO blocks SELECT ?1,?2,?3,?4,?5,?6 WHERE NOT EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?3) AND
+       (EXISTS(SELECT 1 FROM issues WHERE app_id=?2 AND json_extract(author,'$.id')=?3) OR EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?2 AND json_extract(c.author,'$.id')=?3))`,
       id,
       app,
       actorId,
       JSON.stringify(actor),
       JSON.stringify(a.actor),
-      at,
-      app,
-      actorId
+      at
     )
   ]
   if (b.hide_content) {

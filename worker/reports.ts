@@ -67,7 +67,7 @@ async function jsonUpload(c: Ctx) {
   } catch {
     bad("Invalid report JSON")
   }
-  return input(parsed)
+  return { payload: input(parsed), bytes: size }
 }
 function fields(value: unknown, limit: number) {
   if (value === undefined) return {}
@@ -114,7 +114,7 @@ export async function uploadReport(c: Ctx) {
     ).first<{ id: string; app_id: string }>()
   if (!key) return invalid()
   await enforce(c, "RL_WRITE", `report-key:${key.id}`)
-  const b = await jsonUpload(c),
+  const { payload: b, bytes } = await jsonUpload(c),
     id = "md_" + secret(),
     at = now(),
     expires = new Date(Date.now() + ttl).toISOString(),
@@ -128,6 +128,16 @@ export async function uploadReport(c: Ctx) {
     }
   if (new TextEncoder().encode(JSON.stringify([system, context])).length > 256 * 1024) tooLarge()
   await env.DB.batch([
+    // Reserve the accepted wire bytes and upload slot together, before writing any R2
+    // objects. Review/deletion never refunds this daily abuse budget.
+    sql(
+      env,
+      `INSERT INTO report_key_daily(key_id,day,uploads,bytes) SELECT id,date('now'),1,? FROM report_keys WHERE id=?
+      ON CONFLICT(key_id) DO UPDATE SET day=excluded.day,uploads=CASE WHEN day=excluded.day THEN uploads+1 ELSE 1 END,
+        bytes=CASE WHEN day=excluded.day THEN bytes+excluded.bytes ELSE excluded.bytes END`,
+      bytes,
+      key.id
+    ),
     sql(
       env,
       `INSERT INTO report_metadata(id,app_id,title,message,source,system,context,fingerprint,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?)`,

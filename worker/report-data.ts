@@ -128,14 +128,22 @@ export async function purgeReportObjects(env: Env, keys: string[]) {
   ).run()
 }
 export async function expireReports(env: Env) {
-  await sql(
-    env,
-    "DELETE FROM report_metadata WHERE id IN(SELECT id FROM report_metadata WHERE expires_at<=? ORDER BY expires_at LIMIT 100)",
-    now()
-  ).run()
-  const gc = await sql(env, "SELECT object_key FROM report_log_gc LIMIT 500").all<{ object_key: string }>()
-  await purgeReportObjects(
-    env,
-    gc.results.map((r) => r.object_key)
-  )
+  const until = Date.now() + 20000
+  for (let i = 0; i < 32 && Date.now() < until; i++) {
+    const gc = await sql(env, "SELECT object_key FROM report_log_gc LIMIT 1000").all<{ object_key: string }>()
+    if (gc.results.length) {
+      await purgeReportObjects(
+        env,
+        gc.results.map((r) => r.object_key)
+      )
+      continue
+    }
+    const r = await sql(
+      env,
+      "DELETE FROM report_metadata WHERE id IN(SELECT id FROM report_metadata WHERE expires_at<=? ORDER BY expires_at LIMIT 250)",
+      now()
+    ).run()
+    if (!r.meta.changes) break
+  }
+  await sql(env, "DELETE FROM confirmation_daily WHERE day<date('now','-1 day')").run()
 }

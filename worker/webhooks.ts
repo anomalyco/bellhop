@@ -7,8 +7,18 @@ export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
   const url = URL.parse(str(value, "url", 4096))
   if (!url || url.username || url.password) bad("Invalid webhook URL")
-  const local = env.DEV_LOGIN === "1" && ["localhost", "127.0.0.1"].includes(url.hostname)
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) bad("Webhook URL must use HTTPS")
+  const host = url.hostname.toLowerCase().replace(/\.+$/, ""),
+    own = (env.APP_DOMAIN || "blhp.app").toLowerCase().replace(/\.+$/, "")
+  if (
+    url.protocol !== "https:" ||
+    !host.includes(".") ||
+    /^[\d.]+$/.test(host) ||
+    !host.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
+    ["localhost", "local", "internal", "localdomain", "home.arpa", "blhp.app", own].some(
+      (s) => host === s || host.endsWith("." + s)
+    )
+  )
+    bad("Webhook must use HTTPS on an external domain")
   return url.href
 }
 
@@ -217,7 +227,16 @@ async function deliver(env: Env, message: Message<Job>) {
   ).first<{ payload: string; event: string; url: string | null; secret: string }>()
   if (!delivery) return message.ack()
   const { payload, event, url, secret } = delivery
-  if (!url || (await sha256(url)) !== destinationHash) {
+  // Revalidate the persisted destination as well as its fingerprint: it may predate this policy.
+  let destination: string | null = null
+  if (url && (await sha256(url)) === destinationHash) {
+    try {
+      destination = webhookUrl(url, env)
+    } catch {
+      /* A forbidden legacy URL is terminal. */
+    }
+  }
+  if (!destination) {
     await sql(env, "UPDATE webhook_deliveries SET status='failed' WHERE id=? AND status='pending'", id).run()
     return message.ack()
   }
@@ -230,7 +249,7 @@ async function deliver(env: Env, message: Message<Job>) {
   const signature = hex(await crypto.subtle.sign("HMAC", key, enc.encode(`${t}.${payload}`)))
   let status: number | null = null
   try {
-    const res = await fetch(webhookUrl(url, env)!, {
+    const res = await fetch(destination, {
       method: "POST",
       body: payload,
       redirect: "manual",
@@ -250,7 +269,11 @@ async function deliver(env: Env, message: Message<Job>) {
 
   // wrangler.jsonc: one initial attempt + max_retries: 6.
   const state =
-    status !== null && status >= 200 && status < 300 ? "delivered" : message.attempts >= 7 ? "failed" : "pending"
+    status !== null && status >= 200 && status < 300
+      ? "delivered"
+      : (status !== null && status >= 300 && status < 400) || message.attempts >= 7
+        ? "failed"
+        : "pending"
   await sql(
     env,
     `UPDATE webhook_deliveries SET status=?,attempts=max(attempts,?),response_status=?

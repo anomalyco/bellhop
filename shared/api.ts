@@ -54,7 +54,13 @@
 //   PATCH  /api/apps/:slug/agents/:id { role }           -> AppAgent           admin; capped at the approver's role
 //   DELETE /api/apps/:slug/agents/:id                    -> { ok: true }       admin; removes this app from the agent
 //                                                                             (an exclusion if it has all workspaces)
-//   POST   /api/apps/:slug/members { email, role? }      -> AppSettings        admin; role defaults to "member"
+//   POST   /api/apps/:slug/members { email, role? }      -> AppSettings        admin; role defaults to "member". An
+//          invitation: nobody joins until they accept it (accounts see it under /api/me/invitations; a new person
+//          accepts after signing in). Pending invitees get no access, no email and no agent access there.
+//   DELETE /api/apps/:slug/members/me                    -> { ok: true }       leave the workspace (not the last owner)
+//   GET    /api/me/invitations                           -> Invitation[]       signed in
+//   POST   /api/me/invitations/:id/accept                -> App                signed in; that invitation's email only
+//   POST   /api/me/invitations/:id/decline               -> { ok: true }
 //   PATCH  /api/apps/:slug/members/:id { role }          -> AppSettings        admin
 //   DELETE /api/apps/:slug/members/:id                   -> AppSettings        admin
 //          Granting, changing or removing admin/owner needs an owner; the last owner can't be removed or demoted.
@@ -306,7 +312,8 @@ export type ModerationReason = "spam" | "abuse" | "off_topic"
 
 export interface Moderation {
   reason: ModerationReason
-  by: Actor
+  /** Redacted for viewers outside the workspace team. */
+  by: Actor | null
   at: string
 }
 
@@ -482,13 +489,22 @@ export interface AppSettings {
   mcp_url: string
 }
 
+/** An invitation to join a workspace, waiting for the invited account to accept or decline. */
+export interface Invitation {
+  id: string
+  app: { slug: string; name: string; icon_url: string | null }
+  role: Role
+  invited_by: { name: string; avatar_url: string | null }
+  created_at: string
+}
+
 export interface Member {
   id: string
   email: string
   name: string | null
   avatar_url: string | null
   role: Role
-  /** False until that email has signed in once. */
+  /** False until the invited person accepts the invitation. */
   joined: boolean
 }
 

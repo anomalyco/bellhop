@@ -25,7 +25,9 @@ export const seesComment = (v: Viewer, hidden: unknown) => v.team || !hidden
 export function commentView(c: Comment, v: Viewer): Comment {
   return {
     ...c,
-    ...(!seesComment(v, c.hidden) ? { body: "", attachments: [], mentions: [] } : {}),
+    ...(!seesComment(v, c.hidden) && c.hidden
+      ? { body: "", attachments: [], mentions: [], hidden: { ...c.hidden, by: null } }
+      : {}),
     viewer_is_author: owns(v, c.author.id)
   }
 }

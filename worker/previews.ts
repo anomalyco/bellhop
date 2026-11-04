@@ -104,7 +104,7 @@ export async function preview(env: Env, slug: string | null, number: string | nu
         (SELECT author FROM comments WHERE issue_id=i.id AND internal=0 AND hidden IS NULL ORDER BY created_at DESC,rowid DESC LIMIT 1) latest,
         (SELECT json_group_array(json_object('name',l.name,'color',l.color) ORDER BY l.name,l.id) FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id) labels,
         t.number tombstone FROM apps a LEFT JOIN issues i ON i.app_id=a.id AND i.number=?1 AND i.private=0 AND i.hidden IS NULL
-        LEFT JOIN issue_tombstones t ON t.app_id=a.id AND t.number=?1 WHERE a.slug=?2`,
+        LEFT JOIN public_issue_tombstones t ON t.app_id=a.id AND t.number=?1 WHERE a.slug=?2`,
             number,
             slug
           ).first<Row>()

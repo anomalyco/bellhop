@@ -7,7 +7,8 @@ export async function roster(env: Env, app: string): Promise<Member[]> {
     sql(
       env,
       `SELECT coalesce(m.user_id,m.id) id,m.email,u.name,u.avatar_url,m.role,m.user_id IS NOT NULL joined FROM members m
-     LEFT JOIN users u ON u.id=m.user_id WHERE m.app_id=? ORDER BY m.role DESC,m.email`,
+     LEFT JOIN users u ON u.id=m.user_id WHERE m.app_id=?1
+     UNION ALL SELECT id,email,NULL,NULL,role,0 FROM workspace_invitations WHERE app_id=?1 ORDER BY role DESC,email`,
       app
     )
   )
@@ -30,12 +31,15 @@ export async function invite(env: Env, app: string, manager: Manager, address: u
     [allowed, args] = gate(app, manager, can(role, "setup"))
   const r = await sql(
     env,
-    `INSERT INTO members(id,app_id,email,user_id,role) SELECT ?,?,?,(SELECT id FROM users WHERE email=?),? WHERE ${allowed}`,
+    `INSERT INTO workspace_invitations(id,app_id,email,role,invited_by) SELECT ?,?,?,?,${manager.agent ? "(SELECT json_object('name',name,'avatar_url',NULL) FROM agents WHERE id=?)" : "(SELECT json_object('name',name,'avatar_url',avatar_url) FROM users WHERE id=?)"}
+     WHERE NOT EXISTS(SELECT 1 FROM members WHERE app_id=? AND email=?) AND ${allowed}`,
     uid(),
     app,
     e,
-    e,
     role,
+    manager.agent ?? manager.user,
+    app,
+    e,
     ...args
   ).run()
   if (!r.meta.changes) denied()
@@ -51,16 +55,17 @@ export async function changeMember(
   const byId = "id" in target
   const row = await sql(
     env,
-    `SELECT id,role,user_id FROM members WHERE app_id=? AND ${byId ? "coalesce(user_id,id)" : "email"}=?`,
+    `SELECT id,role,user_id,0 pending FROM members WHERE app_id=?1 AND ${byId ? "coalesce(user_id,id)" : "email"}=?2
+    UNION ALL SELECT id,role,NULL,1 FROM workspace_invitations WHERE app_id=?1 AND ${byId ? "id" : "email"}=?2`,
     app,
     byId ? target.id : email(target.email)
-  ).first<{ id: string; role: Role; user_id: string | null }>()
+  ).first<{ id: string; role: Role; user_id: string | null; pending: number }>()
   if (!row) missing()
   if (transfer && !row.user_id) bad("Ownership can only be transferred to a joined member")
   const [allowed, args] = gate(app, manager, can(row.role, "setup") || can(role, "setup"))
   const r = await sql(
     env,
-    `${role === null ? "DELETE FROM members" : "UPDATE members SET role=?"} WHERE app_id=? AND id=? AND role=? AND ${allowed}`,
+    `${role === null ? "DELETE FROM" : "UPDATE"} ${row.pending ? "workspace_invitations" : "members"} ${role === null ? "" : "SET role=?"} WHERE app_id=? AND id=? AND role=? AND ${allowed}`,
     ...(role === null ? [] : [role]),
     app,
     row.id,

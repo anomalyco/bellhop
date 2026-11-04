@@ -124,7 +124,7 @@ export function IssueFlags({ issue }: { issue: Issue }) {
             Hidden · {reasonText[issue.hidden.reason]}
           </span>
           <span className="flag-text">
-            Only the team can see it. Hidden by {actorName(issue.hidden.by)} <Time iso={issue.hidden.at} />.
+            Only the team can see it.{issue.hidden.by && <> Hidden by {actorName(issue.hidden.by)}</>} <Time iso={issue.hidden.at} />.
           </span>
         </p>
       )}

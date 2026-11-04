@@ -1,5 +1,15 @@
 import { Hono } from "hono"
-import type { Actor, App, AppDetail, AppSettings, Label, Member, Template, WebhookDelivery } from "../shared/api"
+import type {
+  Actor,
+  App,
+  AppDetail,
+  AppSettings,
+  Invitation,
+  Label,
+  Member,
+  Template,
+  WebhookDelivery
+} from "../shared/api"
 import {
   bad,
   body,
@@ -373,6 +383,57 @@ apps.post("/api/apps/:slug/transfer", async (c) => {
     true
   )
   return c.json(await settings(c))
+})
+apps.get("/api/me/invitations", async (c) => {
+  const u = c.var.user ?? fail(401, "sign_in", "Sign in to see invitations")
+  const data = await rows<Omit<Invitation, "app" | "invited_by"> & { app: string; invited_by: string }>(
+    sql(
+      c.env,
+      `SELECT v.id,v.role,v.created_at,v.invited_by,json_object('slug',a.slug,'name',a.name,'icon_url','/icon/'||a.slug||'/'||a.icon_version) app FROM workspace_invitations v JOIN apps a ON a.id=v.app_id WHERE v.email=? ORDER BY v.created_at DESC,v.id`,
+      u.email
+    )
+  )
+  return c.json(data.map((v) => ({ ...v, app: JSON.parse(v.app), invited_by: JSON.parse(v.invited_by) })))
+})
+apps.post("/api/me/invitations/:id/accept", async (c) => {
+  const u = c.var.user ?? fail(401, "sign_in", "Sign in to accept an invitation"),
+    id = c.req.param("id")
+  const [seat, app] = await c.env.DB.batch<AppRow>([
+    sql(
+      c.env,
+      `INSERT INTO members(id,app_id,user_id,email,role) SELECT id,app_id,?,email,role FROM workspace_invitations WHERE id=? AND email=?`,
+      u.id,
+      id,
+      u.email
+    ),
+    sql(
+      c.env,
+      `SELECT ${appCols},m.role FROM apps a JOIN members m ON m.app_id=a.id WHERE m.id=? AND m.user_id=?`,
+      id,
+      u.id
+    ),
+    sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", id, u.email)
+  ])
+  if (!seat!.meta.changes) missing()
+  return c.json(fromAppRow(app!.results[0]!))
+})
+apps.post("/api/me/invitations/:id/decline", async (c) => {
+  const u = c.var.user ?? fail(401, "sign_in", "Sign in to decline an invitation")
+  if (
+    !(await sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", c.req.param("id"), u.email).run())
+      .meta.changes
+  )
+    missing()
+  return c.json({ ok: true })
+})
+apps.delete("/api/apps/:slug/members/me", async (c) => {
+  requireTeam(c, "read")
+  if (
+    !(await sql(c.env, "DELETE FROM members WHERE app_id=? AND user_id=?", c.var.app.id, c.var.user!.id).run()).meta
+      .changes
+  )
+    missing()
+  return c.json({ ok: true })
 })
 apps.delete("/api/apps/:slug/members/:id", async (c) => {
   requireTeam(c, "setup")

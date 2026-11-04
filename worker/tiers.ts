@@ -2,7 +2,7 @@ import { Hono } from "hono"
 import type { Actor, Person, Tier } from "../shared/api"
 import { bad, body, denied, email, ids, input, missing, rows, sql, str, uid } from "./core"
 import type { Bindings } from "./core"
-import { requireTeam } from "./permissions"
+import { can, requireTeam } from "./permissions"
 
 type TierRow = Omit<Tier, "rules"> & {
   label_ids: string
@@ -110,14 +110,16 @@ type PersonRow = {
 async function people(
   env: Env,
   app: string,
+  showEmail: boolean,
   opts: { tier?: string; q?: string; one?: Identity } = {}
 ): Promise<Person[]> {
   const term = opts.q === undefined ? "" : str(opts.q, "query", 256, true).trim().toLowerCase(),
     person = opts.one
   // An edit is activity by its author; a reply by somebody else is not. The MAX row supplies
   // the last guest display name, while registered accounts always use their current profile.
-  const match = (alias: string) =>
-    person ? `AND json_extract(${alias}.author,'$.id')=coalesce(?4,(SELECT id FROM users WHERE email=?5))` : ""
+  const match = (alias: string) => (person ? `AND json_extract(${alias}.author,'$.id')=?4` : "")
+  // Non-admins never receive or search addresses (including guest and pending addresses).
+  // An admin can see an account email only with activity here, or a pending address as entered.
   const data = await rows<PersonRow>(
     sql(
       env,
@@ -125,19 +127,19 @@ async function people(
     SELECT json_extract(i.author,'$.id') aid,i.author,coalesce(i.edited_at,i.created_at) seen,1 opened FROM issues i WHERE i.app_id=?1 AND json_extract(i.author,'$.type')!='agent' ${match("i")}
     UNION ALL SELECT json_extract(c.author,'$.id'),c.author,c.updated_at,0 FROM issues i JOIN comments c ON c.issue_id=i.id WHERE i.app_id=?1 AND json_extract(c.author,'$.type')!='agent' ${match("c")}),
     activity AS (SELECT aid,author,sum(opened) issue_count,max(seen) last_seen_at FROM posts GROUP BY aid),
-    persons(aid,pending) AS (${person ? "SELECT coalesce(?4,(SELECT id FROM users WHERE email=?5)), CASE WHEN ?4 IS NULL AND NOT EXISTS(SELECT 1 FROM users WHERE email=?5) THEN ?5 END" : "SELECT aid,NULL FROM activity UNION SELECT actor_id,pending_email FROM tier_assignments WHERE app_id=?1"}),
-    directory AS (SELECT p.aid actor_id,coalesce(u.email,p.pending) address,CASE WHEN u.id IS NOT NULL THEN json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',NULL)
+    persons(aid,pending) AS (${person ? "SELECT ?4,NULL" : "SELECT aid,NULL FROM activity UNION SELECT actor_id,pending_email FROM tier_assignments WHERE app_id=?1"}),
+    directory AS (SELECT p.aid actor_id,${showEmail ? "coalesce(CASE WHEN s.aid IS NOT NULL THEN u.email END,p.pending)" : "NULL"} address,CASE WHEN u.id IS NOT NULL THEN json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',NULL)
       WHEN p.aid IS NOT NULL THEN coalesce(s.author,json_object('type','guest','id',p.aid,'name',NULL,'handle','guest-'||substr(p.aid,1,4))) END actor,
       coalesce(s.issue_count,0) issue_count,s.last_seen_at,t.id tier_id,t.name tier_name,t.color,t.agents_reply,h.handle old_handle
       FROM persons p LEFT JOIN users u ON u.id=p.aid LEFT JOIN activity s ON s.aid=p.aid
       LEFT JOIN tier_assignments x ON x.app_id=?1 AND (x.actor_id=p.aid OR x.pending_email=p.pending) LEFT JOIN tiers t ON t.id=x.tier_id
       LEFT JOIN mention_handles h ON h.app_id=?1 AND h.actor_id=p.aid WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND (m.user_id=p.aid OR m.email=coalesce(u.email,p.pending))))
     SELECT * FROM directory WHERE (?2 IS NULL OR tier_id=?2) AND (?3='' OR instr(lower(coalesce(json_extract(actor,'$.name'),'')),?3) OR instr(lower(coalesce(json_extract(actor,'$.handle'),old_handle,'')),?3) OR instr(lower(coalesce(address,'')),?3))
-    ${person ? "AND (actor_id=?4 OR address=?5)" : ""} ORDER BY last_seen_at DESC,coalesce(address,actor_id)`,
+    ORDER BY last_seen_at DESC,coalesce(address,actor_id)`,
       app,
       opts.tier ?? null,
       term,
-      ...(person ? [person.actor_id, person.address] : [])
+      ...(person ? [person.actor_id] : [])
     )
   )
   return data.map((r) => {
@@ -150,24 +152,25 @@ async function people(
     return { actor, email: r.address, tier, issue_count: r.issue_count, last_seen_at: r.last_seen_at }
   })
 }
-export async function setTier(env: Env, app: string, b: Record<string, unknown>): Promise<Person> {
+export async function setTier(env: Env, app: string, b: Record<string, unknown>, showEmail: boolean): Promise<Person> {
   if ((b.actor_id === undefined) === (b.email === undefined)) bad("Provide either email or actor_id")
   const identity: Identity = {
       actor_id: b.actor_id === undefined ? null : str(b.actor_id, "actor_id", 64),
       address: b.email === undefined ? null : email(b.email)
     },
     tier = b.tier_id === null ? null : str(b.tier_id, "tier_id", 64)
-  if (tier && !(await sql(env, "SELECT 1 FROM tiers WHERE app_id=? AND id=?", app, tier).first()))
-    bad("Unknown workspace tier")
+  const badge = tier
+    ? ((await sql(env, "SELECT id,name,color FROM tiers WHERE app_id=? AND id=?", app, tier).first<
+        NonNullable<Person["tier"]>
+      >()) ?? bad("Unknown workspace tier"))
+    : null
   const { actor_id: id, address } = identity
-  // Resolve email inside the write transaction, so racing a first sign-in cannot strand a
-  // pending assignment. The guarded upsert also rechecks that the target is outside the team.
-  const who = `WITH person AS (SELECT coalesce(?2,(SELECT id FROM users WHERE email=?3)) aid,?3 address),
-    target AS (SELECT aid,CASE WHEN aid IS NULL THEN address END pending FROM person WHERE NOT EXISTS(SELECT 1 FROM agents WHERE id=aid)
-      AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND (m.user_id=aid OR m.email=coalesce(address,(SELECT email FROM users WHERE id=aid))))
-      AND (address IS NOT NULL OR EXISTS(SELECT 1 FROM users WHERE id=aid)
-        OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=?1 AND json_extract(i.author,'$.id')=aid AND json_extract(i.author,'$.type')='guest')
-        OR EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?1 AND json_extract(c.author,'$.id')=aid AND json_extract(c.author,'$.type')='guest')
+  // Email writes never resolve an account. Only a later authenticated sign-in binds them.
+  const who = `WITH person AS (SELECT ?2 aid,?3 address),
+    target AS (SELECT aid,address pending FROM person WHERE NOT EXISTS(SELECT 1 FROM agents WHERE id=aid)
+      AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND (m.user_id=aid OR m.email=address))
+      AND (address IS NOT NULL OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=?1 AND json_extract(i.author,'$.id')=aid AND json_extract(i.author,'$.type')!='agent')
+        OR EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?1 AND json_extract(c.author,'$.id')=aid AND json_extract(c.author,'$.type')!='agent')
         OR EXISTS(SELECT 1 FROM tier_assignments WHERE app_id=?1 AND actor_id=aid)))`
   const [allowed] = await env.DB.batch([
     sql(env, `${who} SELECT 1 FROM target`, app, id, address),
@@ -194,7 +197,9 @@ export async function setTier(env: Env, app: string, b: Record<string, unknown>)
         ])
   ])
   if (!allowed!.results.length) denied()
-  return (await people(env, app, { one: identity }))[0] ?? missing()
+  if (address)
+    return { actor: null, email: showEmail ? address : null, tier: badge, issue_count: 0, last_seen_at: null }
+  return (await people(env, app, showEmail, { one: identity }))[0] ?? missing()
 }
 export const tierRoutes = new Hono<Bindings>()
 const base = "/api/apps/:slug/tiers"
@@ -220,9 +225,11 @@ tierRoutes.delete(`${base}/:id`, async (c) => {
 })
 tierRoutes.get("/api/apps/:slug/people", async (c) => {
   requireTeam(c, "triage")
-  return c.json(await people(c.env, c.var.app.id, { q: c.req.query("q"), tier: c.req.query("tier") }))
+  return c.json(
+    await people(c.env, c.var.app.id, can(c.var.app.role, "setup"), { q: c.req.query("q"), tier: c.req.query("tier") })
+  )
 })
 tierRoutes.put("/api/apps/:slug/people/tier", async (c) => {
   requireTeam(c, "triage")
-  return c.json(await setTier(c.env, c.var.app.id, await body(c)))
+  return c.json(await setTier(c.env, c.var.app.id, await body(c), can(c.var.app.role, "setup")))
 })

@@ -85,7 +85,7 @@ const parseMentions = (json: string, roles: Roles) =>
 function moderation(json: string | null, roles: Roles): Moderation | null {
   if (!json) return null
   const m: Moderation = JSON.parse(json)
-  return { ...m, by: normalizeActor(m.by, roles) }
+  return { ...m, by: m.by ? normalizeActor(m.by, roles) : null }
 }
 function currentActivity(json: string | null, roles: Roles): Activity | null {
   const activity: Activity | null = json && JSON.parse(json)
@@ -514,7 +514,7 @@ export async function getIssue(
           })
       }
     }
-    if (await sql(env, `SELECT 1 FROM issue_tombstones WHERE ${where}`, key, number).first())
+    if (await sql(env, `SELECT 1 FROM public_issue_tombstones WHERE ${where}`, key, number).first())
       fail(410, "deleted", "Issue permanently deleted")
     missing()
   }

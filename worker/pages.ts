@@ -45,6 +45,23 @@ async function visibility(c: Ctx, slug: string) {
 export async function page(c: Ctx) {
   const slug = workspace(c),
     url = new URL(c.req.url)
+  const vite = c.env.DEV_LOGIN === "1" && !c.env.APP_DOMAIN,
+    nonce = vite ? crypto.randomUUID() : null
+  const wsHost = new URL(c.env.PUBLIC_ORIGIN && !c.env.APP_DOMAIN ? c.env.PUBLIC_ORIGIN : url).host
+  const policy = [
+    "default-src 'self'",
+    `script-src 'self' https://challenges.cloudflare.com https://static.cloudflareinsights.com${vite ? " 'sha256-Z2/iFzh9VMlVkEOar1f/oSHWwQk3ve1qk/C2WdsC4Xk='" : ""}`,
+    `style-src 'self'${nonce ? ` 'nonce-${nonce}'` : ""}`,
+    "font-src 'self'",
+    "img-src 'self' data: blob: https://lh3.googleusercontent.com",
+    "media-src 'self' blob:",
+    `connect-src 'self' wss://${wsHost} ${url.protocol === "http:" ? "ws://" + wsHost + " " : ""}https://challenges.cloudflare.com https://cloudflareinsights.com`,
+    "frame-src https://challenges.cloudflare.com",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "object-src 'none'"
+  ].join("; ")
+  c.header("Content-Security-Policy", policy)
   const subdomain = c.env.APP_DOMAIN && url.hostname.endsWith(`.${c.env.APP_DOMAIN}`)
   const path = !subdomain && slug !== null ? url.pathname.replace(/^\/[^/]+/, "") || "/" : url.pathname
   const capability = /^\/new\/?$/.test(path) ? url.searchParams.get("metadata") : null
@@ -115,6 +132,7 @@ export async function page(c: Ctx) {
     `<link rel="icon" href="${xml(icon ?? "/favicon.svg")}"><link rel="apple-touch-icon" href="${xml(icon ?? "/apple-touch-icon.png")}">`
   ]
   if (noindex) tags.push(meta("robots", "noindex"))
+  if (nonce) tags.push(`<meta property="csp-nonce" nonce="${nonce}">`)
   if (slug && p.code === 200 && (number || /^\/(?:index\.html)?$/.test(path))) {
     const href = appPath(number ? `/issues/${number}/feed.atom` : "/feed.atom")
     tags.push(`<link rel="alternate" type="application/atom+xml" href="${xml(href)}">`)
@@ -129,6 +147,7 @@ export async function page(c: Ctx) {
       meta("twitter:data2", article.reporter)
     )
   const headers = new Headers(asset.headers)
+  headers.set("Content-Security-Policy", policy)
   for (const h of ["etag", "last-modified", "content-length", "content-range"]) headers.delete(h)
   headers.set("Cache-Control", "public, max-age=0, must-revalidate")
   if (capability !== null) {
@@ -261,7 +280,7 @@ export async function ogImage(c: Ctx) {
   const slug = home ? null : workspace(c)
   const subdomain = c.env.APP_DOMAIN && new URL(c.req.url).hostname.endsWith(`.${c.env.APP_DOMAIN}`)
   if (!home && (slug === null || (!subdomain && path === c.req.path))) return c.notFound()
-  const { card, v, reply } = await preview(c.env, slug, number, false)
+  const { card, v, reply, code } = await preview(c.env, slug, number, false)
   if (!home && card.kind === "home") return notFound(c)
   const key = `og/${card.appId}/${card.number ?? card.kind}/${v}.png`
   // The public URL is not a cache key: arbitrary queries, a stale version, or a now-private
@@ -269,7 +288,14 @@ export async function ogImage(c: Ctx) {
   const cacheKey = new Request(`${origin(c)}/.bellhop-cache/${key}?a=${reply}`)
   const cache = caches.default,
     hit = await cache.match(cacheKey)
-  if (hit) return hit
+  const forRequest = (image: Response) => {
+    if (!number || code === 200) return image
+    const h = new Headers(image.headers)
+    h.set("Cache-Control", "no-store")
+    h.set("X-Robots-Tag", "noindex")
+    return new Response(image.body, { status: code, headers: h })
+  }
+  if (hit) return forRequest(hit)
   const headers = {
     "Content-Type": "image/png",
     "Cache-Control": "public, max-age=31536000, immutable",
@@ -290,7 +316,7 @@ export async function ogImage(c: Ctx) {
     res = new Response(png, { headers })
   }
   c.executionCtx.waitUntil(cache.put(cacheKey, res.clone()))
-  return res
+  return forRequest(res)
 }
 export async function robots(c: Ctx) {
   const slug = workspace(c),

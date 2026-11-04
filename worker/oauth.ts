@@ -197,14 +197,22 @@ oauth.post("/oauth/register", async (c) => {
   )
 })
 oauth.get("/oauth/authorize", async (c) => {
-  if (c.env.APP_DOMAIN && new URL(c.req.url).hostname !== c.env.APP_DOMAIN)
-    return c.redirect(`${oauthOrigin(c)}/oauth/authorize${new URL(c.req.url).search}`)
+  const invalidPage = () =>
+    c.html(
+      '<!doctype html><html lang="en"><head><title>Invalid authorization request · Bellhop</title></head><body><h1>Invalid authorization request</h1><p>Return to your app and start again.</p></body></html>',
+      400,
+      {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'"
+      }
+    )
   const q = new URL(c.req.url).searchParams
   if (q.getAll("client_id").length !== 1 || q.getAll("redirect_uri").length !== 1)
-    return c.text("Invalid client or redirect URI", 400)
+    return invalidPage()
   const cl = await sql(c.env, "SELECT * FROM oauth_clients WHERE id=?", q.get("client_id")).first<Client>(),
     uri = q.get("redirect_uri")!
-  if (!cl || !(JSON.parse(cl.redirects) as string[]).includes(uri)) return c.text("Invalid client or redirect URI", 400)
+  if (!cl || !(JSON.parse(cl.redirects) as string[]).includes(uri)) return invalidPage()
   let state: string | undefined
   try {
     const b = uniqueParams(q)
@@ -218,6 +226,8 @@ oauth.get("/oauth/authorize", async (c) => {
       !/^[\w-]{43}$/.test(b.code_challenge)
     )
       invalid("S256 PKCE required")
+    if (c.env.APP_DOMAIN && new URL(c.req.url).hostname !== c.env.APP_DOMAIN)
+      return c.redirect(`${oauthOrigin(c)}/oauth/authorize${new URL(c.req.url).search}`)
     await throttle(c, `authorize:${ip(c)}`, 90, 600)
     const id = uid(),
       next = `/oauth/consent?request=${id}`
@@ -236,7 +246,8 @@ oauth.get("/oauth/authorize", async (c) => {
     return c.redirect(c.var.user ? next : `/auth/google?next=${encodeURIComponent(next)}`)
   } catch (e) {
     if (!(e instanceof OAuthError)) throw e
-    return c.redirect(redirectTo(uri, { error: e.code, ...(state && { state }) }))
+    // Pre-consent validation failures must not send the browser (or state) elsewhere.
+    return invalidPage()
   }
 })
 oauth.post("/oauth/device", async (c) => {

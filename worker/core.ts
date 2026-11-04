@@ -98,6 +98,12 @@ export function memberActor(user: Pick<User, "id" | "name" | "avatar_url">, role
 }
 export function dbError(e: Error): ApiFailure | null {
   const message = `${e.message} ${e.cause ?? ""}`
+  if (message.includes("confirmation_daily_limit"))
+    return new ApiFailure(429, "confirmation_daily_limit", "Daily confirmation email limit reached")
+  if (message.includes("report_daily_limit"))
+    return new ApiFailure(429, "report_daily_limit", "Daily report key upload or byte limit reached")
+  if (message.includes("invitation acceptance required"))
+    return new ApiFailure(409, "invitation_required", "Accept the workspace invitation before joining")
   if (message.includes("expired report metadata")) return new ApiFailure(410, "expired", "Report metadata expired")
   if (message.includes("unknown report metadata")) return new ApiFailure(404, "not_found", "Report metadata not found")
   if (message.includes("report metadata already attached"))

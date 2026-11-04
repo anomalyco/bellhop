@@ -235,7 +235,11 @@ api.get("*", (c) => {
 api.notFound((c) => c.json({ error: { code: "not_found", message: "Not found" } }, 404))
 api.onError((e, c) => {
   const err = e instanceof ApiFailure ? e : dbError(e)
-  if (err?.status === 429 && !c.res.headers.has("Retry-After")) c.header("Retry-After", "3600") // Existing hourly D1 guards.
+  if (err?.status === 429 && !c.res.headers.has("Retry-After"))
+    c.header(
+      "Retry-After",
+      err.code.endsWith("_daily_limit") ? String(86400 - (Math.floor(Date.now() / 1000) % 86400)) : "3600"
+    )
   if (err)
     return c.json(
       { error: { code: err.code, message: err.message, ...(err.moved_to && { moved_to: err.moved_to }) } },

@@ -338,7 +338,9 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
               app.id,
               str(b.tier, "tier", 100).trim()
             ).first<string>("id")) ?? bad("Unknown workspace tier"))
-      return textResult(await setTier(env, app.id, { email: b.email, actor_id: b.actor_id, tier_id: id }))
+      return textResult(
+        await setTier(env, app.id, { email: b.email, actor_id: b.actor_id, tier_id: id }, can(chosen.role, "setup"))
+      )
     }
     case "list_mentionables":
       return textResult(await mentionables(env, app.id))

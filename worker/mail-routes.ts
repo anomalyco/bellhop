@@ -145,12 +145,12 @@ mailRoutes.put(route, async (c) => {
       await enforce(c, "RL_HUMAN", `confirm:ip:${clientIP(c)}`)
       await enforce(c, "RL_UPLOAD", `confirm:addr:${await sha256(address)}`)
     }
-    const [saved] = await c.env.DB.batch<Sub>([
+    const [, reservation] = await c.env.DB.batch<Sub>([
       sql(
         c.env,
         `INSERT INTO mail_subs(issue_id,actor_id,user_id,guest_hash,address,state,reason,requested) VALUES(?,?,?,?,?,?,'manual',unixepoch())
       ON CONFLICT(issue_id,actor_id) DO UPDATE SET address=excluded.address,state=excluded.state,reason='manual',requested=excluded.requested,nonce=lower(hex(randomblob(16)))
-      WHERE mail_subs.state='off' OR mail_subs.address!=excluded.address OR (mail_subs.state='pending' AND mail_subs.requested<unixepoch()-600) RETURNING *`,
+      WHERE mail_subs.state='off' OR mail_subs.address!=excluded.address OR (mail_subs.state='pending' AND mail_subs.requested<unixepoch()-86400)`,
         iid,
         actor,
         u?.id ?? null,
@@ -160,6 +160,17 @@ mailRoutes.put(route, async (c) => {
       ),
       ...(!u
         ? [
+            // Same pending API state regardless of requests on other issues. Only the
+            // winning address-wide reservation is allowed to send a confirmation link.
+            sql(
+              c.env,
+              `INSERT INTO confirmation_daily(address,day,sub_id,nonce,n)
+             SELECT s.address,date('now'),s.id,s.nonce,1 FROM mail_people s WHERE s.issue_id=? AND s.actor_id=? AND s.state='pending'
+             AND NOT EXISTS(SELECT 1 FROM confirmation_daily d JOIN mail_subs p ON p.id=d.sub_id AND p.address=d.address AND p.nonce=d.nonce WHERE d.address=s.address AND p.state='pending' AND p.requested>=unixepoch()-86400)
+             ON CONFLICT(address) DO UPDATE SET day=excluded.day,sub_id=excluded.sub_id,nonce=excluded.nonce,n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END RETURNING sub_id id,nonce,address`,
+              iid,
+              actor
+            ),
             guestWrite(c.env, c.var.guestHash),
             sql(
               c.env,
@@ -178,7 +189,7 @@ mailRoutes.put(route, async (c) => {
             )
           ])
     ])
-    const r = saved!.results[0]
+    const r = !u && reservation?.results[0]
     if (
       r &&
       !u &&

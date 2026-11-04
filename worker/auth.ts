@@ -161,12 +161,6 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
     ),
     sql(
       c.env,
-      `UPDATE members SET user_id=(SELECT id FROM users WHERE email=?) WHERE email=? AND user_id IS NULL`,
-      address,
-      address
-    ),
-    sql(
-      c.env,
       `INSERT INTO sessions SELECT ?,id,? FROM users WHERE email=? AND (? IS NULL OR google_sub=?) RETURNING user_id`,
       hash,
       new Date(Date.now() + month * 1000).toISOString(),
@@ -175,7 +169,7 @@ async function signIn(c: Ctx, address: string, name: string, picture: string | n
       sub
     )
   ])
-  const session = result[2]?.results[0]
+  const session = result[1]?.results[0]
   if (!session) denied()
   if (c.var.existingGuest) await claimGuest(c, { id: session.user_id, email: address, name, avatar_url: picture })
   cookie(c, "bh_session", token, month, true)
