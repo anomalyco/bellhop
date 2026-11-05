@@ -33,7 +33,7 @@ import {
 } from "./visibility"
 import { mentionables, voteCount } from "./conversation"
 import { parseSearch, sorts } from "./search"
-import { active, withPerson, neutral } from "./handoff"
+import { active, withPerson } from "./handoff"
 import { projectTiers, tierBag } from "./tier-actors"
 import { appIdSQL, appKey, readBatch, type Read } from "./read-scope"
 import type { ReadScope } from "./read-scope"
@@ -784,7 +784,7 @@ export async function getIssue(
   for (const e of handoffs)
     timeline.push({
       kind: "event",
-      event: { ...e, data: e.data ? JSON.parse(e.data) : {}, actor: e.actor ? parseActor(e.actor, roles) : neutral }
+      event: { ...e, data: e.data ? JSON.parse(e.data) : {}, actor: e.actor ? parseActor(e.actor, roles) : null }
     })
   for (const { tier_bag, held_at, sent_by, ...c } of comments) {
     const author = parseActor(c.author, roles)

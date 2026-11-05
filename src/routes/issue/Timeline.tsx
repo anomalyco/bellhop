@@ -236,7 +236,7 @@ export function eventContent(
       icon = <PersonIcon size={14} />
       say = !to
         ? plain("event.unassigned")
-        : to.id === event.actor.id
+        : to.id === event.actor?.id
           ? plain("event.selfAssigned")
           : (actor) => tr("event.assigned", { actor, assignee: <strong>{actorName(to)}</strong> })
       break
@@ -354,7 +354,7 @@ export function EventLine({ slug, event, authorTier }: { slug: string; event: Is
     <div className="event" data-tone={tone} data-rule={rule ? "" : undefined} data-key={event.id} ref={arrivalRef(event.id)}>
       <span className="event-icon">{icon}</span>
       <span className="event-text">
-        {say(rule ? tr("event.rule", { tier: <TierBadge tier={{ name: rule.tier_name, color }} /> }) : <ActorName actor={event.actor} badge={false} />)} ·{" "}
+        {say(rule ? tr("event.rule", { tier: <TierBadge tier={{ name: rule.tier_name, color }} /> }) : event.actor && <ActorName actor={event.actor} badge={false} />)} ·{" "}
         <Time iso={event.created_at} />
       </span>
     </div>
@@ -365,7 +365,7 @@ export function EventLine({ slug, event, authorTier }: { slug: string; event: Is
 export function EventBurst({ slug, events, authorTier }: { slug: string; events: IssueEvent[]; authorTier?: ActorTier | null }) {
   useT()
   const [open, setOpen] = useState(false)
-  const names = [...new Set(events.map((e) => (ruleOf(e) ? t("event.rule", { tier: ruleOf(e)!.tier_name }) : actorName(e.actor))))]
+  const names = [...new Set(events.flatMap((e) => ruleOf(e) ? [t("event.rule", { tier: ruleOf(e)!.tier_name })] : e.actor ? [actorName(e.actor)] : []))]
   const last = events[events.length - 1]!
   return (
     <div className="burst" data-open={open || undefined}>

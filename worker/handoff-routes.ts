@@ -226,6 +226,14 @@ handoffRoutes.delete(groupPath + "/:id", async (c) => {
   )
   return c.json({ ok: true })
 })
+handoffRoutes.get(base + "/me/availability", async (c) => {
+  desk(c)
+  requireTeam(c, "triage")
+  const row = await sql(c.env, `SELECT coalesce(v.available,1) available FROM members m
+    JOIN apps a ON a.id=m.app_id AND a.mode='helpdesk' LEFT JOIN handoff_availability v ON v.member_id=m.id
+    WHERE m.app_id=? AND m.user_id=? AND m.role IN ('owner','admin','member')`, c.var.app.id, c.var.user!.id).first<{available:number}>()
+  return c.json({ available: !!(row ?? denied()).available })
+})
 handoffRoutes.put(base + "/me/availability", async (c) => {
   desk(c)
   requireTeam(c, "triage")
