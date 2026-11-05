@@ -256,6 +256,7 @@
 //   POST   /api/apps/:slug/groups GroupInput             -> Group              admin
 //   PATCH  /api/apps/:slug/groups/:id Partial<GroupInput> -> Group             admin
 //   DELETE /api/apps/:slug/groups/:id                    -> { ok: true }       admin (routes to it fall back to unassigned)
+//   GET    /api/apps/:slug/me/availability                -> { available: boolean }   member; own setting, independent of group hours
 //   PUT    /api/apps/:slug/me/availability { available: boolean } -> { available: boolean }   member; away members
 //          are skipped by group assignment (default available)
 //   POST   /api/apps/:slug/issues/:number/escalate { reason?, group_id? } -> Issue   the requester ("Talk to a person";
@@ -836,6 +837,8 @@ export interface Invitation {
 }
 
 export interface Member {
+  /** Workspace availability preference, independent of working hours. False for invitations and viewers. */
+  available: boolean
   id: string
   email: string
   name: string | null
@@ -1236,7 +1239,8 @@ export type IssueEventType =
 export interface IssueEvent {
   id: string
   type: IssueEventType
-  actor: Actor
+  /** Null on the requester's neutral `escalated` event. */
+  actor: Actor | null
   data: Record<string, unknown>
   created_at: string
 }

@@ -429,7 +429,10 @@ function participants(issue: Issue): Actor[] {
   const seen = new Map<string, Actor>()
   const add = (a: Actor) => seen.has(`${a.type}:${a.id}`) || seen.set(`${a.type}:${a.id}`, a)
   add(issue.author)
-  for (const t of issue.timeline) add(t.kind === "comment" ? t.comment.author : t.event.actor)
+  for (const t of issue.timeline) {
+    if (t.kind === "comment") add(t.comment.author)
+    else if (t.event.actor && !(t.event.type === "escalated" && !("source" in t.event.data))) add(t.event.actor)
+  }
   return [...seen.values()]
 }
 

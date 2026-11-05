@@ -27,46 +27,31 @@ function ahead(iso: string, now = clockNow()) {
   return f.format(Math.round(s / 86400), "day")
 }
 
-/**
- * The team's own availability in this help desk. The API only sets it, so the switch shows what this browser last
- * set, else what the groups say about you (a group on duty lists you as available or not), else the default
- * (available).
- */
-const awayKey = (slug: string, user: string) => `bellhop:away:${slug}:${user}`
-function storedAway(slug: string, user: string | undefined) {
-  if (!user) return null
-  try {
-    const v = localStorage.getItem(awayKey(slug, user))
-    return v === null ? null : v === "1"
-  } catch {
-    return null
-  }
-}
-
 export function AvailabilitySwitch({ app, compact = false }: { app: AppDetail; compact?: boolean }) {
   const t = useT()
   const me = useMe().data?.user
-  const { data: groups } = useGroups(app)
-  const [away, setAway] = useState<boolean | null>(() => storedAway(app.slug, me?.id))
+  const key = me && isDesk(app) && app.role && app.role !== "viewer" ? keys.availability(app.slug, me.id) : null
+  const { data, error: readError } = useResource(key, () => api.availability(app.slug), -1)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  if (!me || !isDesk(app) || !app.role || app.role === "viewer") return null
-  const onDuty = groups?.find((g) => g.member_ids.includes(me.id) && g.available_ids.length > 0)
-  const known = away ?? storedAway(app.slug, me.id) ?? (onDuty ? !onDuty.available_ids.includes(me.id) : false)
+  useEffect(() => {
+    if (!key || busy) return
+    const refresh = () => { if (document.visibilityState === "visible") load(key, () => api.availability(app.slug)).catch(() => {}) }
+    window.addEventListener("focus", refresh)
+    document.addEventListener("visibilitychange", refresh)
+    return () => { window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", refresh) }
+  }, [key, app.slug, busy])
+  if (!key) return null
   const flip = async (next: boolean) => {
     setBusy(true)
     setError(null)
-    setAway(!next)
     try {
-      await api.setAvailability(app.slug, next)
-      try {
-        localStorage.setItem(awayKey(app.slug, me.id), next ? "0" : "1")
-      } catch {
-        /* private mode: the switch still shows this tab's choice */
-      }
+      const saved = await api.setAvailability(app.slug, next)
+      // Finish any older focus read before publishing the confirmed write to both switch locations.
+      await load(key, () => Promise.resolve(saved)).catch(() => {})
+      setData(key, saved)
       load(keys.groups(app.slug), () => api.groups(app.slug)).catch(() => {})
     } catch (e) {
-      setAway(!!known)
       setError(errorMessage(e))
     } finally {
       setBusy(false)
@@ -78,14 +63,15 @@ export function AvailabilitySwitch({ app, compact = false }: { app: AppDetail; c
       <label className="availability-row" htmlFor={id}>
         <span className="availability-text">
           <span className="availability-title">{t("availability.title")}</span>
-          <span className="availability-state" data-away={known || undefined}>
-            {known ? t("availability.away") : t("availability.available")}
+          <span className="availability-state" data-away={data?.available === false || undefined}>
+            {/* A non-breaking space holds the line until the read lands, so the row never grows. */}
+            {data ? (data.available ? t("availability.available") : t("availability.away")) : "\u00a0"}
           </span>
         </span>
-        <input id={id} type="checkbox" role="switch" className="switch" checked={!known} aria-checked={!known} disabled={busy} onChange={(e) => void flip(e.target.checked)} />
+        <input id={id} type="checkbox" role="switch" className="switch" checked={data?.available ?? false} disabled={busy || !data} onChange={(e) => void flip(e.target.checked)} />
       </label>
       {!compact && <p className="api-hint">{t("availability.text")}</p>}
-      {error && <p className="field-error">{error}</p>}
+      {(error || readError) ? <p className="field-error">{error || errorMessage(readError)}</p> : null}
     </div>
   )
 }

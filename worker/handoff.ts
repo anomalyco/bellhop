@@ -7,7 +7,6 @@ import { signalContact } from "./v1/signals"
 import { entry } from "./audit"
 
 const system: Actor = { type: "agent", id: "bellhop", name: "Bellhop" }
-export const neutral: Actor = { type: "member", id: "workspace-team", name: "Team", avatar_url: null }
 export const guard = (env: Env, test: string, ...args: unknown[]) =>
   sql(env, `INSERT INTO handoff_guard SELECT 0 WHERE NOT (${test})`, ...args)
 export const active = `SELECT h.doc FROM handoff_docs h WHERE h.issue_id=i.id AND h.app_id=i.app_id AND h.ended_at IS NULL`
@@ -283,7 +282,7 @@ export async function publishHandoff(env: Env, id: string, origin: string) {
     room.publishConversation([team], { app: r.app_id, internalOnly: true }),
     r.type === "escalated"
       ? room.publishConversation(
-          [{ ...team, item: { kind: "event", event: { ...event, actor: neutral, data: {} } } }],
+          [{ ...team, item: { kind: "event", event: { ...event, actor: null, data: {} } } }],
           { app: r.app_id, internalOnly: false, requesterOnly: true }
         )
       : Promise.resolve(),

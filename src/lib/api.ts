@@ -347,6 +347,7 @@ export const api = {
   createGroup: (slug: string, input: GroupInput) => request<Group>("POST", `${app(slug)}/groups`, input),
   patchGroup: (slug: string, id: string, input: Partial<GroupInput>) => request<Group>("PATCH", `${app(slug)}/groups/${enc(id)}`, input),
   deleteGroup: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/groups/${enc(id)}`),
+  availability: (slug: string) => get<{ available: boolean }>(`${app(slug)}/me/availability`),
   setAvailability: (slug: string, available: boolean) => request<{ available: boolean }>("PUT", `${app(slug)}/me/availability`, { available }),
   escalate: (slug: string, number: number, input: { reason?: string; group_id?: string }) => request<Issue>("POST", `${app(slug)}/issues/${number}/escalate`, input),
   handBack: (slug: string, number: number) => request<Issue>("DELETE", `${app(slug)}/issues/${number}/escalation`),
@@ -411,6 +412,7 @@ export const keys = {
   apiKeys: (slug: string) => `api-keys:${slug}`,
   requestTypes: (slug: string) => `request-types:${slug}`,
   groups: (slug: string) => `groups:${slug}`,
+  availability: (slug: string, user: string) => `availability:${slug}:${user}`,
 }
 
 export const loadConfig = () => load(keys.config, api.config)

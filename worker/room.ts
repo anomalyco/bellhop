@@ -485,7 +485,7 @@ export class Room extends DurableObject<Env> {
               if (!v.team)
                 e = {
                   ...e,
-                  item: { kind: "event", event: { ...e.item.event, actor: requesterActor(e.item.event.actor) } }
+                  item: { kind: "event", event: { ...e.item.event, actor: e.item.event.type === "escalated" || !e.item.event.actor ? null : requesterActor(e.item.event.actor) } }
                 }
             }
           } else if (e.type === "comment.updated") {
