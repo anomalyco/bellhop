@@ -1,0 +1,141 @@
+name: Deploy production
+
+# Production (https://blhp.app) deploys only from the `production` branch, which is
+# fast-forwarded to a tested commit on `main` (git push origin main:production).
+# Staged: apply D1 migrations, upload the new version at 0%, smoke-test it through the
+# version-override header, promote it to 100%, smoke-test live traffic, and roll back
+# to the previous version if that fails. Each version has its own asset manifest and a
+# deploy takes seconds to reach every edge, so the candidate is checked before it takes
+# traffic. The Cloudflare token is minted per run by the token issuer
+# (anomalyco/secrets, role github/bellhop-production); there is no stored token.
+# Commits that add a Durable Object class need a plain `wrangler deploy` instead.
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment:
+      name: production
+      url: https://blhp.app
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      CLOUDFLARE_ACCOUNT_ID: 15d29c8639fd3733b1b5486a2acfd968
+      CLOUDFLARE_ENV: production
+      CI: "true"
+    steps:
+      - name: Production deploys only from the production branch
+        if: github.ref != 'refs/heads/production'
+        run: |
+          echo "::error::Deploy production only runs from production, not $GITHUB_REF."
+          exit 1
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: og
+      - run: bunx tsc -b
+      - run: bun run build
+      - run: rm -f dist/bellhop/.dev.vars
+      - run: bunx playwright-core install --with-deps chromium
+
+      - name: Configure AWS credentials
+        id: aws
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::604439173067:role/github/bellhop-production
+          role-session-name: bellhop-production-deploy-${{ github.run_id }}
+          role-duration-seconds: 900
+          aws-region: us-east-1
+          output-env-credentials: false
+          output-credentials: true
+
+      - name: Mint the deploy token
+        id: cloudflare-token
+        env:
+          AWS_ACCESS_KEY_ID: ${{ steps.aws.outputs.aws-access-key-id }}
+          AWS_SECRET_ACCESS_KEY: ${{ steps.aws.outputs.aws-secret-access-key }}
+          AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
+        run: bash .github/release/cloudflare-token.sh
+
+      - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+        run: |
+          bunx wrangler d1 migrations apply bellhop --remote --env production
+          if ! bunx wrangler d1 migrations list bellhop --remote --env production | grep -q "No migrations"; then
+            echo "::error::Migrations are still pending."
+            exit 1
+          fi
+
+      - name: Upload the new version at 0%
+        id: candidate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+        run: |
+          prev=$(bunx wrangler deployments status 2>&1 | grep -oE '\(100%\) [0-9a-f-]{36}' | awk '{print $2}')
+          [ -n "$prev" ] || { echo "::error::Could not read the current version."; exit 1; }
+          msg=$(git log --format=%s -1 | cut -c1-90)
+          new=$(bunx wrangler versions upload --message "$msg" 2>&1 | tee /dev/stderr | awk '/Worker Version ID:/ {print $4}')
+          [ -n "$new" ] || { echo "::error::Upload failed."; exit 1; }
+          bunx wrangler versions deploy "$prev@100%" "$new@0%" -y --message "candidate $new at 0%"
+          echo "prev=$prev" >> "$GITHUB_OUTPUT"
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          sleep 8
+
+      - name: Smoke-test the candidate
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+          OVERRIDE_VERSION: ${{ steps.candidate.outputs.new }}
+          PREV: ${{ steps.candidate.outputs.prev }}
+          SMOKE_DIR: ${{ runner.temp }}
+        run: |
+          if ! node scripts/smoke.mjs; then
+            bunx wrangler versions deploy "$PREV@100%" -y
+            echo "::error::The candidate failed its smoke test; production stays on $PREV."
+            exit 1
+          fi
+
+      - name: Promote and smoke-test live traffic
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+          NEW: ${{ steps.candidate.outputs.new }}
+          PREV: ${{ steps.candidate.outputs.prev }}
+          SMOKE_DIR: ${{ runner.temp }}
+        run: |
+          bunx wrangler versions deploy "$NEW@100%" -y --message "$(git log --format=%s -1 | cut -c1-90)"
+          sleep 15
+          if ! node scripts/smoke.mjs; then
+            sleep 10
+            if ! node scripts/smoke.mjs; then
+              bunx wrangler versions deploy "$PREV@100%" -y
+              echo "::error::$NEW failed live smoke tests twice; rolled back to $PREV."
+              exit 1
+            fi
+          fi
+          echo "::notice::Production is on $NEW (previous $PREV)."
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: smoke-screenshots
+          path: ${{ runner.temp }}/bellhop-smoke-*.png
+          if-no-files-found: ignore
