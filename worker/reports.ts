@@ -213,7 +213,9 @@ export async function uploadReport(c: Ctx) {
   )
 }
 
-const keyFields = "id,name,preview,created_at,last_used_at"
+const keyFields = "id,name,preview,created_at,last_used_at,feedback"
+type KeyRow = Omit<ReportKey, "feedback"> & { feedback: number }
+const keyOf = ({ feedback, ...k }: KeyRow): ReportKey => ({ ...k, feedback: !!feedback })
 export const reports = new Hono<Bindings>(),
   base = "/api/apps/:slug"
 reports.get(`${base}/report-keys`, async (c) => {
@@ -224,9 +226,29 @@ reports.get(`${base}/report-keys`, async (c) => {
         c.env,
         `SELECT ${keyFields} FROM report_keys WHERE app_id=? ORDER BY created_at,id`,
         c.var.app.id
-      ).all<ReportKey>()
-    ).results
+      ).all<KeyRow>()
+    ).results.map(keyOf)
   )
+})
+// Whether a key may also send feedback (keys from before feedback only upload report metadata until turned on).
+reports.patch(`${base}/report-keys/:id`, async (c) => {
+  requireTeam(c, "setup")
+  const b = await body(c)
+  if (Object.keys(b).some((k) => k !== "feedback") || typeof b.feedback !== "boolean") bad("Expected { feedback: boolean }")
+  const app = c.var.app.id,
+    id = c.req.param("id")
+  const [r] = await c.env.DB.batch<KeyRow>([
+    sql(c.env, `UPDATE report_keys SET feedback=? WHERE app_id=? AND id=? RETURNING ${keyFields}`, Number(b.feedback), app, id),
+    sql(
+      c.env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT app_id,?,'report_key.updated',json_object('type','report_key','id',id,'name',name,'preview',preview),json_object('feedback',json(?)) FROM report_keys WHERE app_id=? AND id=? AND changes()>0`,
+      auditActor(c.var.actor),
+      JSON.stringify(b.feedback),
+      app,
+      id
+    )
+  ])
+  return c.json(keyOf(r!.results[0] ?? missing()))
 })
 reports.post(`${base}/report-keys`, async (c) => {
   requireTeam(c, "setup")
@@ -234,11 +256,11 @@ reports.post(`${base}/report-keys`, async (c) => {
     name = str((await body(c)).name, "name", 120).trim()
   const id = uid(),
     preview = key.slice(0, 15) + "…"
-  const r = await recorded<ReportKey>(
+  const r = await recorded<KeyRow>(
     c.env,
     sql(
       c.env,
-      `INSERT INTO report_keys(id,app_id,name,preview,hash,created_at) VALUES(?,?,?,?,?,?) RETURNING ${keyFields}`,
+      `INSERT INTO report_keys(id,app_id,name,preview,hash,created_at,feedback) VALUES(?,?,?,?,?,?,1) RETURNING ${keyFields}`,
       id,
       c.var.app.id,
       name,
@@ -251,7 +273,7 @@ reports.post(`${base}/report-keys`, async (c) => {
     "report_key.created",
     { type: "report_key", id, name, preview }
   )
-  return c.json({ ...r.results[0], key }, 201)
+  return c.json({ ...keyOf(r.results[0]!), key }, 201)
 })
 reports.delete(`${base}/report-keys/:id`, async (c) => {
   requireTeam(c, "setup")

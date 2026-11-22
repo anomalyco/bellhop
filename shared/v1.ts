@@ -16,7 +16,8 @@
 //          publishable, names its workspace)   FeedbackInput (api.ts) -> 201 FeedbackCreated (api.ts)
 //          JSON with base64 screenshots, or multipart/form-data: a "payload" part (FeedbackInput as JSON, without
 //          screenshots) and up to 5 "screenshot" file parts. Each submission is a private issue only the team and its
-//          agents see; the submitter has no web view and hears back only by email, after confirming it once. Also
+//          agents see; the submitter has no web view and hears back only by email: when the team first replies, one
+//          confirmation email; after that, the replies. Report keys must allow feedback (ReportKey.feedback). Also
 //          /v1/feedback on the workspace's host (the key must be that workspace's) and in dev path mode, and
 //          POST /api/apps/:slug/feedback. CORS for any origin. Send an Idempotency-Key and retry with the same key and
 //          the same feedback after a dropped connection: the first answer replays (no duplicate issue or email); the

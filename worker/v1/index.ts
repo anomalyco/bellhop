@@ -13,6 +13,7 @@ import { conversations, items, mark, open, postMessage, typing, confirm, target 
 import { replay } from "./replay"
 import { schemas, ref, string, type Schema } from "./schemas"
 import { feedbackCors, feedbackLimits, submitFeedback } from "../feedback"
+import { imageLimits } from "../images"
 
 type Action = (c: Ctx, s: Scope, b: Record<string, unknown>, id: string, number: number, seed?: string) => unknown
 type Route = {
@@ -421,17 +422,17 @@ export function document() {
 }
 const L = feedbackLimits,
   MB = (n: number) => n / 1024 / 1024 + " MB"
-const feedbackDescription = `Send in-app feedback as a private issue in the report key's workspace (on a workspace host, the key must be that workspace's; also POST /api/apps/{slug}/feedback). The submitter has no web view: with an email (and not anonymous) Bellhop sends one confirmation email, and once it's confirmed public replies are emailed and email replies post back. Anonymous sends keep no email, user, install id or logs. JSON with base64 screenshots, or multipart/form-data with a payload part (FeedbackInput as JSON, without screenshots) and up to ${L.screenshots} screenshot file parts. Screenshots are PNG, JPEG or WebP (checked by content), each <= ${MB(L.screenshot)}, <= ${MB(L.screenshotTotal)} in total; the whole request <= ${MB(L.request)}. Limits: ${L.perIpMinute} per minute per IP, ${L.perKeyMinute} per minute per key, ${L.perInstallHour} per hour per install_id, ${L.perKeyDay} per day and ${MB(L.bytesPerKeyDay)} per day per key. CORS is open to any origin. Retries: send an Idempotency-Key and retry with the same key and the same feedback (for multipart, the same payload part and screenshot files); the first answer comes back for 24 hours, with no second issue or confirmation email. The key is per report key; the same key with different feedback is a 422, and a retry while the first is still running a 409 with Retry-After. Client errors replay for 5 minutes.`
+const feedbackDescription = `Send in-app feedback as a private issue in the report key's workspace (on a workspace host, the key must be that workspace's; also POST /api/apps/{slug}/feedback). The key must allow feedback (ReportKey.feedback; keys from before feedback existed don't until an admin turns it on). The submitter has no web view: nothing is emailed at submission; when the team first replies, Bellhop emails the given address (if not anonymous) one confirmation, and once it's confirmed the replies arrive by email and email replies post back. JSON with base64 screenshots, or multipart/form-data with a payload part (FeedbackInput as JSON, without screenshots) and up to ${L.screenshots} screenshot file parts. Screenshots are PNG, JPEG or WebP, checked by their real headers: at most ${imageLimits.side} px a side and ${imageLimits.pixels / 1e6} megapixels, nothing after the image, each <= ${MB(L.screenshot)}, <= ${MB(L.screenshotTotal)} in total; the whole request <= ${MB(L.request)}. Limits: ${L.perIpMinute} per minute per IP, ${L.perKeyMinute} per minute per key, ${L.perInstallHour} per hour per install_id, ${L.perIpDay} per day and ${MB(L.bytesPerIpDay)} per day per key and client IP, ${L.perKeyDay} per day and ${MB(L.bytesPerKeyDay)} per day per key. CORS is open to any origin. Retries: send an Idempotency-Key and retry with the same key and the same feedback (for multipart, the same payload part and screenshot files); the first answer comes back for 24 hours, with no second issue. Keys are scoped to the report key and, when given, the install_id; the same key with different feedback is a 422, and a retry while the first is still running a 409 with Retry-After (an unfinished attempt frees its key after 2 minutes). Client errors replay for 5 minutes.`
 const feedbackErrors = {
   400: "invalid_input: a field is missing, too long or of the wrong type (at most 5 screenshots)",
   401: "invalid_report_key: missing, unknown or revoked report key (or another workspace's, on a workspace host)",
-  403: "feedback_unavailable: help desk workspaces don't take feedback; blocked: this install is blocked",
+  403: "feedback_disabled: this report key doesn't allow feedback; feedback_unavailable: help desk workspaces don't take feedback; blocked: this install is blocked",
   404: "not_found: unknown host",
-  413: "too_large (a screenshot, the screenshots or the request) or feedback_byte_quota (the key's daily bytes)",
-  415: "unsupported_media_type: not JSON or multipart, or a screenshot that isn't a PNG, JPEG or WebP image",
+  413: "too_large (a screenshot, its dimensions, the screenshots or the request), feedback_ip_byte_quota (this client's daily bytes for the key) or feedback_byte_quota (the key's daily bytes)",
+  415: "unsupported_media_type: not JSON or multipart, or a screenshot that isn't a well-formed PNG, JPEG or WebP image",
   409: "request_pending: a request with this Idempotency-Key is still running; retry after the indicated delay",
   422: "idempotency_mismatch: the Idempotency-Key was used for different feedback",
-  429: "rate_limited (per IP), key_rate_limited (per key per minute), install_rate_limited (per install per hour), feedback_daily_limit (per key per day) or idempotency_limit (1000 active keys per report key and IP); retry after the indicated delay",
+  429: "rate_limited (per IP), key_rate_limited (per key per minute), install_rate_limited (per install per hour), feedback_ip_daily_limit (per key and client per day), feedback_daily_limit (per key per day) or idempotency_limit (1000 active keys per report key and client); retry after the indicated delay",
   500: "internal_error",
   503: "misconfigured"
 }

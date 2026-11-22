@@ -61,10 +61,11 @@ async function orgDetail(env: Env, org: OrgRow, apps: App[]): Promise<OrgDetail>
     ...org,
     apps: apps.map((a) => ({ ...a, counts: { open: byApp.get(a.id)?.open ?? 0, closed: byApp.get(a.id)?.closed ?? 0 } })),
     // Help desk availability is per workspace; it doesn't apply to an org seat.
-    members: (members!.results as (Omit<Member, "joined" | "available"> & { joined: number })[]).map((m) => ({
+    members: (members!.results as (Omit<Member, "joined" | "available" | "via"> & { joined: number })[]).map((m) => ({
       ...m,
       joined: !!m.joined,
-      available: false
+      available: false,
+      via: "org" as const
     }))
   }
 }
@@ -197,6 +198,22 @@ orgs.post("/api/orgs/:org/members", async (c) => {
   if (!r!.meta.changes) denied()
   return current(c)
 })
+// Leaving an org (or being removed) also ends any direct seats in its apps, so nothing of the org's stays reachable.
+// Runs after the org seat is gone in the same batch; each app's audit log records the seat it lost.
+function dropSeats(env: Env, org: string, user: string, actor: Actor) {
+  const gone = `a.org_id=? AND m.user_id=? AND NOT EXISTS(SELECT 1 FROM org_members WHERE org_id=a.org_id AND user_id=m.user_id)`
+  return [
+    sql(
+      env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT m.app_id,?,'member.removed',json_object('type','member','id',m.user_id,'email',m.email),
+      json_object('from',m.role,'to',NULL,'reason','left_org') FROM members m JOIN apps a ON a.id=m.app_id WHERE ${gone}`,
+      auditActor(actor),
+      org,
+      user
+    ),
+    sql(env, `DELETE FROM members WHERE id IN (SELECT m.id FROM members m JOIN apps a ON a.id=m.app_id WHERE ${gone})`, org, user)
+  ]
+}
 async function changeOrgMember(c: Ctx, role: Role | null) {
   const { org } = await access(c),
     target = c.req.param("id")!,
@@ -230,7 +247,8 @@ async function changeOrgMember(c: Ctx, role: Role | null) {
       { type: row.pending ? "invitation" : "member", id: row.user_id ?? row.id, email: row.email, org: org.slug },
       { from: row.role, to: role },
       !row.pending
-    )
+    ),
+    ...(role === null && row.user_id ? dropSeats(c.env, org.id, row.user_id, actorOf(c, org.role)) : [])
   ])
   if (!r!.meta.changes) denied()
   // An admin who removed their own seat may no longer see the org.
@@ -243,7 +261,8 @@ orgs.delete("/api/orgs/:org/members/me", async (c) => {
   if (!org.role) missing()
   const [r] = await c.env.DB.batch([
     sql(c.env, "DELETE FROM org_members WHERE org_id=? AND user_id=?", org.id, u.id),
-    ...audit(c.env, org.id, actorOf(c, org.role), "member.left", { type: "member", id: u.id, email: u.email, org: org.slug }, {}, true)
+    ...audit(c.env, org.id, actorOf(c, org.role), "member.left", { type: "member", id: u.id, email: u.email, org: org.slug }, {}, true),
+    ...dropSeats(c.env, org.id, u.id, actorOf(c, org.role))
   ])
   if (!r!.meta.changes) missing()
   return c.json({ ok: true })
@@ -260,7 +279,8 @@ orgs.post("/api/orgs/:org/apps", async (c) => {
     slug: org.slug,
     name: org.name,
     kind: kind === undefined ? "feedback" : choice(kind, ["feedback", "tracker"] as const, "kind"),
-    user: u.id
+    user: u.id,
+    role: org.role === "owner" ? "owner" : "admin"
   })
   await sql(
     c.env,
@@ -293,15 +313,41 @@ orgs.put("/api/apps/:slug/org", async (c) => {
   const to = target!.results[0] ?? null,
     old = from!.results[0] ?? null
   if (slug !== null && !to?.role) missing()
-  if ((to && !admin(to.role)) || (old && !admin(old.role))) denied()
+  // Joining takes an admin of the org; leaving takes an owner of the org it leaves.
+  if ((to && !admin(to.role)) || (old && old.role !== "owner")) denied()
   if ((to?.id ?? null) !== (old?.id ?? null)) {
     const actor = c.var.actor,
       ref = { type: "app", id: app.id, slug: app.slug }
-    const [r] = await c.env.DB.batch([
+    // Out of every org, the app needs a direct owner: the org owner taking it out becomes one if it has none.
+    const seat = to
+      ? []
+      : [
+          sql(
+            c.env,
+            `INSERT INTO members(id,app_id,user_id,email,role) SELECT ?1,?2,u.id,u.email,'owner' FROM users u WHERE u.id=?3
+            AND NOT EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND role='owner' AND user_id IS NOT NULL)
+            AND EXISTS(SELECT 1 FROM apps a JOIN org_members o ON o.org_id=a.org_id AND o.user_id=?3 AND o.role='owner' WHERE a.id=?2 AND a.org_id=?4)
+            ON CONFLICT(app_id,user_id) DO UPDATE SET role='owner'`,
+            uid(),
+            app.id,
+            u,
+            old!.id
+          ),
+          sql(
+            c.env,
+            "INSERT INTO audit_log(app_id,actor,action,target,data) SELECT ?,?,'member.role_changed',?,? WHERE changes()>0",
+            app.id,
+            auditActor(c.var.actor),
+            JSON.stringify({ type: "member", id: u, email: c.var.user!.email }),
+            JSON.stringify({ to: "owner", reason: "left_org" })
+          )
+        ]
+    const results = await c.env.DB.batch([
+      ...seat,
       sql(
         c.env,
         `UPDATE apps SET org_id=? WHERE id=? AND org_id IS ? AND EXISTS(SELECT 1 FROM team WHERE app_id=apps.id AND user_id=? AND role='owner')
-        AND (? IS NULL OR ${adminSQL()}) AND (? IS NULL OR ${adminSQL()})`,
+        AND (? IS NULL OR ${adminSQL()}) AND (? IS NULL OR ${adminSQL(true)})`,
         to?.id ?? null,
         app.id,
         old?.id ?? null,
@@ -324,7 +370,7 @@ orgs.put("/api/apps/:slug/org", async (c) => {
       ...(old ? audit(c.env, old.id, actor, "org.app_removed", ref) : []),
       ...(to ? audit(c.env, to.id, actor, "org.app_added", ref) : [])
     ])
-    if (!r!.meta.changes) denied()
+    if (!results[seat.length]!.meta.changes) denied()
   }
   const role = await sql(c.env, "SELECT role FROM team WHERE app_id=? AND user_id=?", app.id, u).first<Role>("role")
   c.set("app", { ...app, role, org: to && role ? { slug: to.slug, name: to.name } : null })

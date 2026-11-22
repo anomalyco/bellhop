@@ -68,6 +68,7 @@
 //          nudge_days (1-30, or null for off): email the reporter once when an issue has waited on them that many days.
 //          Never closes anything.
 //   POST   /api/apps/:slug/transfer { member_id }        -> AppSettings        owner; that member becomes an owner too
+//          (anyone on the team: someone there only through the org gets a direct owner seat)
 //   PUT    /api/apps/:slug/icon    body: raw image bytes, Content-Type png/jpeg/webp, ≤ 1 MB -> AppDetail  admin
 //   DELETE /api/apps/:slug/icon                          -> AppDetail          admin; back to the Bellhop mark
 //   GET    /icon/:slug/:version                          -> the app's icon (public, immutable; SVG is not accepted)
@@ -148,6 +149,7 @@
 //          -> ReportMetadata   the person reviewing it before submitting (only while unattached)
 //   GET    /api/apps/:slug/report-keys                   -> ReportKey[]        admin
 //   POST   /api/apps/:slug/report-keys { name }          -> NewReportKey       admin; the key is shown once
+//   PATCH  /api/apps/:slug/report-keys/:id { feedback: boolean } -> ReportKey  admin; allow or stop feedback with this key
 //   DELETE /api/apps/:slug/report-keys/:id               -> { ok: true }       admin
 //   Pages: https://<slug>.blhp.app/new?metadata=<id> (and /<slug>/new?metadata= in path mode) opens new issue with it
 //   attached and its title suggested; https://blhp.app/new?metadata=<id> redirects to the right workspace.
@@ -165,33 +167,45 @@
 //   PATCH  /api/orgs/:org/members/:id { role }           -> OrgDetail          org admin
 //   DELETE /api/orgs/:org/members/:id                    -> OrgDetail          org admin ({ ok: true } when it was your seat)
 //   DELETE /api/orgs/:org/members/me                     -> { ok: true }       org member: leave the org
+//          Removing someone from an org (or leaving it) also removes their direct seats in the org's apps (each app's
+//          audit log records it), so nothing of the org stays reachable.
 //   POST   /api/orgs/:org/apps     NewApp & { kind?: "feedback" | "tracker" } -> AppDetail & { report_key?: string }
 //          org admin; creates an app in the org. "feedback" (the default here): private by default and reporters
 //          can't choose, unlisted, labels bug / idea / question, and a first report key returned once in report_key.
-//   PUT    /api/apps/:slug/org     { org: string | null } -> AppDetail         owner of the app and admin of the org
-//          it joins (and of the org it leaves); null takes it out of its org
+//          The creator gets no direct seat: they're on its team through the org, and the org's owners own it.
+//   PUT    /api/apps/:slug/org     { org: string | null } -> AppDetail         joining: owner of the app and admin of the
+//          org it joins; leaving (null, or moving to another org): an owner of the org it leaves. Out of every org an
+//          app needs a direct owner: the org owner who takes it out becomes one if it has none.
 //   GET    /api/orgs/:org/inbox?state=open|closed&q=<text>&cursor= -> InboxList   org members: every issue in the
 //          org's apps (people on only some of its apps: those), private ones included, most recently active first. q takes the list qualifiers plus
 //          app:<slug> (repeatable, any), platform:<name>, version:<app version>, meta:<key>=<value>, has:screenshot,
 //          has:email and source:feedback|web. Hidden issues only with is:hidden.
 // Feedback: apps send in-app feedback straight in with a report key (publishable, ship it in the app). Each
 // submission becomes a private issue in that app: only the team and agents can see it; the submitter has no web
-// view. With an email (and not anonymous) Bellhop sends one confirmation email; once confirmed, public replies go
-// to that address (the whole reply, no link) and email replies post back into the issue. Nothing else is ever emailed
-// to an unconfirmed address. This is the public API (v1, documented in /v1/openapi.json): see shared/v1.ts.
+// view. Nothing is emailed at submission: with an email (and not anonymous) the address waits as pending, and when the
+// team (or an agent) first replies in public, Bellhop sends it one neutral email ("{workspace} replied to your
+// feedback", no reply text) to confirm with a button (POST; opening the link alone confirms nothing). Confirming turns on
+// every pending feedback subscription for that address in the app and sends the replies so far; later public replies
+// go to the address (no link; long ones shortened with a note) and email replies post back into the issue. One
+// confirmation at a time per (app, address), at most 3 a day. This is the public API (v1, /v1/openapi.json): see
+// shared/v1.ts.
 //   POST   https://api.blhp.app/v1/feedback FeedbackInput -> FeedbackCreated   Authorization: Bearer <report key>;
 //          the key names the workspace (also /v1/feedback on its workspace host, where the key must be that
 //          workspace's, and in dev path mode). JSON (screenshots as base64), or multipart/form-data with a "payload"
 //          part (FeedbackInput as JSON, without screenshots) and up to 5 "screenshot" file parts. CORS for any
-//          origin. Screenshots png/jpeg/webp (checked by content), each <= 10 MB, <= 20 MB in total; request <= 30 MB.
-//          Limits: 10/min per IP (429 rate_limited), 60/min per key (429 key_rate_limited), 10/hour per install_id
-//          (429 install_rate_limited), 1000/day per key (429 feedback_daily_limit), 1 GB/day per key (413
-//          feedback_byte_quota). Help desk workspaces don't take feedback (403 feedback_unavailable).
+//          origin. Screenshots png/jpeg/webp checked by their real headers (<= 8192 px a side and 40 megapixels, nothing
+//          after the image; stored with the detected type's extension), each <= 10 MB, <= 20 MB in total; request
+//          <= 30 MB. Limits: 10/min per IP (429 rate_limited), 60/min per key (429 key_rate_limited), 10/hour per
+//          install_id (429 install_rate_limited), per key and client IP 50/day (429 feedback_ip_daily_limit) and
+//          100 MB/day (413 feedback_ip_byte_quota), per key 1000/day (429 feedback_daily_limit) and 1 GB/day (413
+//          feedback_byte_quota; the workspace's admins are emailed once a day when a key hits its caps). The key must
+//          allow feedback (403 feedback_disabled); help desk workspaces don't take feedback (403 feedback_unavailable).
 //          Retries: send Idempotency-Key and retry with the same key and the same feedback (multipart: the same payload
 //          part and screenshot files; the boundary may change). The first answer (FeedbackCreated, or a client error for
-//          5 minutes) replays for 24 hours: no second issue or confirmation email. Keys are per report key (1000 active
-//          per key and IP, 429 idempotency_limit); the same key with different feedback is 422 idempotency_mismatch, and
-//          a retry while the first is still running is 409 request_pending with Retry-After.
+//          5 minutes) replays for 24 hours: no second issue. Keys are per report key and, when given, install_id (1000
+//          active per key and client, 429 idempotency_limit); the same key with different feedback is 422
+//          idempotency_mismatch, and a retry while the first is still running is 409 request_pending with Retry-After
+//          (an unfinished attempt frees its key after 2 minutes).
 //   POST   /api/apps/:slug/feedback                       the same, scoped to that workspace (the key must be its)
 //   GET    /api/apps/:slug/saved-replies                 -> SavedReply[]       team (viewer and up) and agents
 //   POST   /api/apps/:slug/saved-replies SavedReplyInput -> SavedReply         member
@@ -488,7 +502,9 @@ export interface FeedbackInput {
   /** Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept, so apps
    *  must not put identifying values in metadata for anonymous sends. */
   anonymous?: boolean
-  /** The host app's signed-in user, shown to the team as given (not verified). Ignored when anonymous. */
+  /** The host app's signed-in user, shown to the team as given by the app (not verified). name: 1-40 characters, no
+   *  control or formatting characters. Ignored when anonymous. If the team makes the issue public, the reporter is
+   *  shown as "Anonymous" from then on (FeedbackInfo.user keeps the name for the team). */
   user?: { id?: string; name?: string }
   /** e.g. { name: "Hex", version: "1.4.2", build: "56" } */
   app?: { name?: string; version?: string; build?: string }
@@ -512,10 +528,10 @@ export interface FeedbackCreated {
   /** The issue number in the app. */
   number: number
   received_at: string
-  /** "sent": a confirmation email went out; "not_needed": already confirmed (the same install confirmed this address
-   *  in this app); "none": no email given (or anonymous, or the address opted out of email); "limited": no
-   *  confirmation could be sent now (too many to that address today, or an earlier one is still waiting). */
-  email: "sent" | "not_needed" | "none" | "limited"
+  /** "pending": an email was given (and not anonymous): nothing is sent now; when the team first replies, Bellhop
+   *  emails one confirmation, and replies reach the address once it's confirmed. "none": no email (or anonymous).
+   *  Deliberately neutral: it never says whether the address was already confirmed or opted out of email. */
+  email: "pending" | "none"
 }
 
 /** Where an issue came from an app's feedback form, for the team and agents. */
@@ -523,6 +539,7 @@ export interface FeedbackInfo {
   anonymous: boolean
   /** The address given, if any, and whether it's confirmed (replies only reach confirmed addresses). */
   email: { address: string; confirmed: boolean } | null
+  /** As given by the app (not verified). */
   user: { id?: string; name?: string } | null
   app: { name?: string; version?: string; build?: string } | null
   device: { platform?: string; os?: string; model?: string; locale?: string } | null
@@ -923,6 +940,9 @@ export interface ReportKey {
   preview: string
   created_at: string
   last_used_at: string | null
+  /** Whether it may also send feedback (POST /v1/feedback). New keys may; keys created before feedback existed
+   *  can't until an admin turns it on (PATCH .../report-keys/:id). */
+  feedback: boolean
 }
 
 export interface NewReportKey extends ReportKey {
@@ -996,6 +1016,9 @@ export interface Member {
   role: Role
   /** False until the invited person accepts the invitation. */
   joined: boolean
+  /** "app": a seat in this workspace (managed here); "org": on the team through the workspace's org (role is the
+   *  org role; read-only here, managed in the org). */
+  via: "app" | "org"
 }
 
 /** A token agent just created or rotated: the full secret is shown once. */
@@ -1513,7 +1536,8 @@ export interface WebhookPayload {
 //   get_issue      { number, images?: boolean }  full issue: body, timeline, attachments, relations, system info,
 //                                                  feedback; with images (default true) up to 5 screenshot/image
 //                                                  attachments follow the JSON as MCP image content (<= 2 MB each;
-//                                                  larger ones as URLs), the feedback screenshots first
+//                                                  larger ones, or files that aren't well-formed images of the
+//                                                  type they claim, as URLs), the feedback screenshots first
 //   list_orgs      {}                            orgs the agent's account is on, with their apps the agent can use
 //   list_feedback  { org?, app?, query?, state?, limit? }   newest activity first across every app the agent can use
 //                                                  (or one org, or one app); query as the inbox q; rows carry app and

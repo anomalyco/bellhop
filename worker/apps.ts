@@ -16,6 +16,7 @@ import {
   bad,
   body,
   choice,
+  denied,
   fail,
   ids,
   input,
@@ -339,7 +340,8 @@ const feedbackLabels = [
   ["idea", "a2eeef", "A suggestion or feature idea"],
   ["question", "d876e3", "A question about the app"]
 ] as const
-export type OrgApp = { id: string; slug: string; name: string; kind: "feedback" | "tracker"; user: string }
+// The creator of an app in an org gets no direct seat: they're on its team through the org (org owners own it).
+export type OrgApp = { id: string; slug: string; name: string; kind: "feedback" | "tracker"; user: string; role: "owner" | "admin" }
 export async function createApp(
   c: Ctx,
   u: { id: string },
@@ -358,7 +360,7 @@ export async function createApp(
     description: str(b.description ?? "", "description", 4000, true),
     created_at: now(),
     icon_url: null,
-    role: "owner",
+    role: org?.role ?? "owner",
     public: b.public === undefined || feedback ? false : publicFlag(b.public),
     org: org ? { slug: org.slug, name: org.name } : null
   }
@@ -377,13 +379,17 @@ export async function createApp(
       Number(feedback),
       org?.user ?? null
     ),
-    sql(
-      c.env,
-      "INSERT INTO members(id,app_id,user_id,email,role) SELECT ?,?,id,email,'owner' FROM users WHERE id=?",
-      uid(),
-      app.id,
-      u.id
-    ),
+    ...(org
+      ? []
+      : [
+          sql(
+            c.env,
+            "INSERT INTO members(id,app_id,user_id,email,role) SELECT ?,?,id,email,'owner' FROM users WHERE id=?",
+            uid(),
+            app.id,
+            u.id
+          )
+        ]),
     sql(c.env, "INSERT INTO webhook_settings(app_id,secret) VALUES(?,?)", app.id, secret())
   ]
   const labelIds = (feedback ? feedbackLabels : seedLabels).map(([n, col, d]) => {
@@ -427,7 +433,7 @@ export async function createApp(
     q.push(
       sql(
         c.env,
-        "INSERT INTO report_keys(id,app_id,name,preview,hash,created_at) VALUES(?,?,?,?,?,?)",
+        "INSERT INTO report_keys(id,app_id,name,preview,hash,created_at,feedback) VALUES(?,?,?,?,?,?,1)",
         id,
         app.id,
         "Feedback form",
@@ -567,14 +573,40 @@ apps.patch("/api/apps/:slug/members/:id", async (c) => {
 })
 apps.post("/api/apps/:slug/transfer", async (c) => {
   requireTeam(c, "ownership")
-  await changeMember(
+  const target = str((await body(c)).member_id, "member_id", 64),
+    app = c.var.app.id
+  // The target is anyone on the team: someone there only through the org gets a direct owner seat.
+  const onTeam = await sql(
     c.env,
-    c.var.app.id,
-    { user: c.var.user!.id, actor: c.var.actor },
-    { id: str((await body(c)).member_id, "member_id", 64) },
-    "owner",
-    true
-  )
+    "SELECT t.role,u.email,EXISTS(SELECT 1 FROM members m WHERE m.app_id=t.app_id AND m.user_id=t.user_id) seat FROM team t JOIN users u ON u.id=t.user_id WHERE t.app_id=? AND t.user_id=?",
+    app,
+    target
+  ).first<{ role: Member["role"]; email: string; seat: number }>()
+  if (!onTeam || onTeam.seat)
+    await changeMember(c.env, app, { user: c.var.user!.id, actor: c.var.actor }, { id: target }, "owner", true)
+  else {
+    const [seat] = await c.env.DB.batch([
+      sql(
+        c.env,
+        `INSERT INTO members(id,app_id,user_id,email,role) SELECT ?,?,u.id,u.email,'owner' FROM users u WHERE u.id=?
+        AND EXISTS(SELECT 1 FROM team WHERE app_id=? AND user_id=? AND role='owner')`,
+        uid(),
+        app,
+        target,
+        app,
+        c.var.user!.id
+      ),
+      entry(
+        c.env,
+        app,
+        c.var.actor,
+        "app.ownership_transferred",
+        { type: "member", id: target, email: onTeam.email },
+        { from: onTeam.role, to: "owner", via: "org" }
+      )
+    ])
+    if (!seat!.meta.changes) denied()
+  }
   return c.json(await settings(c))
 })
 apps.get("/api/me/invitations", async (c) => {

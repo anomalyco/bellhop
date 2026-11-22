@@ -28,7 +28,7 @@ export const schemas = {
       message: { type: "string", minLength: 1, maxLength: 20000, description: "What happened, or what they'd like." },
       email: { type: "string", format: "email", description: "Where to send replies; confirmed by one email before anything else is sent. Ignored when anonymous." },
       anonymous: { type: "boolean", description: "Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept." },
-      user: obj({ id: field("The host app's user id, shown to the team as given."), name: field("Shown to the team as the reporter's name (not verified).", 120) }, []),
+      user: obj({ id: field("The host app's user id, shown to the team as given."), name: { ...field("Shown to the team as the reporter's name, as given by the app (not verified); 1-40 characters, no control or formatting characters.", 40), minLength: 1 } }, []),
       app: obj({ name: field("e.g. Hex"), version: field("e.g. 1.4.2"), build: field("e.g. 56") }, []),
       device: obj({ platform: field("e.g. ios"), os: field("e.g. iOS 26.1"), model: field("e.g. iPhone17,1"), locale: field("e.g. en-US") }, []),
       install_id: field("A random id the app creates once per installation (never a hardware id); groups an install's reports. Ignored when anonymous."),
@@ -43,7 +43,7 @@ export const schemas = {
       screenshots: {
         type: "array",
         maxItems: 5,
-        description: "JSON only. PNG, JPEG or WebP (checked by content), each <= 10 MB decoded, <= 20 MB in total.",
+        description: "JSON only. PNG, JPEG or WebP, checked by their real headers (at most 8192 px a side and 40 megapixels, nothing after the image), each <= 10 MB decoded, <= 20 MB in total.",
         items: obj({ name: field("File name.", 255), content_type: { enum: ["image/png", "image/jpeg", "image/webp"] }, data: { type: "string", contentEncoding: "base64" } }, ["content_type", "data"])
       },
       logs: {
@@ -66,8 +66,8 @@ export const schemas = {
     number: { ...integer, description: "The issue number in the workspace." },
     received_at: date,
     email: {
-      enum: ["sent", "not_needed", "none", "limited"],
-      description: "sent: a confirmation email went out; not_needed: already confirmed; none: no email (anonymous, or the address opted out of email); limited: no confirmation could be sent now (too many to that address today, or one is still waiting)."
+      enum: ["pending", "none"],
+      description: "pending: an email was given (and not anonymous); nothing is sent now, and when the team first replies Bellhop emails one confirmation. none: no email (or anonymous). Deliberately neutral about the address's history."
     }
   }),
   EscalateInput: obj({ reason: { type: "string", maxLength: 1000 } }, []),

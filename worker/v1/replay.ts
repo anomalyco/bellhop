@@ -13,14 +13,15 @@ const b64 = (bytes: Uint8Array) => {
 // Seal private response bodies and key the fingerprint of low-entropy OTPs. Mint
 // responses store a random ticket, not a bearer; retries rederive the credential
 // from the ticket, the original Authorization header and the server's secret.
-// Feedback keeps its records in feedback_replays (scoped to a report key); everything else in api_replays.
+// Feedback keeps its records in feedback_replays (scoped to a report key), and its unfinished attempts give their
+// key back after `pending` seconds; everything else uses api_replays, held for a day.
 export async function replay(
   c: Ctx,
   s: Scope,
   route: string,
   raw: string,
   run: (seed?: string) => Promise<Response>,
-  table: "api_replays" | "feedback_replays" = "api_replays"
+  { table = "api_replays", pending }: { table?: "api_replays" | "feedback_replays"; pending?: number } = {}
 ) {
   const nonce = c.req.header("Idempotency-Key")
   if (nonce === undefined) return run()
@@ -34,9 +35,10 @@ export async function replay(
       salt: enc.encode("Bellhop"),
       info: enc.encode("v1/replay/" + label)
     })
-  const [aes, mac] = await Promise.all([
+  const [aes, mac, budget] = await Promise.all([
     crypto.subtle.deriveKey(derive("response"), root, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]),
-    crypto.subtle.deriveKey(derive("request"), root, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"])
+    crypto.subtle.deriveKey(derive("request"), root, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"]),
+    crypto.subtle.deriveKey(derive("budget"), root, { name: "HMAC", hash: "SHA-256", length: 256 }, false, ["sign"])
   ])
   const scope = s.user ? s.family : s.key + ":" + (s.origin ?? ""),
     ids = [s.key, scope, route, nonce],
@@ -49,10 +51,16 @@ export async function replay(
     sql(c.env, `DELETE FROM ${table} WHERE ${where} AND expires<=unixepoch()`, ...ids),
     sql(
       c.env,
-      `INSERT INTO ${table}(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+86400,?) ON CONFLICT DO NOTHING`,
+      `INSERT INTO ${table}(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+?,?) ON CONFLICT DO NOTHING`,
       ...ids,
       digest,
-      s.kind === "publishable" && !s.user ? await sha256(s.key + ":" + clientIP(c)) : s.user ? s.family : scope
+      pending ?? 86400,
+      // Publishable credentials are budgeted per key and client; the client is a keyed hash, never a plain IP digest.
+      s.kind === "publishable" && !s.user
+        ? hex(await crypto.subtle.sign("HMAC", budget, enc.encode(s.key + ":" + clientIP(c))))
+        : s.user
+          ? s.family
+          : scope
     ),
     sql(c.env, `SELECT digest,status,cipher FROM ${table} WHERE ${where}`, ...ids)
   ])
@@ -138,7 +146,7 @@ export async function replay(
   sealed.set(cipher, 12)
   await sql(
     c.env,
-    `UPDATE ${table} SET status=?,cipher=?,contact_id=?,expires=min(expires,unixepoch()+CAST(? AS INTEGER)) WHERE ${where} AND digest=? AND status IS NULL`,
+    `UPDATE ${table} SET status=?,cipher=?,contact_id=?,expires=${pending ? "" : "min(expires,"}unixepoch()+CAST(? AS INTEGER)${pending ? "" : ")"} WHERE ${where} AND digest=? AND status IS NULL`,
     response.status,
     b64(sealed),
     s.replayContact ?? s.user?.id ?? null,

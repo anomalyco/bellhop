@@ -1,7 +1,7 @@
 import { appUrl, rows, sql } from "./core"
 import { deliverFormCode, formMailPrefix } from "./email-codes"
 import type { Locale, IssueStatus } from "../shared/api"
-import { mailCopy, formatMail, handoffCopy } from "./mail-copy"
+import { mailCopy, feedbackCopy, formatMail, handoffCopy } from "./mail-copy"
 import {
   esc,
   mailOrigin,
@@ -55,7 +55,7 @@ export async function enqueueDue(env: Env) {
   if (codes.length) await env.MAIL.sendBatch(codes.map((r) => ({ body: { id: formMailPrefix + r.id } })))
 }
 type Recipient = TokenRow & {
-  /** A feedback form's reporter: no web view, so no link, and the whole reply. */
+  /** A feedback form's reporter: no web view, so no link (and a note when a reply was shortened). */
   feedback: number
   mode: string
   trusted: number
@@ -152,7 +152,7 @@ export async function deliverBatch(env: Env, id: string) {
     sql(
       env,
       `SELECT n.kind,coalesce(json_extract(c.author,'$.name'),json_extract(c.author,'$.handle')) author,coalesce(c.internal,0) internal,
-      CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') WHEN p.role IS NULL AND EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=i.id) THEN c.body ELSE substr(c.body,1,4096) END description
+      CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') ELSE substr(c.body,1,4096) END description
       FROM mail_items n JOIN mail_batches b ON b.id=n.batch_id AND b.sealed=1 JOIN mail_people p ON p.id=b.sub_id AND p.state='on' JOIN issues i ON i.id=p.issue_id
       LEFT JOIN comments c ON c.id=n.ref AND c.issue_id=i.id LEFT JOIN issue_events e ON n.kind='status' AND e.id=n.ref AND e.issue_id=i.id
       WHERE b.id=? AND NOT EXISTS(SELECT 1 FROM held_replies h WHERE h.id=n.ref AND h.issue_id=i.id)
@@ -185,7 +185,7 @@ export async function deliverBatch(env: Env, id: string) {
     const url = appUrl(env, mailOrigin(env), p.slug, `/issues/${p.number}`),
       off = unsubscribeURL(env, unsub),
       all = off + "&all=1"
-    const cap = p.feedback ? Infinity : Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
+    const cap = Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
       lines = data.map((n) => {
         if (n.kind === "nudge") return copy.nudge
         if (n.kind === "status")
@@ -201,6 +201,8 @@ export async function deliverBatch(env: Env, id: string) {
         )
       }),
       instruction = note ? copy.noteAnswer : copy.answer
+    if (p.feedback && data.some((n) => n.kind !== "status" && (n.description?.length ?? 0) >= cap))
+      lines.push(feedbackCopy[p.locale].truncated)
     const clean = (s: string) => s.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim()
     await sendMail(env, "bellhop-" + id, {
       to: p.address,

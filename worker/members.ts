@@ -4,14 +4,18 @@ import { bad, denied, email, missing, rows, sql, uid } from "./core"
 import { agentAccessSQL, can } from "./permissions"
 
 export async function roster(env: Env, app: string): Promise<Member[]> {
+  // Seats in this app, then people on its team only through its org (read-only here), then invitations.
   const members = await rows<Omit<Member, "joined" | "available"> & { joined: number; available: number }>(
     sql(
       env,
       `SELECT coalesce(m.user_id,m.id) id,m.email,u.name,u.avatar_url,m.role,m.user_id IS NOT NULL joined,
-      (m.user_id IS NOT NULL AND t.role!='viewer' AND coalesce(v.available,1)) available FROM members m
+      (m.user_id IS NOT NULL AND t.role!='viewer' AND coalesce(v.available,1)) available,'app' via FROM members m
      LEFT JOIN users u ON u.id=m.user_id LEFT JOIN team t ON t.app_id=m.app_id AND t.user_id=m.user_id
      LEFT JOIN handoff_availability v ON v.member_id=t.id WHERE m.app_id=?1
-     UNION ALL SELECT id,email,NULL,NULL,role,0,0 FROM workspace_invitations WHERE app_id=?1 ORDER BY role DESC,email`,
+     UNION ALL SELECT t.user_id,t.email,u.name,u.avatar_url,t.role,1,(t.role!='viewer' AND coalesce(v.available,1)),'org' FROM team t
+     JOIN users u ON u.id=t.user_id LEFT JOIN handoff_availability v ON v.member_id=t.id
+     WHERE t.app_id=?1 AND NOT EXISTS(SELECT 1 FROM members x WHERE x.app_id=t.app_id AND x.user_id=t.user_id)
+     UNION ALL SELECT id,email,NULL,NULL,role,0,0,'app' FROM workspace_invitations WHERE app_id=?1 ORDER BY role DESC,email`,
       app
     )
   )

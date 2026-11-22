@@ -1,7 +1,7 @@
 import { Hono } from "hono"
 import type { IssueSubscription, Locale, NotificationSettings } from "../shared/api"
 import { requestLocale } from "./locale"
-import { mailCopy, deskCopy, formatMail } from "./mail-copy"
+import { mailCopy, deskCopy, feedbackCopy, formatMail } from "./mail-copy"
 import { allowWrite } from "./auth"
 import { guestWrite } from "./guest-history"
 import { bad, body, denied, email, fail, missing, sha256, sql, type Bindings, type Ctx } from "./core"
@@ -16,6 +16,7 @@ import {
   sendMail,
   unsubscribeURL,
   secrets,
+  workspaceSender,
   type TokenRow
 } from "./mail-provider"
 import { receiveEvent, type InboundEvent } from "./mail-inbound"
@@ -228,6 +229,29 @@ export async function sendConfirmation(
     throw e
   }
 }
+// A feedback reporter's one confirmation, sent when the team first replies: the workspace's name and that a reply is
+// waiting, nothing of the reply itself, and the workspace's sender ("{workspace} via Bellhop" unless trusted).
+export async function sendFeedbackConfirmation(
+  env: Env,
+  r: TokenRow,
+  address: string,
+  app: { locale: Locale | null; trusted: number; name: string }
+) {
+  const confirm = `${mailOrigin(env)}/email/confirm?t=${await mailToken(env, "confirm", r)}`,
+    unsub = unsubscribeURL(env, await mailToken(env, "unsubscribe", r)),
+    copy = mailCopy[app.locale ?? "en"],
+    words = feedbackCopy[app.locale ?? "en"],
+    workspace = app.name.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim(),
+    intro = formatMail(words.intro, { workspace }),
+    action = words.action
+  await sendMail(env, "feedback-confirm-" + r.nonce, {
+    to: address,
+    fromName: workspaceSender(workspace, !!app.trusted),
+    subject: formatMail(words.subject, { workspace }),
+    text: `${intro}\n${action}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}`,
+    html: `<p>${esc(intro)}</p><p><a href="${esc(confirm)}">${esc(action)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a></p>`
+  })
+}
 // Reserve the address-wide confirmation for a pending subscription (the same rules as the subscription route).
 export const reserveConfirmation = (env: Env, issue: string, actor: string) =>
   sql(
@@ -247,27 +271,57 @@ function page(c: Ctx, text: string, form = "") {
     "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'"
   })
 }
-mailRoutes.get("/email/confirm", async (c) => {
+// Confirming takes a POST from the page's button, so link scanners that open (GET) the link don't confirm anything.
+mailRoutes.on(["GET", "POST"], "/email/confirm", async (c) => {
   const t = c.req.query("t") ?? "",
     r = await sql(
       c.env,
-      `SELECT id,nonce FROM mail_people WHERE id=? AND state='pending' AND requested>=unixepoch()-86400`,
+      `SELECT id,nonce,issue_id,address,EXISTS(SELECT 1 FROM feedback WHERE issue_id=mail_people.issue_id) feedback FROM mail_people WHERE id=? AND state='pending' AND requested>=unixepoch()-86400`,
       t.slice(0, 24)
-    ).first<TokenRow>()
+    ).first<TokenRow & { issue_id: string; address: string; feedback: number }>()
   if (!r || !(await checkToken(c.env, "confirm", r, t)))
     return page(c, "This confirmation link is expired or no longer available.")
+  if (c.req.method === "GET")
+    return page(
+      c,
+      r.feedback ? "Confirm your email address to read the reply and get future replies?" : "Confirm email updates on this issue?",
+      `<form method="post"><button>Confirm</button></form>`
+    )
   const changed = await sql(
     c.env,
     "UPDATE mail_subs SET state='on' WHERE id=? AND nonce=? AND state='pending' AND EXISTS(SELECT 1 FROM mail_people p WHERE p.id=mail_subs.id)",
     r.id,
     r.nonce
   ).run()
-  return page(
-    c,
-    changed.meta.changes
-      ? "Confirmed. You will receive updates on this issue."
-      : "This confirmation link is no longer active."
-  )
+  if (!changed.meta.changes) return page(c, "This confirmation link is no longer active.")
+  if (!r.feedback) return page(c, "Confirmed. You will receive updates on this issue.")
+  // Feedback: the address is proved for this app, so every pending feedback subscription with it there turns on, and
+  // the replies already posted on those issues are sent (the one that triggered this confirmation among them).
+  const on = await sql(
+    c.env,
+    `UPDATE mail_subs SET state='on' WHERE state='pending' AND user_id IS NULL AND address=?1 AND issue_id IN
+      (SELECT f.issue_id FROM feedback f WHERE f.app_id=(SELECT app_id FROM feedback WHERE issue_id=?2)) RETURNING id`,
+    r.address,
+    r.issue_id
+  ).all<{ id: string }>()
+  const subs = JSON.stringify([r.id, ...on.results.map((s) => s.id)])
+  await c.env.DB.batch([
+    sql(
+      c.env,
+      `INSERT INTO mail_batches(sub_id,issue_id,address,due) SELECT s.id,s.issue_id,s.address,unixepoch() FROM mail_subs s WHERE s.id IN (SELECT value FROM json_each(?))
+      AND EXISTS(SELECT 1 FROM comments c WHERE c.issue_id=s.issue_id AND c.internal=0 AND c.hidden IS NULL AND json_extract(c.author,'$.id')!=s.actor_id)
+      ON CONFLICT(issue_id,address) WHERE sealed=0 DO UPDATE SET sub_id=excluded.sub_id,due=excluded.due`,
+      subs
+    ),
+    sql(
+      c.env,
+      `INSERT OR IGNORE INTO mail_items(batch_id,kind,ref,actor) SELECT b.id,'reply',c.id,json_extract(c.author,'$.id') FROM mail_batches b JOIN mail_subs s ON s.id=b.sub_id
+      JOIN comments c ON c.issue_id=b.issue_id AND c.internal=0 AND c.hidden IS NULL AND json_extract(c.author,'$.id')!=s.actor_id
+      WHERE b.sealed=0 AND b.sub_id IN (SELECT value FROM json_each(?)) ORDER BY c.created_at,c.rowid`,
+      subs
+    )
+  ])
+  return page(c, "Confirmed. The reply is on its way, and future replies will reach you by email.")
 })
 mailRoutes.on(["GET", "POST"], "/email/unsubscribe", async (c) => {
   const t = c.req.query("t") ?? "",

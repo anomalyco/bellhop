@@ -39,6 +39,7 @@ import { contactActor } from "./contact-session"
 import { prepareForm, type FormCaller } from "./request-form"
 import { decideApproval, memberGrant, responderGrant } from "./approvals"
 import { typeGuard, requestJson, typeInfo, retireFormReplays } from "./request-types"
+import { askToConfirm } from "./feedback"
 
 export interface Access {
   env: Env
@@ -557,6 +558,8 @@ export async function addComment(
     viewer_helpful: false
   }
   if (actor.type === "agent" && !internal) await setActivity(env, app.id, s.id, actor, null, true)
+  // The team's first public reply to feedback asks its reporter to confirm their address (feedback.ts).
+  if (!internal && can(a.role, "respond")) a.ctx.waitUntil(askToConfirm(env, s.id))
   notify(a, {
     type: "comment.created",
     issue: await summary(a, n),

@@ -290,6 +290,58 @@ export const mailCopy: Record<Locale, typeof en> = {
   }
 }
 
+// A feedback reporter's confirmation (sent when the team first replies) and the line under a shortened reply.
+export const feedbackCopy: Record<Locale, { subject: string; intro: string; action: string; truncated: string }> = {
+  en: {
+    subject: "{workspace} replied to your feedback",
+    intro: "{workspace} replied to your feedback. Confirm your email address to read the reply and get future replies.",
+    action: "Confirm to read the reply",
+    truncated: "This reply was shortened for email. Reply to this email if anything is missing."
+  },
+  es: {
+    subject: "{workspace} respondió a tus comentarios",
+    intro: "{workspace} respondió a tus comentarios. Confirma tu dirección de correo para leer la respuesta y recibir las siguientes.",
+    action: "Confirmar para leer la respuesta",
+    truncated: "Esta respuesta se acortó para el correo. Responde a este correo si falta algo."
+  },
+  "pt-BR": {
+    subject: "{workspace} respondeu ao seu feedback",
+    intro: "{workspace} respondeu ao seu feedback. Confirme seu endereço de e-mail para ler a resposta e receber as próximas.",
+    action: "Confirmar para ler a resposta",
+    truncated: "Esta resposta foi encurtada para o e-mail. Responda a este e-mail se faltar algo."
+  },
+  fr: {
+    subject: "{workspace} a répondu à vos commentaires",
+    intro: "{workspace} a répondu à vos commentaires. Confirmez votre adresse e-mail pour lire la réponse et recevoir les suivantes.",
+    action: "Confirmer pour lire la réponse",
+    truncated: "Cette réponse a été raccourcie pour l’e-mail. Répondez à cet e-mail s’il manque quelque chose."
+  },
+  de: {
+    subject: "{workspace} hat auf dein Feedback geantwortet",
+    intro: "{workspace} hat auf dein Feedback geantwortet. Bestätige deine E-Mail-Adresse, um die Antwort zu lesen und weitere zu erhalten.",
+    action: "Bestätigen und Antwort lesen",
+    truncated: "Diese Antwort wurde für die E-Mail gekürzt. Antworte auf diese E-Mail, wenn etwas fehlt."
+  },
+  ja: {
+    subject: "{workspace}からフィードバックへの返信があります",
+    intro: "{workspace}があなたのフィードバックに返信しました。返信を読み、今後の返信を受け取るにはメールアドレスを確認してください。",
+    action: "確認して返信を読む",
+    truncated: "この返信はメール用に短縮されています。足りない内容があれば、このメールに返信してください。"
+  },
+  "zh-CN": {
+    subject: "{workspace} 回复了你的反馈",
+    intro: "{workspace} 回复了你的反馈。请确认你的邮箱地址，以阅读回复并接收后续回复。",
+    action: "确认并阅读回复",
+    truncated: "此回复已为邮件缩短。如有遗漏，请直接回复此邮件。"
+  },
+  ko: {
+    subject: "{workspace}에서 피드백에 답장했습니다",
+    intro: "{workspace}에서 피드백에 답장했습니다. 답장을 읽고 이후 답장을 받으려면 이메일 주소를 확인하세요.",
+    action: "확인하고 답장 읽기",
+    truncated: "이 답장은 이메일용으로 줄여졌습니다. 빠진 내용이 있으면 이 이메일에 답장하세요."
+  }
+}
+
 // Substitute only catalog placeholders, never recursively interpret the user's text.
 export const formatMail = (template: string, fields: Record<string, string | number>) =>
   template.replace(/\{(\w+)\}/g, (_, key: string) => String(fields[key]))

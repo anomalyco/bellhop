@@ -1,10 +1,11 @@
 import type { Actor, FeedbackCreated, Locale, SystemInfo } from "../shared/api"
 import { LOCALES } from "../shared/api"
-import { ApiFailure, bad, dbError, email, fail, hex, input, now, secret, sha256, sql, str, uid, type Ctx } from "./core"
+import { ApiFailure, appUrl, bad, dbError, email, fail, hex, input, now, rows, secret, sha256, sql, str, uid, type Ctx } from "./core"
 import { createIssue, type Access } from "./mutations"
-import { imageType } from "./icons"
-import { allowed, clientIP, enforce } from "./rate-limits"
-import { reserveConfirmation, sendConfirmation } from "./mail-routes"
+import { imageExtensions, imageLimits, inspectImage } from "./images"
+import { clientIP, enforce } from "./rate-limits"
+import { sendFeedbackConfirmation } from "./mail-routes"
+import { esc, mailOrigin, sendMail, workspaceSender } from "./mail-provider"
 import { checkHost, type Scope } from "./v1/access"
 import { replay } from "./v1/replay"
 
@@ -27,7 +28,10 @@ export const feedbackLimits = {
   perKeyMinute: 60,
   perInstallHour: 10,
   perKeyDay: 1000,
-  bytesPerKeyDay: 1024 * MiB
+  bytesPerKeyDay: 1024 * MiB,
+  perIpDay: 50,
+  bytesPerIpDay: 100 * MiB,
+  userName: 40
 }
 const L = feedbackLimits
 const tooLarge = (message = "Feedback exceeds the upload limit") => fail(413, "too_large", message)
@@ -37,7 +41,7 @@ type Shot = { name: string; mime: string; bytes: Uint8Array }
 export function feedbackCors(c: Ctx) {
   c.header("Access-Control-Allow-Origin", "*")
   c.header("Access-Control-Allow-Methods", "POST, OPTIONS")
-  c.header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+  c.header("Access-Control-Allow-Headers", "Authorization, Content-Type, Idempotency-Key")
   c.header("Access-Control-Expose-Headers", "Retry-After")
   c.header("Access-Control-Max-Age", "86400")
   c.header("Cache-Control", "no-store")
@@ -85,14 +89,16 @@ function json(bytes: Uint8Array) {
     return bad("Invalid feedback JSON")
   }
 }
-const extensions = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" } as const
+// The real header decides: type, dimensions and nothing hidden after the image. The stored name always carries the
+// detected type's extension.
 function shot(index: number, name: unknown, bytes: Uint8Array): Shot {
   if (bytes.length > L.screenshot) tooLarge("Each screenshot must be 10 MB or smaller")
-  const mime = imageType(bytes)
-  if (!mime) return unsupported("Screenshots must be PNG, JPEG or WebP images")
-  const given = typeof name === "string" ? name.trim() : ""
-  const safe = given && given.length <= 255 && !/[\/\\\x00-\x1f\x7f]/.test(given) && given !== "." && given !== ".."
-  return { name: safe ? given : "screenshot-" + (index + 1) + "." + extensions[mime], mime, bytes }
+  const info = inspectImage(bytes)
+  if (info === "too_large") return tooLarge(`Screenshots can be at most ${imageLimits.side} px a side and ${imageLimits.pixels / 1e6} megapixels`)
+  if (info === "invalid") return unsupported("Screenshots must be PNG, JPEG or WebP images")
+  const given = typeof name === "string" ? name.trim() : "",
+    base = given.replace(/\.[^.]*$/, "").replace(/[\/\\\p{Cc}\p{Cf}]/gu, "").trim().slice(0, 200)
+  return { name: (base && base !== "." ? base : "screenshot-" + (index + 1)) + "." + imageExtensions[info.mime], mime: info.mime, bytes }
 }
 // JSON (base64 screenshots) or multipart (a "payload" part and "screenshot" file parts), one shape after parsing.
 async function parse(c: Ctx) {
@@ -203,6 +209,18 @@ async function installActor(env: Env, app: string, install: string) {
     ])
   return hex(await crypto.subtle.sign("HMAC", key, enc.encode("bellhop-feedback-install-v1:" + app + ":" + install))).slice(0, 32)
 }
+// Guest-name rules for the app's user name: shown to the team as the reporter.
+function userName(name: string) {
+  if ([...name].length > L.userName || /[\p{Cc}\p{Cf}]/u.test(name)) bad("user.name must be 1-40 characters without control or formatting characters")
+  return name
+}
+// A keyed hash, so stored client counters never hold an IP address.
+async function keyed(env: Env, label: string, value: string) {
+  if (!env.COOKIE_SECRET || env.COOKIE_SECRET.length < 32) fail(503, "misconfigured", "Feedback signing unavailable")
+  const enc = new TextEncoder(),
+    k = await crypto.subtle.importKey("raw", enc.encode(env.COOKIE_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"])
+  return hex(await crypto.subtle.sign("HMAC", k, enc.encode(label + ":" + value))).slice(0, 32)
+}
 function rethrow(e: unknown): never {
   throw (e instanceof ApiFailure ? e : e instanceof Error ? dbError(e) : null) ?? e
 }
@@ -226,12 +244,13 @@ export async function submitFeedback(c: Ctx, slug?: string) {
     scope = slug ?? (host && host !== "api." + env.APP_DOMAIN ? host.slice(0, -env.APP_DOMAIN.length - 1) : null),
     key = await sql(
       env,
-      "SELECT k.id,a.id app_id,a.slug,a.name,a.public,a.mode FROM report_keys k JOIN apps a ON a.id=k.app_id WHERE k.hash=? AND (?2 IS NULL OR a.slug=?2)",
+      "SELECT k.id,k.name key_name,k.feedback,a.id app_id,a.slug,a.name,a.public,a.mode FROM report_keys k JOIN apps a ON a.id=k.app_id WHERE k.hash=? AND (?2 IS NULL OR a.slug=?2)",
       await sha256(bearer),
       scope
-    ).first<{ id: string; app_id: string; slug: string; name: string; public: number; mode: string }>()
+    ).first<{ id: string; key_name: string; feedback: number; app_id: string; slug: string; name: string; public: number; mode: string }>()
   if (!key) return invalid()
   if (key.mode !== "tracker") fail(403, "feedback_unavailable", "Help desk workspaces don't take feedback")
+  if (!key.feedback) fail(403, "feedback_disabled", "This report key can't send feedback; an admin can turn it on")
   const { b, shots, bytes, material } = await parse(c)
   const accept = async () => {
     const known = ["subject", "message", "email", "anonymous", "user", "app", "device", "install_id", "metadata", "category", "screenshots", "logs"]
@@ -253,11 +272,12 @@ export async function submitFeedback(c: Ctx, slug?: string) {
       user = anonymous ? null : sentUser,
       install = anonymous ? undefined : sentInstall,
       files = anonymous ? [] : sentLogs
+    if (sentUser?.name !== undefined) userName(sentUser.name)
     const actorId = install ? await installActor(env, key.app_id, install) : secret().slice(0, 32),
       actor: Actor = {
         type: "guest",
         id: actorId,
-        name: user?.name?.slice(0, 120) || "Anonymous",
+        name: user?.name || "Anonymous",
         handle: "guest-" + actorId.slice(0, 4)
       }
     const info: SystemInfo = {}
@@ -288,6 +308,14 @@ export async function submitFeedback(c: Ctx, slug?: string) {
       await env.DB.batch([
         window("key", key.id, minute, L.perKeyMinute),
         ...(install ? [window("install", actorId, hour, L.perInstallHour)] : []),
+        // One client's share of the key's day comes first, so it can't use up the key's own caps.
+        sql(
+          env,
+          "INSERT INTO feedback_ip_daily(key_id,client,day,n,bytes) VALUES(?,?,date('now'),1,?) ON CONFLICT(key_id,client) DO UPDATE SET n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END,bytes=CASE WHEN day=excluded.day THEN bytes+excluded.bytes ELSE excluded.bytes END,day=excluded.day",
+          key.id,
+          await keyed(env, "feedback-client-v1", clientIP(c)),
+          Math.max(bytes, stored)
+        ),
         sql(
           env,
           "INSERT INTO feedback_key_daily(key_id,day,n,bytes) VALUES(?,date('now'),1,?) ON CONFLICT(key_id) DO UPDATE SET n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END,bytes=CASE WHEN day=excluded.day THEN bytes+excluded.bytes ELSE excluded.bytes END,day=excluded.day",
@@ -299,6 +327,7 @@ export async function submitFeedback(c: Ctx, slug?: string) {
       const code = e instanceof Error ? dbError(e)?.code : undefined
       if (code === "key_rate_limited") c.header("Retry-After", String(60 - (Math.floor(Date.now() / 1000) % 60)))
       if (code === "install_rate_limited") c.header("Retry-After", String(3600 - (Math.floor(Date.now() / 1000) % 3600)))
+      if (code === "feedback_daily_limit" || code === "feedback_byte_quota") c.executionCtx.waitUntil(limitReached(c, key))
       rethrow(e)
     }
     const at = now(),
@@ -410,7 +439,7 @@ export async function submitFeedback(c: Ctx, slug?: string) {
         {
           number: issue.number,
           received_at: at,
-          email: address ? await subscribe(c, key, issue.id, actor, address, locale(device?.locale) ?? null) : "none"
+          email: address ? await keepAddress(env, key.app_id, issue.id, actor, address, locale(device?.locale) ?? null) : "none"
         } satisfies FeedbackCreated,
         201
       )
@@ -425,12 +454,14 @@ export async function submitFeedback(c: Ctx, slug?: string) {
     }
   }
   if (c.req.header("Idempotency-Key") === undefined) return accept()
-  // A retry with the same key and the same feedback gets the first answer: no second issue, no second email.
+  // A retry with the same key and the same feedback gets the first answer: no second issue, no second email. Keys
+  // are scoped to the install when there is one, and an unfinished first attempt holds its key for 2 minutes.
+  const install = b.anonymous !== true && typeof b.install_id === "string" && b.install_id.trim() ? b.install_id.trim() : null
   const s: Scope = {
     key: key.id,
     kind: "publishable",
     user: null,
-    origin: null,
+    origin: install && (await installActor(env, key.app_id, install)),
     family: "",
     hash: "",
     app: key.app_id,
@@ -440,61 +471,110 @@ export async function submitFeedback(c: Ctx, slug?: string) {
     allow_anonymous: 0,
     require_verified_email: 0
   }
-  return replay(c, s, "/v1/feedback", await material(), accept, "feedback_replays")
+  return replay(c, s, "/v1/feedback", await material(), accept, { table: "feedback_replays", pending: 120 })
 }
-// One confirmation through the existing double opt-in; nothing else reaches an address until it's confirmed.
-async function subscribe(
-  c: Ctx,
-  app: { app_id: string; name: string },
-  issue: string,
-  actor: Actor,
-  address: string,
-  locale: Locale | null
-): Promise<FeedbackCreated["email"]> {
-  const env = c.env
-  if (await sql(env, "SELECT 1 FROM mail_suppressed WHERE address=?", address).first()) return "none"
-  // The same install already confirmed this address in this app: no second confirmation.
-  const known = await sql(
+// The address waits as a pending subscription; nothing is sent at submission. The confirmation goes out when the team
+// first replies (askToConfirm). The same install's confirmed address in this app needs no second confirmation.
+async function keepAddress(env: Env, app: string, issue: string, actor: Actor, address: string, locale: Locale | null) {
+  await sql(
     env,
-    "SELECT 1 FROM mail_subs s JOIN issues i ON i.id=s.issue_id WHERE i.app_id=? AND s.actor_id=? AND s.address=? AND s.state='on' AND s.user_id IS NULL LIMIT 1",
-    app.app_id,
+    `INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,address,state,reason,requested,locale)
+    SELECT ?1,?2,?3,CASE WHEN EXISTS(SELECT 1 FROM mail_subs s JOIN feedback f ON f.issue_id=s.issue_id WHERE f.app_id=?5 AND f.install_hash=?2
+      AND s.actor_id=?2 AND s.address=?3 AND s.state='on' AND s.user_id IS NULL) THEN 'on' ELSE 'pending' END,'opened',0,?4
+    WHERE NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=?3)`,
+    issue,
     actor.id,
-    address
-  ).first()
-  const insert = (state: "on" | "pending") =>
+    address,
+    locale,
+    app
+  ).run()
+  // Neutral: the answer never tells whether the address was confirmed, opted out or new.
+  return "pending" as const
+}
+// When the team (or an agent) first replies in public to a feedback issue, its reporter's pending address gets one
+// neutral email: "{workspace} replied to your feedback", with no reply text until they confirm. One at a time per
+// (app, address), at most 3 a day; another reporter's address in another app is unaffected.
+export async function askToConfirm(env: Env, issue: string) {
+  const subs = await rows<{ id: string; nonce: string; address: string; app_id: string; name: string; trusted: number; locale: Locale | null }>(
     sql(
       env,
-      "INSERT OR IGNORE INTO mail_subs(issue_id,actor_id,address,state,reason,requested,locale) VALUES(?,?,?,?,'opened',unixepoch(),?)",
-      issue,
-      actor.id,
-      address,
-      state,
-      locale
+      `SELECT s.id,s.nonce,s.address,a.id app_id,a.name,a.trusted,s.locale FROM mail_subs s JOIN feedback f ON f.issue_id=s.issue_id JOIN apps a ON a.id=f.app_id
+      WHERE s.issue_id=? AND s.state='pending' AND s.user_id IS NULL AND s.requested<unixepoch()-86400
+      AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=s.address)`,
+      issue
     )
-  if (known) {
-    await insert("on").run()
-    return "not_needed"
+  )
+  for (const s of subs) {
+    let reserved: unknown
+    try {
+      const [r] = await env.DB.batch([
+        sql(
+          env,
+          `INSERT INTO feedback_confirmations(app_id,address,day,sub_id,nonce,n) SELECT ?1,s.address,date('now'),s.id,s.nonce,1 FROM mail_subs s WHERE s.id=?2 AND s.state='pending'
+          AND NOT EXISTS(SELECT 1 FROM feedback_confirmations d JOIN mail_subs p ON p.id=d.sub_id AND p.nonce=d.nonce WHERE d.app_id=?1 AND d.address=s.address AND p.state='pending' AND p.requested>=unixepoch()-86400)
+          ON CONFLICT(app_id,address) DO UPDATE SET day=excluded.day,sub_id=excluded.sub_id,nonce=excluded.nonce,n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END RETURNING sub_id`,
+          s.app_id,
+          s.id
+        ),
+        sql(
+          env,
+          "UPDATE mail_subs SET requested=unixepoch() WHERE id=? AND nonce=? AND EXISTS(SELECT 1 FROM feedback_confirmations WHERE app_id=? AND address=? AND sub_id=? AND nonce=?)",
+          s.id,
+          s.nonce,
+          s.app_id,
+          s.address,
+          s.id,
+          s.nonce
+        )
+      ])
+      reserved = r!.results[0]
+    } catch (e) {
+      if ((String((e as Error).message) + String((e as Error).cause ?? "")).includes("feedback_confirmation_limit")) continue
+      throw e
+    }
+    if (!reserved) continue
+    try {
+      await sendFeedbackConfirmation(env, s, s.address, s)
+    } catch (e) {
+      await sql(env, "UPDATE mail_subs SET requested=0 WHERE id=? AND nonce=?", s.id, s.nonce).run()
+      console.error("bellhop.feedback_confirmation_failed", { message: (e as Error).message })
+    }
   }
-  if (!(await allowed(c, "RL_UPLOAD", "confirm:addr:" + (await sha256(address))))) return "limited"
-  let reservation: { id: string; nonce: string; address: string } | undefined
-  try {
-    const [, r] = await env.DB.batch<{ id: string; nonce: string; address: string }>([
-      insert("pending"),
-      reserveConfirmation(env, issue, actor.id)
-    ])
-    reservation = r!.results[0]
-  } catch (e) {
-    if (dbError(e as Error)?.code === "confirmation_daily_limit") return "limited"
-    throw e
-  }
-  // Another confirmation to this address is still waiting (sent within a day): don't send a second one.
-  if (!reservation) return "limited"
-  const trusted = (await sql(env, "SELECT trusted FROM apps WHERE id=?", app.app_id).first<number>("trusted")) ?? 0
-  try {
-    await sendConfirmation(env, reservation, address, { locale, trusted, workspace: app.name })
-  } catch (e) {
-    console.error("bellhop.feedback_confirmation_failed", { message: (e as Error).message })
-    return "limited"
-  }
-  return "sent"
+}
+// A report key hit its own daily cap: tell the workspace's admins once a day, and note it in the audit log.
+async function limitReached(c: Ctx, key: { id: string; key_name: string; app_id: string; slug: string; name: string }) {
+  const env = c.env
+  const [first] = await env.DB.batch([
+    sql(env, "INSERT INTO feedback_key_alerts(key_id,day) VALUES(?,date('now')) ON CONFLICT(key_id) DO UPDATE SET day=excluded.day WHERE day<excluded.day", key.id),
+    sql(
+      env,
+      `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT ?,?,'report_key.feedback_limited',json_object('type','report_key','id',id,'name',name,'preview',preview),
+      json_object('submissions',?,'bytes',?) FROM report_keys WHERE id=? AND changes()>0`,
+      key.app_id,
+      JSON.stringify({ type: "agent", id: "system", name: "Bellhop" }),
+      L.perKeyDay,
+      L.bytesPerKeyDay,
+      key.id
+    )
+  ])
+  if (!first!.meta.changes) return
+  const admins = await rows<{ email: string; locale: Locale | null; trusted: number }>(
+    sql(
+      env,
+      `SELECT u.email,u.locale,a.trusted FROM team t JOIN users u ON u.id=t.user_id JOIN apps a ON a.id=t.app_id WHERE t.app_id=? AND t.role IN ('admin','owner')
+      AND NOT EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email)`,
+      key.app_id
+    )
+  )
+  const url = appUrl(env, mailOrigin(env), key.slug, "/settings"),
+    subject = `Feedback paused: report key "${key.key_name}" reached today's limit`,
+    text = `Feedback sent with the report key "${key.key_name}" in ${key.name} reached its daily limit (${L.perKeyDay} submissions or ${L.bytesPerKeyDay / MiB} MB). New feedback with this key is refused until midnight UTC; each client also has its own daily share, so this usually means unusual traffic.`
+  for (const a of admins)
+    await sendMail(env, `feedback-limit-${key.id}-${new Date().toISOString().slice(0, 10)}-${await sha256(a.email)}`, {
+      to: a.email,
+      fromName: workspaceSender(key.name, !!a.trusted),
+      subject,
+      text: `${text}\n\n${url}`,
+      html: `<p>${esc(text)}</p><p><a href="${esc(url)}">${esc(key.name)} settings</a></p>`
+    }).catch((e) => console.error("bellhop.feedback_limit_mail_failed", { message: (e as Error).message }))
 }

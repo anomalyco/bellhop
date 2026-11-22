@@ -44,6 +44,7 @@ import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
 import { fromAppRow, orgCols, type AppRow } from "./read-scope"
+import { inspectImage } from "./images"
 import { configureWebhook, redeliver, rotateWebhook, testWebhook, webhookEvents } from "./webhooks"
 
 const number = { type: "integer", minimum: 1 },
@@ -660,12 +661,15 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
       const content: { type: string; text?: string; mimeType?: string; data?: string }[] = [...result.content]
       for (const x of picked) {
         const row = await sql(env, "SELECT object_key FROM attachments WHERE id=? AND app_id=?", x.id, app.id).first<string>("object_key")
-        const object = row && x.size <= 2 * 1024 * 1024 ? await env.MEDIA.get(row) : null
-        if (!object) {
+        const object = row && x.size <= 2 * 1024 * 1024 ? await env.MEDIA.get(row) : null,
+          bytes = object && new Uint8Array(await object.arrayBuffer()),
+          info = bytes && inspectImage(bytes)
+        // Only real images (checked by their headers, of the type they claim) go inline; anything else as a link.
+        if (!bytes || !info || typeof info !== "object" || info.mime !== x.mime) {
           content.push({ type: "text", text: `Image ${x.name} (${x.size} bytes): ${new URL(x.url, a.origin).href}` })
           continue
         }
-        content.push({ type: "image", mimeType: x.mime, data: base64(new Uint8Array(await object.arrayBuffer())) })
+        content.push({ type: "image", mimeType: x.mime, data: base64(bytes) })
       }
       return { content }
     }
@@ -692,7 +696,10 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
         return textResult(new URL(attachment(row).url, a.origin).href)
       const object = await env.MEDIA.get(row.object_key)
       if (!object) missing()
-      return { content: [{ type: "image", mimeType: row.mime, data: base64(new Uint8Array(await object.arrayBuffer())) }] }
+      const bytes = new Uint8Array(await object.arrayBuffer()),
+        info = inspectImage(bytes)
+      if (typeof info !== "object" || info.mime !== row.mime) return textResult(new URL(attachment(row).url, a.origin).href)
+      return { content: [{ type: "image", mimeType: info.mime, data: base64(bytes) }] }
     }
     case "comment": {
       const comment = await addComment(a, n(), b)
