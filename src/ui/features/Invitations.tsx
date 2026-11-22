@@ -7,6 +7,7 @@ import { AppIcon, Button } from "../primitives"
 import { RoleBadge } from "../roles/RoleSelect"
 import "../../styles/features.css"
 import { useT } from "../../i18n/core"
+import { useT as useInboxT } from "../../i18n/inbox"
 
 /** The account's waiting invitations; null while signed out. A missing route (older backend) reads as none. */
 export function useInvitations() {
@@ -37,6 +38,7 @@ export function InvitationsSection({ invitations }: { invitations: Invitation[] 
 
 function InvitationRow({ invitation }: { invitation: Invitation }) {
   const t = useT()
+  const ti = useInboxT()
   const [busy, setBusy] = useState<"accept" | "decline" | null>(null)
   const [error, setError] = useState<string | null>(null)
   const drop = () => setData<Invitation[]>(keys.invitations, (list) => list?.filter((i) => i.id !== invitation.id))
@@ -45,9 +47,11 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
     setBusy("accept")
     setError(null)
     try {
-      const app = await api.acceptInvitation(invitation.id)
-      setData<App[]>(keys.apps, (apps) => (apps ? [...apps.filter((a) => a.id !== app.id), app] : apps))
+      const joined = await api.acceptInvitation(invitation.id)
+      // A workspace invitation answers with the app; an org one with the org (its apps come with the next fetch)
+      if (invitation.app) setData<App[]>(keys.apps, (apps) => (apps ? [...apps.filter((a) => a.id !== joined.id), joined] : apps))
       invalidate(keys.apps)
+      invalidate(keys.orgs)
       drop()
     } catch (e) {
       setError(errorMessage(e))
@@ -66,17 +70,17 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
     }
   }
 
-  // Org invitations are shown by the inbox screens; this row is for workspace invitations.
-  const target = invitation.app ?? invitation.org
-  if (!target) return null
+  // Exactly one of app and org is set
+  const place = invitation.org ?? invitation.app
   return (
-    <div className="box-row invite-row">
-      <AppIcon src={target.icon_url} size={28} />
+    <div className="box-row invite-row" data-org={invitation.org ? "" : undefined}>
+      <AppIcon src={place?.icon_url ?? null} size={28} name={invitation.org ? invitation.org.name : undefined} />
       <div className="app-row-main invite-main">
         <div className="app-row-title">
-          <span className="app-row-name">{target.name}</span>
+          <span className="app-row-name">{invitation.org ? ti("invite.joinOrg", { org: invitation.org.name }) : place?.name}</span>
           <RoleBadge role={invitation.role} />
         </div>
+        {invitation.org && <div className="issue-meta">{ti("invite.orgText")}</div>}
         <div className="issue-meta">
           {t("invite.by", { name: invitation.invited_by.name })} <Time iso={invitation.created_at} />
         </div>

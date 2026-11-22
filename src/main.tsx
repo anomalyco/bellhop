@@ -1,11 +1,11 @@
-import { StrictMode, Suspense, lazy } from "react"
+import { StrictMode, Suspense, lazy, useEffect } from "react"
 import { createRoot } from "react-dom/client"
-import { Route, Switch } from "wouter"
+import { Route, Switch, useLocation } from "wouter"
 import { api, keys, loadConfig, loadMe } from "./lib/api"
 import { load } from "./lib/cache"
 import { fetchList, listKey, parseQuery } from "./lib/issues"
 import { readBoot, seedBoot } from "./lib/page"
-import { appPath, homeSegments, hostSlug, onHome } from "./lib/site"
+import { appPath, homeSegments, hostSlug, onHome, orgPath } from "./lib/site"
 import { Feed, feedKey, fetchFeed } from "./routes/Feed"
 import { NewWorkspacePage, WorkspacesPage } from "./routes/Home"
 import { SignInPage } from "./routes/home/SignIn"
@@ -16,7 +16,7 @@ import { loadMarkdown } from "./ui/Markdown"
 import { setLocale } from "./i18n"
 import { resolveLocale } from "./i18n/locale"
 import { LocaleSync } from "./ui/LanguageMenu"
-import { AppLayout, NotFound } from "./ui/Shell"
+import { AppLayout, Header, NotFound, useMe, useOrgs } from "./ui/Shell"
 import "./styles/theme.css"
 import "./styles/components.css"
 import "./styles/app.css"
@@ -31,6 +31,8 @@ const Reports = lazy(() => import("./routes/Reports").then((m) => ({ default: m.
 const ContactsPage = lazy(() => import("./routes/helpdesk/Contacts").then((m) => ({ default: m.ContactsPage })))
 const ContactPageView = lazy(() => import("./routes/helpdesk/Contacts").then((m) => ({ default: m.ContactPageView })))
 const NotificationSettings = lazy(() => import("./routes/NotificationSettings").then((m) => ({ default: m.NotificationSettingsPage })))
+const OrgInboxPage = lazy(() => import("./routes/inbox/OrgInbox").then((m) => ({ default: m.OrgInboxPage })))
+const OrgSettingsPage = lazy(() => import("./routes/inbox/OrgSettings").then((m) => ({ default: m.OrgSettingsPage })))
 
 // A deploy swaps hashed /assets/* chunks across edge colos over a few seconds, and open tabs can outlive their
 // lazy chunks: reload once per location on a chunk/preload failure so mid-deploy visitors recover without looping.
@@ -172,11 +174,31 @@ function AppRoutes({ slug }: { slug: string }) {
 }
 
 /** The home domain, and every page in dev, where apps live under /<slug>. */
+/**
+ * blhp.app: a signed-in operator's home is their org's feedback inbox (the first org they're on); everyone else, and
+ * /?feed=1 or a search, gets the public feed.
+ */
+function Home() {
+  const { data: me } = useMe()
+  const { data: orgs, error } = useOrgs()
+  const params = new URLSearchParams(window.location.search)
+  const feed = params.has("feed") || params.has("q") || params.has("next")
+  const first = orgs?.[0]
+  const [, navigate] = useLocation()
+  useEffect(() => {
+    if (!feed && first) navigate(orgPath(first.slug), { replace: true })
+  }, [feed, first, navigate])
+  if (feed || (me && !me.user)) return <Feed />
+  // Signed in: wait for the orgs (briefly) rather than flash the feed before the inbox
+  if (!me || (!orgs && !error) || first) return <Header />
+  return <Feed />
+}
+
 function PathRoutes() {
   return (
     <Switch>
       <Route path="/_design" component={DesignSystem} />
-      <Route path="/" component={Feed} />
+      <Route path="/" component={Home} />
       <Route path="/signin" component={SignInPage} />
       <Route path="/workspaces" component={WorkspacesPage} />
       <Route path="/new" component={NewWorkspacePage} />
@@ -185,6 +207,9 @@ function PathRoutes() {
       <Route path="/agents" component={Agents} />
       <Route path="/reports" component={Reports} />
       <Route path="/settings/notifications" component={NotificationSettings} />
+      <Route path="/o/:org/settings/:section?">{(p) => <OrgSettingsPage org={p.org} section={p.section} />}</Route>
+      <Route path="/o/:org/:app">{(p) => <OrgInboxPage org={p.org} app={p.app} />}</Route>
+      <Route path="/o/:org">{(p) => <OrgInboxPage org={p.org} />}</Route>
       <Route path="/:slug/new">{(p) => <NewIssue slug={p.slug} />}</Route>
       <Route path="/:slug/signin">{(p) => <DeskSignIn slug={p.slug} />}</Route>
       <Route path="/:slug/contacts">{(p) => <ContactsPage slug={p.slug} />}</Route>

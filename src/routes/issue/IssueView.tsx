@@ -29,6 +29,7 @@ import { isDesk } from "../../lib/helpdesk"
 import { ContactNamesProvider } from "../../ui/Actor"
 import { contactLabel } from "../../lib/helpdesk"
 import { RequestAnswers, RequestProvider, RequestTypeLabel } from "../../ui/helpdesk/RequestDetails"
+import { FeedbackPanel } from "../../ui/inbox/FeedbackPanel"
 import { ApprovalCard, HeldReply, ReviewNotice } from "../../ui/helpdesk/Review"
 import { TalkToPerson } from "../../ui/helpdesk/Handoff"
 
@@ -106,7 +107,9 @@ function Report({ model }: { model: IssueModel }) {
   // Report metadata on the issue itself (not on a comment): shown as Diagnostics, its logs not as loose files.
   const diagnostics = (issue.metadata ?? []).filter((m) => m.attached_to?.comment_id == null)
   const logs = logIds(issue.metadata)
-  const loose = issue.attachments.filter((a) => !issue.body.includes(a.url) && !logs.has(a.id))
+  // Feedback screenshots show in the feedback panel's gallery, not as loose files
+  const shotIds = new Set(issue.feedback?.screenshot_ids ?? [])
+  const loose = issue.attachments.filter((a) => !issue.body.includes(a.url) && !logs.has(a.id) && !shotIds.has(a.id))
 
   return (
     <header className="report">
@@ -207,6 +210,7 @@ function Report({ model }: { model: IssueModel }) {
               </button>
             )}
             <RequestAnswers app={app} issue={issue} />
+            <FeedbackPanel app={app} issue={issue} />
             <DiagnosticsBlock metadata={diagnostics} />
           </>
         )}

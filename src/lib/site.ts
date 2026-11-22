@@ -9,7 +9,13 @@ export const hostSlug = domain && hostname.endsWith(`.${domain}`) ? hostname.sli
 export const onHome = !!domain && hostname === domain
 
 /** First path segments that are the home domain's own pages, not workspaces under /<slug> (path mode). */
-export const homeSegments = new Set(["_design", "oauth", "device", "agents", "signin", "workspaces", "new", "reports", "settings"])
+export const homeSegments = new Set(["_design", "oauth", "device", "agents", "signin", "workspaces", "new", "reports", "settings", "o"])
+
+/** A page of an org (its inbox, an app's view, settings): on the home domain, /o/<org>[/rest]. */
+export function orgPath(org: string, rest = "") {
+  const tail = !rest || rest === "/" ? "" : rest.startsWith("/") || rest.startsWith("?") ? rest : `/${rest}`
+  return homeUrl(`/o/${encodeURIComponent(org)}${tail}`)
+}
 
 /**
  * A link to `rest` ("/issues/3", "/settings", "?q=…") inside an app. Same-app links stay relative so client-side

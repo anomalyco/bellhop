@@ -1,13 +1,14 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { useLocation } from "wouter"
-import type { AppDetail, Me } from "../../shared/api"
+import type { AppDetail, Me, Org } from "../../shared/api"
 import { ApiFailure, api, errorMessage, keys } from "../lib/api"
 import { useResource } from "../lib/cache"
 import { setFavicon } from "../lib/favicon"
-import { appPath, homeUrl, hostSlug, isAbsolute, signInHref } from "../lib/site"
+import { appPath, homeUrl, hostSlug, isAbsolute, orgPath, signInHref } from "../lib/site"
 import { contactLabel, contactSignInHref, deskOutsider, initialIcon, initialOf, isDesk } from "../lib/helpdesk"
 import { invalidate, setData } from "../lib/cache"
 import { useT as useDeskT } from "../i18n/helpdesk"
+import { useT as useInboxT } from "../i18n/inbox"
 import { UserAvatar } from "./Actor"
 import { IssueOpenIcon, PersonIcon, SettingsIcon } from "./icons"
 import { Menu, MenuHeader, MenuItem } from "./Menu"
@@ -30,6 +31,12 @@ export function useMe() {
 
 export function useApp(slug: string) {
   return useResource<AppDetail>(keys.app(slug), () => api.app(slug), 10_000)
+}
+
+/** The orgs this account is on (none while signed out; an older backend without orgs reads as none). */
+export function useOrgs() {
+  const { data: me } = useMe()
+  return useResource<Org[]>(me?.user ? keys.orgs : null, api.orgs, 30_000)
 }
 
 interface CachedAppMeta {
@@ -154,8 +161,10 @@ function DeskUserMenu({ slug }: { slug: string }) {
 
 function UserMenu() {
   const { data: me } = useMe()
+  const { data: orgs } = useOrgs()
   const [, navigate] = useLocation()
   const t = useT()
+  const ti = useInboxT()
   const locale = useLocale()
   // The account menu shows its links, or (after "Language") the language list in the same panel
   const [view, setView] = useState<"main" | "language">("main")
@@ -209,8 +218,26 @@ function UserMenu() {
               <strong>{user.name}</strong>
               <span className="menu-item-description">{user.email}</span>
             </MenuHeader>
+            {/* The feedback inboxes lead: an operator's home is their org */}
+            {orgs?.map((org) => (
+              <MenuItem
+                key={org.id}
+                onSelect={() => {
+                  close()
+                  const href = orgPath(org.slug)
+                  if (isAbsolute(href)) window.location.assign(href)
+                  else navigate(href)
+                }}
+              >
+                <span className="menu-org">
+                  <AppIcon src={org.icon_url} size={16} name={org.name} />
+                  {ti("menu.inbox", { org: org.name })}
+                </span>
+              </MenuItem>
+            ))}
             {(
               [
+                [ti("menu.newOrg"), homeUrl("/workspaces?new=org")],
                 [t("menu.workspaces"), homeUrl("/workspaces")],
                 [t("menu.agents"), homeUrl("/agents")],
                 [t("menu.reports"), homeUrl("/reports")],
@@ -269,6 +296,9 @@ export function Header({
   tab,
   pendingApp,
   crumb,
+  org,
+  orgTab,
+  wide,
 }: {
   app?: AppDetail | CachedAppMeta | { slug: string; name: string }
   /** The workspace being loaded, when `app` isn't known yet (nothing cached). */
@@ -276,9 +306,45 @@ export function Header({
   tab?: "issues" | "settings" | "contacts"
   pendingApp?: boolean
   crumb?: Crumb
+  /** An org's pages (its inbox and settings): its icon and name lead home, with the Inbox and Settings tabs. */
+  org?: Pick<Org, "slug" | "name" | "icon_url" | "role">
+  orgTab?: "inbox" | "settings"
+  /** Full width (the inbox's split view) rather than the centred page column. */
+  wide?: boolean
 }) {
   useT()
+  const ti = useInboxT()
   const td = useDeskT()
+  if (org)
+    return (
+      <header className="header" data-app="" data-wide={wide || undefined}>
+        <div className="header-inner">
+          <div className="header-crumbs">
+            <SiteLink href={orgPath(org.slug)} className="header-home" aria-label={org.name || undefined}>
+              <AppIcon src={org.icon_url} size={22} name={org.name || undefined} />
+              {org.name && <span className="header-app">{org.name}</span>}
+            </SiteLink>
+          </div>
+          {/* The name and tabs arrive together, so the tabs never slide over when the org loads */}
+          {org.name && (
+            <nav className="app-nav" aria-label={org.name}>
+              <SiteLink href={orgPath(org.slug)} aria-current={orgTab === "inbox" ? "page" : undefined}>
+                <IssueOpenIcon size={14} />
+                <span className="nav-label">{ti("list.label")}</span>
+              </SiteLink>
+              {(org.role === "owner" || org.role === "admin") && (
+                <SiteLink href={orgPath(org.slug, "/settings")} aria-current={orgTab === "settings" ? "page" : undefined} aria-label={ti("settings.title")}>
+                  <SettingsIcon size={14} />
+                  <span className="nav-label">{t("header.settings")}</span>
+                </SiteLink>
+              )}
+            </nav>
+          )}
+          <span className="spacer" />
+          <UserMenu />
+        </div>
+      </header>
+    )
   const detail = app && "counts" in app ? app : null
   // Help desks: the mark is the workspace's initial without an icon; requesters get no tabs and their own menu
   const desk = detail ? isDesk(detail) : !!(app && "desk" in app && app.desk)

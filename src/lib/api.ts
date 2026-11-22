@@ -6,6 +6,10 @@ import type {
   App,
   AppAgent,
   AppDetail,
+  Org,
+  NewOrg,
+  OrgDetail,
+  InboxList,
   AppSettings,
   AppVisibility,
   Block,
@@ -172,6 +176,7 @@ async function request<T>(method: string, path: string, body?: unknown, retried 
 const get = <T>(path: string) => request<T>("GET", path)
 const enc = encodeURIComponent
 const app = (slug: string) => `/api/apps/${enc(slug)}`
+const orgBase = (org: string) => "/api/orgs/" + enc(org)
 
 export const api = {
   config: () => get<Config>("/api/config"),
@@ -308,6 +313,29 @@ export const api = {
   declineInvitation: (id: string) => request<{ ok: true }>("POST", `/api/me/invitations/${enc(id)}/decline`),
   /** Leave a workspace you're on (not as its last owner). */
   leaveApp: (slug: string) => request<{ ok: true }>("DELETE", `${app(slug)}/members/me`),
+  // Orgs: groups of apps with one inbox across them
+  orgs: () => get<Org[]>("/api/orgs"),
+  createOrg: (input: NewOrg) => request<OrgDetail>("POST", "/api/orgs", input),
+  org: (org: string) => get<OrgDetail>(orgBase(org)),
+  patchOrg: (org: string, input: { name?: string }) => request<OrgDetail>("PATCH", orgBase(org), input),
+  putOrgIcon: async (org: string, file: File) => {
+    const res = await fetch(orgBase(org) + "/icon", { method: "PUT", credentials: "same-origin", headers: { "Content-Type": file.type }, body: file })
+    if (!res.ok) throw await failure(res)
+    return (await res.json()) as OrgDetail
+  },
+  addOrgMember: (org: string, email: string, role?: Role) => request<OrgDetail>("POST", orgBase(org) + "/members", { email, role }),
+  patchOrgMember: (org: string, id: string, role: Role) => request<OrgDetail>("PATCH", orgBase(org) + "/members/" + enc(id), { role }),
+  removeOrgMember: (org: string, id: string) => request<OrgDetail>("DELETE", orgBase(org) + "/members/" + enc(id)),
+  leaveOrg: (org: string) => request<unknown>("DELETE", orgBase(org) + "/members/me"),
+  createOrgApp: (org: string, input: NewApp & { kind?: "feedback" | "tracker" }) =>
+    request<AppDetail & { report_key?: string }>("POST", orgBase(org) + "/apps", input),
+  moveApp: (slug: string, org: string | null) => request<AppDetail>("PUT", app(slug) + "/org", { org }),
+  inbox: (org: string, params: { state: "open" | "closed"; q?: string; cursor?: string }) => {
+    const qs = new URLSearchParams({ state: params.state })
+    if (params.q) qs.set("q", params.q)
+    if (params.cursor) qs.set("cursor", params.cursor)
+    return get<InboxList>(orgBase(org) + "/inbox?" + qs)
+  },
   analytics: (slug: string, days: 7 | 30 | 90) => get<Analytics>(`${app(slug)}/analytics?days=${days}`),
   audit: (slug: string, params: { actor?: string; action?: string; cursor?: string } = {}) => {
     const qs = new URLSearchParams()
@@ -413,6 +441,10 @@ export const keys = {
   requestTypes: (slug: string) => `request-types:${slug}`,
   groups: (slug: string) => `groups:${slug}`,
   availability: (slug: string, user: string) => `availability:${slug}:${user}`,
+  orgs: "orgs",
+  org: (org: string) => "org:" + org,
+  /** Every inbox page of an org shares this prefix; then the state and query. */
+  inbox: (org: string) => "inbox:" + org + ":",
 }
 
 export const loadConfig = () => load(keys.config, api.config)
