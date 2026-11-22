@@ -307,6 +307,7 @@ export const api = {
     request<ReportMetadata>("DELETE", `${app(slug)}/metadata/${enc(id)}/items`, items),
   reportKeys: (slug: string) => get<ReportKey[]>(`${app(slug)}/report-keys`),
   createReportKey: (slug: string, name: string) => request<NewReportKey>("POST", `${app(slug)}/report-keys`, { name }),
+  patchReportKey: (slug: string, id: string, patch: { feedback: boolean }) => request<ReportKey>("PATCH", `${app(slug)}/report-keys/${enc(id)}`, patch),
   deleteReportKey: (slug: string, id: string) => request<{ ok: true }>("DELETE", `${app(slug)}/report-keys/${enc(id)}`),
   invitations: () => get<Invitation[]>("/api/me/invitations"),
   acceptInvitation: (id: string) => request<App>("POST", `/api/me/invitations/${enc(id)}/accept`),

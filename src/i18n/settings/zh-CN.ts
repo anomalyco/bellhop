@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "撤销它？使用它的应用将无法再上传。",
   "keys.revoking": "正在撤销…",
   "keys.revoke": "撤销",
+  "keys.feedback": "反馈",
+  "keys.feedbackFor": "允许用 {name} 发送反馈",
+  "keys.feedbackOn": "可以发送应用内反馈。",
+  "keys.feedbackOff": "不能发送反馈：在你开启之前，使用它的应用会收到错误。",
+  "keys.feedbackNew": "此密钥已开启反馈。",
 
   // Members
   "members.lastOwner": "工作区必须至少保留一位已接受邀请的所有者。",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "转让所有权",
   "members.transferHint": "对方也成为所有者，你仍保留所有者身份",
   "members.leaveWorkspace": "离开工作区",
+  "members.viaOrg": "通过 {org} 加入团队",
 
   // Blocked
   "blocked.lede": "被屏蔽的人仍可查看，但无法在这里发帖、编辑或上传。可在对方某条评论的 \"…\" 菜单中屏蔽对方。",

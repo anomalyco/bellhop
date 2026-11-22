@@ -22,7 +22,7 @@ import { Markdown } from "../Markdown"
 import { AppIcon, Button, Label, StateIcon } from "../primitives"
 import { useApp, useMe } from "../Shell"
 import { AppLink } from "../SiteLink"
-import { EmailState, Facts, FbSection, Gallery, Metadata, SameInstall, screenshotsOf } from "./Feedback"
+import { EmailState, Facts, FbSection, Gallery, Metadata, repliedInPublic, SameInstall, screenshotsOf } from "./Feedback"
 import "../../styles/inbox.css"
 
 /** What the page's keyboard shortcuts ask of the open feedback. */
@@ -219,12 +219,12 @@ function DetailBody({
     removeRelation: () => {},
   }
 
+  // Focus right away, in the same keypress: keys typed straight after r or n must land in the composer, never run as
+  // shortcuts (an "e" would close the issue)
   const focusComposer = (m: "reply" | "note") => {
     setMode(m)
-    requestAnimationFrame(() => {
-      composer.current?.scrollIntoView({ block: "nearest" })
-      composer.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus()
-    })
+    composer.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus({ preventScroll: true })
+    composer.current?.scrollIntoView({ block: "nearest" })
   }
   const clickControl = (name: string) => controls.current?.querySelector<HTMLElement>(`[data-control=${name}]`)?.click()
   useImperativeHandle(handle, () => ({
@@ -262,6 +262,7 @@ function DetailBody({
   const files = issue.attachments.filter((a) => !shotIds.has(a.id) && !issue.body.includes(a.url))
   const closed = issue.status === "closed"
   const author = fb?.anonymous ? t("row.anon") : fb?.user?.name || actorName(issue.author)
+  const replied = repliedInPublic(issue)
   const replyHint = !fb
     ? null
     : fb.anonymous
@@ -270,7 +271,9 @@ function DetailBody({
         ? t("composer.toNobody")
         : fb.email.confirmed
           ? t("composer.toConfirmed", { email: fb.email.address })
-          : t("composer.toWaiting", { email: fb.email.address })
+          : replied
+            ? t("composer.toAsked", { email: fb.email.address })
+            : t("composer.toFirst", { email: fb.email.address })
 
   return (
     <div className="inbox-detail-body">
@@ -341,7 +344,7 @@ function DetailBody({
       {fb && (
         <>
           <FbSection title={t("email.label")}>
-            <EmailState feedback={fb} />
+            <EmailState feedback={fb} replied={replied} />
           </FbSection>
           <div className="fb-columns">
             <FbSection title={t("detail.facts")}>

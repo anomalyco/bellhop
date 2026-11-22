@@ -746,6 +746,46 @@
   font-size: 12px;
   font-weight: 400;
 }
+/* Whether a report key may send feedback: off reads as a warning, since the app's sends fail until it's on */
+.key-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  margin-top: 8px;
+  cursor: pointer;
+}
+.key-feedback .switch {
+  flex: none;
+  margin-top: 1px;
+}
+.key-feedback-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.key-feedback-title {
+  font-weight: var(--weight-medium);
+}
+.key-feedback-state {
+  color: var(--fg-muted);
+}
+.key-feedback[data-off] .key-feedback-state {
+  color: var(--progress);
+}
+.key-feedback-note {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-ui);
+}
+@media (pointer: coarse) {
+  .key-feedback {
+    min-height: 40px;
+  }
+}
 .key-snippets {
   display: grid;
   gap: 14px;

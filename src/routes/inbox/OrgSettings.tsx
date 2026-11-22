@@ -4,11 +4,12 @@ import type { App, AppDetail, Member, OrgDetail, Role } from "../../../shared/ap
 import { t as tc } from "../../i18n/core"
 import { t as ti, tr, useT } from "../../i18n/inbox"
 import { ApiFailure, api, errorMessage, keys } from "../../lib/api"
-import { invalidate, setData, useResource } from "../../lib/cache"
+import { invalidate, load, setData, useResource } from "../../lib/cache"
 import { atLeast, roleLabel, roleText, teamRoles } from "../../lib/roles"
 import { appLabel, appPath, homeUrl, isAbsolute, orgPath } from "../../lib/site"
 import { UserAvatar } from "../../ui/Actor"
-import { PlusIcon } from "../../ui/icons"
+import { KebabIcon, PlusIcon } from "../../ui/icons"
+import { Menu, MenuItem } from "../../ui/Menu"
 import { AppIcon, Button } from "../../ui/primitives"
 import { RoleSelect } from "../../ui/roles/RoleSelect"
 import { ErrorPage, Header, Page, useMe } from "../../ui/Shell"
@@ -346,6 +347,7 @@ function Apps({ org }: { org: OrgDetail }) {
   const search = useSearch()
   const [creating, setCreating] = useState(() => new URLSearchParams(search).get("new") === "1")
   const [made, setMade] = useState<{ app: AppDetail; key: string } | null>(null)
+  const [note, setNote] = useState<string | null>(null)
   return (
     <div>
       <Heading title={t("settings.apps")}>
@@ -367,29 +369,98 @@ function Apps({ org }: { org: OrgDetail }) {
           }}
         />
       )}
+      {note && <p className="settings-note">{note}</p>}
       <section className="box">
         {org.apps.length === 0 && <div className="box-empty">{t("apps.none")}</div>}
         {org.apps.map((a) => (
-          <div key={a.id} className="box-row settings-row org-app-row">
-            <AppIcon src={a.icon_url} size={28} name={a.name} />
-            <div className="settings-row-main">
-              <div className="template-row-name">{a.name}</div>
-              <div className="issue-meta">
-                <span className="mono">{appLabel(a.slug)}</span> · {tc("state.open")} {a.counts.open}
-              </div>
-            </div>
-            <div className="settings-row-actions">
-              <SiteLink href={orgPath(org.slug, `/${a.slug}`)} className="btn" data-variant="default" data-size="small">
-                {t("apps.openApp", { app: a.name })}
-              </SiteLink>
-              <AppLink slug={a.slug} href={appPath(a.slug, "/settings")} className="btn" data-variant="invisible" data-size="small">
-                {t("apps.appSettings")}
-              </AppLink>
-            </div>
-          </div>
+          <OrgAppRow key={a.id} org={org} app={a} onNote={setNote} />
         ))}
       </section>
       {admin && <MoveApp org={org} />}
+    </div>
+  )
+}
+
+/**
+ * One of the org's apps. Taking it out of the org (PUT /api/apps/:slug/org { org: null }) is for org owners only:
+ * admins see the item disabled with the reason.
+ */
+function OrgAppRow({ org, app, onNote }: { org: OrgDetail; app: OrgDetail["apps"][number]; onNote: (note: string | null) => void }) {
+  const t = useT()
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const owner = org.role === "owner"
+  const takeOut = async () => {
+    setBusy(true)
+    setError(null)
+    onNote(null)
+    try {
+      const moved = await api.moveApp(app.slug, null)
+      setData(keys.app(moved.slug), moved)
+      setData<OrgDetail>(keys.org(org.slug), (o) => (o ? { ...o, apps: o.apps.filter((x) => x.id !== app.id) } : o))
+      invalidate(keys.org(org.slug))
+      // Now outside every org: it shows up in "Move an existing app here" right away
+      invalidate(keys.apps)
+      void load(keys.apps, api.apps).catch(() => {})
+      onNote(t("apps.takenOut", { app: app.name, org: org.name }))
+    } catch (e) {
+      setError(e instanceof ApiFailure && e.status === 403 ? t("apps.takeOutOwners") : errorMessage(e))
+      setBusy(false)
+      setConfirming(false)
+    }
+  }
+  return (
+    <div className="box-row settings-row org-app-row">
+      <AppIcon src={app.icon_url} size={28} name={app.name} />
+      <div className="settings-row-main">
+        <div className="template-row-name">{app.name}</div>
+        <div className="issue-meta">
+          <span className="mono">{appLabel(app.slug)}</span> · {tc("state.open")} {app.counts.open}
+        </div>
+        {error && <p className="field-error">{error}</p>}
+      </div>
+      {confirming ? (
+        <div className="agent-confirm-inline">
+          <span className="agent-confirm-text">{t("apps.takeOutConfirm", { app: app.name, org: org.name })}</span>
+          <Button size="small" variant="invisible" onClick={() => setConfirming(false)} disabled={busy}>
+            {tc("common.cancel")}
+          </Button>
+          <Button size="small" variant="danger" onClick={() => void takeOut()} disabled={busy}>
+            {busy ? t("apps.takingOut") : t("apps.takeOutButton")}
+          </Button>
+        </div>
+      ) : (
+        <div className="settings-row-actions">
+          <SiteLink href={orgPath(org.slug, `/${app.slug}`)} className="btn" data-variant="default" data-size="small">
+            {t("apps.openApp", { app: app.name })}
+          </SiteLink>
+          <AppLink slug={app.slug} href={appPath(app.slug, "/settings")} className="btn" data-variant="invisible" data-size="small">
+            {t("apps.appSettings")}
+          </AppLink>
+          {isAdmin(org) && (
+            <Menu
+              align="end"
+              width={260}
+              trigger={(p) => <Button iconOnly size="small" variant="ghost-muted" aria-label={t("apps.more", { app: app.name })} icon={<KebabIcon />} {...p} />}
+            >
+              {(close) => (
+                <MenuItem
+                  danger
+                  disabled={!owner}
+                  description={owner ? t("apps.takeOutHint") : t("apps.takeOutOwners")}
+                  onSelect={() => {
+                    close()
+                    setConfirming(true)
+                  }}
+                >
+                  {t("apps.takeOut", { org: org.name })}
+                </MenuItem>
+              )}
+            </Menu>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -485,6 +556,7 @@ function NewKey({ app, reportKey, onDone }: { app: AppDetail; reportKey: string;
         <CopyButton text={reportKey} label={t("apps.copy")} />
       </div>
       <p className="create-note">{tr("apps.install", { url: <code className="mono">{url}</code> })}</p>
+      <p className="create-note">{t("apps.keyFeedbackOn")}</p>
       <div className="settings-actions">
         <a href={homeUrl("/docs/feedback")} className="btn" data-variant="default" data-size="small">
           {t("apps.docs")}

@@ -180,6 +180,11 @@ const en = {
   "keys.confirmRevoke": "Revoke it? Apps using it can't upload any more.",
   "keys.revoking": "Revoking…",
   "keys.revoke": "Revoke",
+  "keys.feedback": "Feedback",
+  "keys.feedbackFor": "Allow feedback with {name}",
+  "keys.feedbackOn": "Can send in-app feedback.",
+  "keys.feedbackOff": "Can't send feedback: apps using it get an error until you turn this on.",
+  "keys.feedbackNew": "Feedback is on for this key.",
 
   // Members
   "members.lastOwner": "A workspace must keep at least one owner who has accepted.",
@@ -206,6 +211,7 @@ const en = {
   "members.transfer": "Transfer ownership",
   "members.transferHint": "They become an owner too; you stay one",
   "members.leaveWorkspace": "Leave workspace",
+  "members.viaOrg": "On the team through {org}",
 
   // Blocked
   "blocked.lede": "Blocked people can still read, but can't post, edit or upload here. Block someone from the \"…\" on one of their comments.",

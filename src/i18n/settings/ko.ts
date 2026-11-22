@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "폐기할까요? 이 키를 쓰는 앱은 더 이상 업로드할 수 없어요.",
   "keys.revoking": "폐기 중…",
   "keys.revoke": "폐기",
+  "keys.feedback": "피드백",
+  "keys.feedbackFor": "{name}(으)로 피드백 허용",
+  "keys.feedbackOn": "앱 내 피드백을 보낼 수 있어요.",
+  "keys.feedbackOff": "피드백을 보낼 수 없어요. 켜기 전까지 이 키를 쓰는 앱은 오류를 받아요.",
+  "keys.feedbackNew": "이 키는 피드백이 켜져 있어요.",
 
   // Members
   "members.lastOwner": "워크스페이스에는 초대를 수락한 소유자가 최소 한 명 있어야 해요.",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "소유권 이전",
   "members.transferHint": "상대도 소유자가 되고, 나도 소유자로 남아요",
   "members.leaveWorkspace": "워크스페이스 나가기",
+  "members.viaOrg": "{org}을(를) 통해 팀에 있어요",
 
   // Blocked
   "blocked.lede": "차단된 사람은 계속 읽을 수 있지만, 이곳에서 글을 쓰거나 편집하거나 업로드할 수 없어요. 상대 댓글의 \"…\"에서 차단할 수 있어요.",

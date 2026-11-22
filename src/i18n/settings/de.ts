@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "Widerrufen? Apps, die ihn nutzen, können dann nichts mehr hochladen.",
   "keys.revoking": "Wird widerrufen…",
   "keys.revoke": "Widerrufen",
+  "keys.feedback": "Feedback",
+  "keys.feedbackFor": "Feedback mit {name} erlauben",
+  "keys.feedbackOn": "Kann In-App-Feedback senden.",
+  "keys.feedbackOff": "Kann kein Feedback senden: Apps, die ihn nutzen, bekommen einen Fehler, bis du das einschaltest.",
+  "keys.feedbackNew": "Feedback ist für diesen Schlüssel an.",
 
   // Members
   "members.lastOwner": "Ein Workspace braucht mindestens einen Inhaber, der die Einladung angenommen hat.",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "Inhaberschaft übertragen",
   "members.transferHint": "Die Person wird ebenfalls Inhaber; du bleibst es",
   "members.leaveWorkspace": "Workspace verlassen",
+  "members.viaOrg": "Im Team über {org}",
 
   // Blocked
   "blocked.lede": "Blockierte Personen können weiterhin lesen, hier aber nichts posten, bearbeiten oder hochladen. Blockiere jemanden über \"…\" an einem ihrer Kommentare.",

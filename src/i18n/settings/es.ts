@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "¿Revocarla? Las apps que la usan ya no podrán subir nada.",
   "keys.revoking": "Revocando…",
   "keys.revoke": "Revocar",
+  "keys.feedback": "Feedback",
+  "keys.feedbackFor": "Permitir feedback con {name}",
+  "keys.feedbackOn": "Puede enviar feedback desde la app.",
+  "keys.feedbackOff": "No puede enviar feedback: las apps que la usan reciben un error hasta que lo actives.",
+  "keys.feedbackNew": "El feedback está activado para esta clave.",
 
   // Members
   "members.lastOwner": "Un espacio de trabajo debe tener al menos un propietario que haya aceptado.",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "Transferir la propiedad",
   "members.transferHint": "También pasa a ser propietario; tú lo sigues siendo",
   "members.leaveWorkspace": "Salir del espacio de trabajo",
+  "members.viaOrg": "En el equipo a través de {org}",
 
   // Blocked
   "blocked.lede": "Las personas bloqueadas pueden seguir leyendo, pero no pueden publicar, editar ni subir archivos aquí. Bloquea a alguien desde el \"…\" de uno de sus comentarios.",

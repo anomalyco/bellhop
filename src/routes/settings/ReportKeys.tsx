@@ -148,6 +148,7 @@ open(url) // the new-issue page, with this attached`
           {t("keys.ready", { name: created.name })}
         </h3>
         <p className="secret-warning">{t("keys.copyNow")}</p>
+        {created.feedback && <p className="key-feedback-note">{t("keys.feedbackNew")}</p>}
       </div>
       <div className="secret-field">
         <span className="secret-label">{t("keys.key")}</span>
@@ -174,6 +175,21 @@ function KeyRow({ slug, item }: { slug: string; item: ReportKey }) {
   const [confirming, setConfirming] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Not disabled while saving, so keyboard focus stays on the switch
+  const [switching, setSwitching] = useState(false)
+  // Keys made before feedback existed start with it off: POST /v1/feedback answers 403 feedback_disabled until it's on
+  const setFeedback = async (feedback: boolean) => {
+    setSwitching(true)
+    setError(null)
+    try {
+      const updated = await api.patchReportKey(slug, item.id, { feedback })
+      setData<ReportKey[]>(keys.reportKeys(slug), (l) => l?.map((k) => (k.id === item.id ? updated : k)))
+    } catch (e) {
+      setError(errorMessage(e))
+    } finally {
+      setSwitching(false)
+    }
+  }
   const revoke = async () => {
     setBusy(true)
     setError(null)
@@ -195,6 +211,21 @@ function KeyRow({ slug, item }: { slug: string; item: ReportKey }) {
         <div className="issue-meta">
           {tr("keys.meta", { time: <Time iso={item.created_at} />, used: <LastUsed iso={item.last_used_at} /> })}
         </div>
+        <label className="key-feedback" data-off={!item.feedback || undefined}>
+          <input
+            type="checkbox"
+            role="switch"
+            className="switch"
+            checked={item.feedback}
+            aria-busy={switching || undefined}
+            onChange={(e) => !switching && void setFeedback(e.target.checked)}
+            aria-label={t("keys.feedbackFor", { name: item.name })}
+          />
+          <span className="key-feedback-text">
+            <span className="key-feedback-title">{t("keys.feedback")}</span>
+            <span className="key-feedback-state">{item.feedback ? t("keys.feedbackOn") : t("keys.feedbackOff")}</span>
+          </span>
+        </label>
         {error && <p className="field-error">{error}</p>}
       </div>
       {confirming ? (

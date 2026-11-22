@@ -4,7 +4,7 @@ import { useT } from "../../i18n/inbox"
 import { withMeta } from "../../lib/inbox"
 import { appPath, isAbsolute, orgPath } from "../../lib/site"
 import { AppLink } from "../SiteLink"
-import { EmailState, Facts, FbSection, Gallery, Metadata, SameInstall, screenshotsOf } from "./Feedback"
+import { EmailState, Facts, FbSection, Gallery, Metadata, repliedInPublic, SameInstall, screenshotsOf } from "./Feedback"
 import "../../styles/inbox.css"
 
 /**
@@ -34,7 +34,7 @@ export function FeedbackPanel({ app, issue }: { app: AppDetail; issue: Issue }) 
         </FbSection>
       )}
       <FbSection title={t("email.label")}>
-        <EmailState feedback={fb} />
+        <EmailState feedback={fb} replied={repliedInPublic(issue)} />
       </FbSection>
       <div className="fb-columns">
         <FbSection title={t("detail.facts")}>

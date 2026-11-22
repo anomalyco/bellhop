@@ -727,8 +727,21 @@ button.fb-meta-value:hover {
 .fb-pill[data-state="confirmed"] {
   color: var(--open);
 }
-.fb-pill[data-state="waiting"] {
+.fb-pill[data-state="asked"] {
   color: var(--progress);
+}
+.fb-pill[data-state="unconfirmed"] {
+  color: var(--fg-muted);
+}
+.fb-email-block {
+  display: grid;
+  gap: 4px;
+}
+.fb-email-note {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--text-small);
+  line-height: 18px;
 }
 .fb-same {
   display: grid;
@@ -1031,6 +1044,9 @@ button.fb-meta-value:hover {
   max-width: 100%;
 }
 @media (pointer: coarse) {
+  .inbox-detail-body .attachment {
+    min-height: 40px;
+  }
   .org-move-row .select {
     height: 40px;
     font-size: 16px;
@@ -1050,6 +1066,7 @@ button.fb-meta-value:hover {
   }
   .org-app-row .settings-row-actions {
     flex-basis: 100%;
+    flex-wrap: wrap;
     padding-left: 44px;
   }
 }

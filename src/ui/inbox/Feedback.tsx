@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { createPortal } from "react-dom"
-import type { Attachment, FeedbackInfo, IssueRef } from "../../../shared/api"
+import type { Attachment, FeedbackInfo, Issue, IssueRef } from "../../../shared/api"
 import { useT } from "../../i18n/inbox"
 import { Time } from "../../lib/time"
 import { CheckIcon, ChevronDownIcon, MailIcon, XIcon } from "../icons"
@@ -132,7 +132,11 @@ function Lightbox({ shots, index, onIndex, onClose }: { shots: Attachment[]; ind
 }
 
 /** Whether replies reach the sender: confirmed, waiting for confirmation, no address, or anonymous. */
-export function EmailState({ feedback }: { feedback: FeedbackInfo }) {
+/** Whether the team has replied in public: until then an unconfirmed address hasn't been asked to confirm. */
+export const repliedInPublic = (issue: Issue) =>
+  issue.timeline.some((i) => i.kind === "comment" && !i.comment.internal && !i.comment.hidden && !i.comment.by_issue_author)
+
+export function EmailState({ feedback, replied }: { feedback: FeedbackInfo; replied: boolean }) {
   const t = useT()
   if (feedback.anonymous) return <p className="fb-email" data-state="anonymous">{t("email.anonymous")}</p>
   if (!feedback.email)
@@ -142,14 +146,20 @@ export function EmailState({ feedback }: { feedback: FeedbackInfo }) {
         {t("email.none")}
       </p>
     )
+  const { address, confirmed } = feedback.email
+  // Nothing is emailed at submission: the team's first public reply sends the one request to confirm.
+  const state = confirmed ? "confirmed" : replied ? "asked" : "unconfirmed"
   return (
-    <p className="fb-email" data-state={feedback.email.confirmed ? "confirmed" : "waiting"}>
-      <MailIcon size={14} />
-      <span className="mono fb-email-address">{feedback.email.address}</span>
-      <span className="fb-pill" data-state={feedback.email.confirmed ? "confirmed" : "waiting"}>
-        {feedback.email.confirmed ? t("email.confirmed") : t("email.waiting")}
-      </span>
-    </p>
+    <div className="fb-email-block">
+      <p className="fb-email" data-state={state}>
+        <MailIcon size={14} />
+        <span className="mono fb-email-address">{address}</span>
+        <span className="fb-pill" data-state={state}>
+          {confirmed ? t("email.confirmed") : replied ? t("email.asked") : t("email.notConfirmed")}
+        </span>
+      </p>
+      {!confirmed && <p className="fb-email-note">{replied ? t("email.askedText") : t("email.firstReplyAsks")}</p>}
+    </div>
   )
 }
 

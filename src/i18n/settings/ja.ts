@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "取り消しますか？このキーを使うアプリはアップロードできなくなります。",
   "keys.revoking": "取り消し中…",
   "keys.revoke": "取り消す",
+  "keys.feedback": "フィードバック",
+  "keys.feedbackFor": "{name} でのフィードバックを許可",
+  "keys.feedbackOn": "アプリ内フィードバックを送信できます。",
+  "keys.feedbackOff": "フィードバックを送信できません。オンにするまで、このキーを使うアプリにはエラーが返ります。",
+  "keys.feedbackNew": "このキーではフィードバックがオンになっています。",
 
   // Members
   "members.lastOwner": "ワークスペースには、招待を承諾したオーナーが少なくとも 1 人必要です。",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "オーナー権限を移譲",
   "members.transferHint": "相手もオーナーになり、あなたもオーナーのままです",
   "members.leaveWorkspace": "ワークスペースから退出",
+  "members.viaOrg": "{org} 経由でチームに参加",
 
   // Blocked
   "blocked.lede": "ブロックされた人は閲覧はできますが、ここで投稿、編集、アップロードはできません。ブロックするには、その人のコメントの \"…\" から行います。",

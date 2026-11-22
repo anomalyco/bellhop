@@ -7,11 +7,11 @@ import { Time } from "../lib/time"
 import { ActorAvatar, UserAvatar, actorName } from "../ui/Actor"
 import { KebabIcon, LockIcon, PlusIcon } from "../ui/icons"
 import { Menu, MenuItem } from "../ui/Menu"
-import { AppLayout, Page, useMe } from "../ui/Shell"
+import { AppLayout, Page, useMe, useOrgs } from "../ui/Shell"
 import { AgentAvatar, AppIcon, Button, Label } from "../ui/primitives"
 import { RoleBadge, RoleSelect } from "../ui/roles/RoleSelect"
 import { agentRoleLabel, agentRoleText, agentRoles, atLeast, canSetup, roleLabel, roleText, teamRoles } from "../lib/roles"
-import { appLabel, appPath, homeUrl, isAbsolute, signInHref } from "../lib/site"
+import { appLabel, appPath, homeUrl, isAbsolute, orgPath, signInHref } from "../lib/site"
 import { SiteLink } from "../ui/SiteLink"
 import { PublicToggle, VisibilityValue } from "../ui/workspace/Visibility"
 import { ColorField, randomColor } from "../ui/ColorField"
@@ -1169,6 +1169,10 @@ function Members({ app }: { app: AppDetail }) {
   )
   const joinedOwners = members.filter((m) => m.role === "owner" && m.joined).length
   const [note, setNote] = useState<string | null>(null)
+  // People on the team through the app's org are managed there; link to it for whoever can manage the org
+  const { data: orgs } = useOrgs()
+  const orgRole = app.org ? orgs?.find((o) => o.slug === app.org!.slug)?.role : null
+  const orgMembers = app.org && (orgRole === "owner" || orgRole === "admin") ? orgPath(app.org.slug, "/settings/members") : null
 
   return (
     <div>
@@ -1184,8 +1188,9 @@ function Members({ app }: { app: AppDetail }) {
             app={app}
             member={m}
             you={!!me?.user && me.user.id === m.id}
-            canManage={admin && (owner || !elevated(m.role))}
+            canManage={m.via !== "org" && admin && (owner || !elevated(m.role))}
             owner={owner}
+            orgMembers={orgMembers}
             lastOwner={m.role === "owner" && m.joined && joinedOwners <= 1}
             onNote={setNote}
           />
@@ -1250,6 +1255,7 @@ function MemberRow({
   canManage,
   owner,
   lastOwner,
+  orgMembers,
   onNote,
 }: {
   app: AppDetail
@@ -1258,6 +1264,7 @@ function MemberRow({
   canManage: boolean
   owner: boolean
   lastOwner: boolean
+  orgMembers: string | null
   onNote: (note: string | null) => void
 }) {
   const [confirm, setConfirm] = useState<{ kind: "remove" } | { kind: "role"; role: Role } | { kind: "transfer" } | null>(null)
@@ -1266,8 +1273,11 @@ function MemberRow({
   const who = member.name ?? member.email
   const [, navigate] = useLocation()
   // You may always leave (DELETE …/members/me), except as the last owner; admins also manage others from the menu.
-  const canLeave = you && !lastOwner
-  const hasMenu = you ? canLeave : canManage
+  // Someone here through the org is read-only (their seat is the org's), but owners can still make them an owner.
+  const viaOrg = member.via === "org"
+  const canLeave = you && !lastOwner && !viaOrg
+  const canTransfer = owner && !you && member.joined && member.role !== "owner" && (canManage || viaOrg)
+  const hasMenu = canLeave || (!you && canManage) || canTransfer
 
   const leave = async () => {
     setBusy(true)
@@ -1328,6 +1338,11 @@ function MemberRow({
           {member.name ? member.email : ""}
           {!member.joined && `${member.name ? " · " : ""}${t("members.invited")}`}
         </div>
+        {viaOrg && app.org && (
+          <div className="issue-meta member-via">
+            {tr("members.viaOrg", { org: orgMembers ? <SiteLink href={orgMembers}>{app.org.name}</SiteLink> : app.org.name })}
+          </div>
+        )}
         {error && <p className="field-error">{error}</p>}
       </div>
       {confirm ? (
@@ -1383,7 +1398,7 @@ function MemberRow({
             >
               {(close) => (
                 <>
-                  {canManage && owner && member.joined && member.role !== "owner" && (
+                  {canTransfer && (
                     <MenuItem
                       description={t("members.transferHint")}
                       onSelect={() => {

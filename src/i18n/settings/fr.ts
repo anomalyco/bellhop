@@ -178,6 +178,11 @@ const messages: Translation<typeof en> = {
   "keys.confirmRevoke": "La révoquer ? Les apps qui l'utilisent ne pourront plus rien envoyer.",
   "keys.revoking": "Révocation…",
   "keys.revoke": "Révoquer",
+  "keys.feedback": "Retours",
+  "keys.feedbackFor": "Autoriser les retours avec {name}",
+  "keys.feedbackOn": "Peut envoyer des retours depuis l'app.",
+  "keys.feedbackOff": "Ne peut pas envoyer de retours : les apps qui l'utilisent reçoivent une erreur tant que vous ne l'activez pas.",
+  "keys.feedbackNew": "Les retours sont activés pour cette clé.",
 
   // Members
   "members.lastOwner": "Un espace de travail doit garder au moins un propriétaire ayant accepté l'invitation.",
@@ -204,6 +209,7 @@ const messages: Translation<typeof en> = {
   "members.transfer": "Transférer la propriété",
   "members.transferHint": "La personne devient aussi propriétaire ; vous le restez",
   "members.leaveWorkspace": "Quitter l'espace de travail",
+  "members.viaOrg": "Dans l'équipe via {org}",
 
   // Blocked
   "blocked.lede": "Les personnes bloquées peuvent toujours lire, mais ne peuvent ni publier, ni modifier, ni envoyer de fichiers ici. Bloquez quelqu'un depuis le menu \"…\" de l'un de ses commentaires.",
