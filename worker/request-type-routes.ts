@@ -63,7 +63,7 @@ async function save(c: Ctx, id?: string) {
   const q = [
     typeGuard(
       env,
-      `EXISTS(SELECT 1 FROM members m JOIN apps a ON a.id=m.app_id WHERE a.id=? AND a.mode='helpdesk' AND m.user_id=? AND m.role IN ('owner','admin'))`,
+      `EXISTS(SELECT 1 FROM team m JOIN apps a ON a.id=m.app_id WHERE a.id=? AND a.mode='helpdesk' AND m.user_id=? AND m.role IN ('owner','admin'))`,
       app,
       c.var.user!.id
     )

@@ -3,10 +3,26 @@ import { str } from "./core"
 
 export const sorts = ["newest", "oldest", "updated", "votes", "comments"] as const
 type Term = {
-  key: "is" | "group" | "type" | "status" | "reason" | "label" | "no" | "assignee" | "author" | "has"
+  key:
+    | "is"
+    | "group"
+    | "type"
+    | "status"
+    | "reason"
+    | "label"
+    | "no"
+    | "assignee"
+    | "author"
+    | "has"
+    | "app"
+    | "platform"
+    | "version"
+    | "source"
+    | "meta"
   value: string
 }
-export function parseSearch(input: unknown, feed = false) {
+// `inbox` also takes app:<slug> (an org's inbox and list_feedback span several apps).
+export function parseSearch(input: unknown, feed = false, inbox = false) {
   const q = input === undefined ? "" : str(input, "query", 512, true),
     terms: Term[] = [],
     text: string[] = []
@@ -50,13 +66,21 @@ export function parseSearch(input: unknown, feed = false) {
         key === "group" ||
         (key === "no" && ["label", "assignee"].includes(value)) ||
         (key === "has" && value === "metadata") ||
-        (!feed && (key === "assignee" || key === "author") && /^@?[a-z0-9][a-z0-9-]*$/.test(value))
+        (!feed && (key === "assignee" || key === "author") && /^@?[a-z0-9][a-z0-9-]*$/.test(value)) ||
+        (inbox && key === "app" && /^[a-z0-9-]{2,40}$/.test(value)) ||
+        (!feed && (key === "platform" || key === "version")) ||
+        (!feed && key === "has" && (value === "screenshot" || value === "email")) ||
+        (!feed && key === "source" && (value === "feedback" || value === "web")) ||
+        (!feed && key === "meta" && /^[^=]{1,64}=/.test(split[2] ?? split[3]!))
       )
     ) {
       text.push(token)
       continue
     }
-    terms.push({ key: key as Term["key"], value: key === "label" ? (split[2] ?? split[3])! : value })
+    terms.push({
+      key: key as Term["key"],
+      value: key === "label" || key === "version" || key === "meta" ? (split[2] ?? split[3])! : value
+    })
   }
   return { terms, text: text.join(" "), sort, tab }
 }

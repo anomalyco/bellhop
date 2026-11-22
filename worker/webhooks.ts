@@ -5,6 +5,7 @@ import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 import { auditActor } from "./audit"
 import { importMessage } from "./github-import"
 import { requestJson, typeInfo, type TypeInfo } from "./request-types"
+import { loadFeedback } from "./feedback-data"
 
 export function webhookUrl(value: unknown, env: Env) {
   if (value === null) return null
@@ -162,6 +163,8 @@ export async function enqueueWebhooks(
           await reportQuery(env, app.id, { team: true, actorId: null }, "issue", issue.number, parents).all<ReportRow>()
         ).results.map(decodeReport)
       : []
+  // Hooks are team reads: an opened issue from a feedback form carries what the form sent.
+  const feedback = issue && selected.some((h) => h.type === "issue.opened") ? await loadFeedback(env, issue.id) : null
   // Source tombstones retain the pre-move/delete count; never count comments in a different app.
   const sourceSnapshot = selected.some((e) => e.type === "issue.moved" || e.type === "issue.deleted")
   const { base, hooks } = await teamProjection(env, app.id, {
@@ -177,7 +180,16 @@ export async function enqueueWebhooks(
               ...teamForm,
               url: appUrl(env, origin, app.slug, `/issues/${issue.number}`),
               comment_count: sourceSnapshot ? issue.comment_count : settings.comment_count,
-              viewer_voted: false
+              viewer_voted: false,
+              ...(feedback && {
+                feedback_summary: {
+                  platform: feedback.device?.platform?.toLowerCase() ?? null,
+                  app_version: feedback.app?.version ?? null,
+                  screenshots: feedback.screenshot_ids.length,
+                  email: !!feedback.email,
+                  anonymous: feedback.anonymous
+                }
+              })
             }
           }
         : {}),
@@ -203,6 +215,7 @@ export async function enqueueWebhooks(
           ...base,
           ...hook,
           ...(attached.length && { metadata: attached }),
+          ...(hook.type === "issue.opened" && feedback && { feedback }),
           ...(transition && base.issue && { issue: { ...base.issue, ...transition } }),
           id,
           created_at

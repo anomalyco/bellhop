@@ -202,7 +202,7 @@ export async function createIssue(a: Access, b: Record<string, unknown>, caller:
       env,
       `INSERT INTO issues(id,app_id,number,title,body,author,system_info,template_id,created_at,updated_at,reporter_locale,private,mentions,assignee,reply_tier_id)
     SELECT ?,a.id,a.issue_seq,?,?,?,?,?,?,?,?,CASE WHEN a.mode='helpdesk' OR t.force_private=1 THEN 1 WHEN (a.reporter_can_choose OR ?) THEN coalesce(?,a.default_private) ELSE a.default_private END,?,
-      CASE WHEN ? THEN NULL ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id) END,
+      CASE WHEN ? THEN NULL ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN team m ON m.user_id=u.id AND m.app_id=a.id WHERE u.id=t.assignee_id) END,
       CASE WHEN t.agents_reply=0 THEN t.id END FROM apps a LEFT JOIN reporter_tiers t ON t.app_id=a.id AND t.actor_id=? WHERE a.id=? RETURNING number`,
       id,
       title,
@@ -343,7 +343,7 @@ export async function setRequestType(a: Access, c: Ctx, n: number, type: unknown
     const permission =
         a.actor.type === "agent"
           ? `SELECT 1 FROM (${agentAccessSQL}) WHERE app_id=? AND agent_id=? AND role IN ('member','admin')`
-          : "SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin','member')",
+          : "SELECT 1 FROM team WHERE app_id=? AND user_id=? AND role IN ('owner','admin','member')",
       eid = uid(),
       at = now()
     const rows = await a.env.DB.batch<{ data: string; info: string }>([
@@ -360,7 +360,7 @@ export async function setRequestType(a: Access, c: Ctx, n: number, type: unknown
       sql(a.env, "DELETE FROM request_answers WHERE issue_id=? AND app_id=?", i.id, a.app.id),
       sql(
         a.env,
-        `UPDATE issues SET assignee=CASE WHEN EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL) THEN assignee ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM reporter_tiers t JOIN members m ON m.app_id=t.app_id AND m.user_id=t.assignee_id JOIN users u ON u.id=m.user_id WHERE t.app_id=issues.app_id AND t.actor_id=json_extract(issues.author,'$.id')) END,revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
+        `UPDATE issues SET assignee=CASE WHEN EXISTS(SELECT 1 FROM handoffs h WHERE h.issue_id=issues.id AND h.ended_at IS NULL) THEN assignee ELSE (SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM reporter_tiers t JOIN team m ON m.app_id=t.app_id AND m.user_id=t.assignee_id JOIN users u ON u.id=m.user_id WHERE t.app_id=issues.app_id AND t.actor_id=json_extract(issues.author,'$.id')) END,revision=revision+1,updated_at=max(updated_at,?) WHERE id=? AND app_id=?`,
         at,
         i.id,
         a.app.id
@@ -881,7 +881,7 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
   const allowed =
     a.actor.type === "agent"
       ? `SELECT count(*) FROM (${agentAccessSQL}) acl WHERE acl.agent_id=? AND acl.app_id IN (?,?) AND acl.role IN ('member','admin')`
-      : `SELECT count(*) FROM members WHERE user_id=? AND app_id IN (?,?) AND role IN ('member','admin','owner')`
+      : `SELECT count(*) FROM team WHERE user_id=? AND app_id IN (?,?) AND role IN ('member','admin','owner')`
   const version = await sql(
     a.env,
     "SELECT revision FROM issues WHERE app_id=? AND number=?",
@@ -929,7 +929,7 @@ export async function transferIssue(a: Access, n: number, slug: unknown) {
       sql(
         a.env,
         `UPDATE issues SET app_id=?1,private=max(private,(SELECT mode='helpdesk' FROM apps WHERE id=?1)),number=(SELECT issue_seq FROM apps WHERE id=?1),pinned=0,template_id=NULL,reply_tier_id=NULL,activity=NULL,
-      assignee=CASE WHEN json_extract(assignee,'$.id') IN(SELECT user_id FROM members WHERE app_id=?1 UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL) THEN assignee END,
+      assignee=CASE WHEN json_extract(assignee,'$.id') IN(SELECT user_id FROM team WHERE app_id=?1 UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL) THEN assignee END,
       updated_at=max(updated_at,?2),revision=CASE WHEN revision=?3 AND app_id=?4 AND number=?5 THEN revision+1 END WHERE id=?6 RETURNING number`,
         dest.id,
         at,
@@ -1372,7 +1372,7 @@ async function blockActor(a: Access, b: Record<string, unknown>): Promise<Block>
   const q = [
     sql(
       env,
-      `INSERT INTO blocks SELECT ?1,?2,?3,?4,?5,?6 WHERE NOT EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?3) AND
+      `INSERT INTO blocks SELECT ?1,?2,?3,?4,?5,?6 WHERE NOT EXISTS(SELECT 1 FROM team WHERE app_id=?2 AND user_id=?3) AND
        (EXISTS(SELECT 1 FROM issues WHERE app_id=?2 AND json_extract(author,'$.id')=?3) OR EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?2 AND json_extract(c.author,'$.id')=?3))`,
       id,
       app,

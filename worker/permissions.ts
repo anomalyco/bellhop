@@ -35,5 +35,5 @@ export const agentAccessSQL = `SELECT s.*,${capSQL("team")} max_role,
   (SELECT g.id agent_id,g.user_id,m.app_id,m.role team,ga.agent_id IS NOT NULL override,
      CASE WHEN ga.agent_id IS NULL THEN g.all_workspaces ELSE ga.role END assigned,
      CASE WHEN ga.agent_id IS NULL THEN g.all_workspaces='admin' ELSE ga.delegated_admin END delegated_admin
-   FROM agents g JOIN members m ON m.user_id=g.user_id LEFT JOIN agent_apps ga ON ga.agent_id=g.id AND ga.app_id=m.app_id
+   FROM agents g JOIN team m ON m.user_id=g.user_id LEFT JOIN agent_apps ga ON ga.agent_id=g.id AND ga.app_id=m.app_id
    WHERE g.revoked_at IS NULL AND (g.all_workspaces IS NOT NULL OR ga.agent_id IS NOT NULL)) s`

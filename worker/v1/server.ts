@@ -226,7 +226,7 @@ export async function openFor(c: Ctx, s: Scope, b: Record<string, unknown>) {
   return (await workspaceConversations(c, s, issue.id)).data[0]!
 }
 const memberQuery =
-  "SELECT u.id,u.name,u.avatar_url,m.role FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?"
+  "SELECT u.id,u.name,u.avatar_url,m.role FROM users u JOIN team m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?"
 async function member(c: Ctx, s: Scope, address: unknown, writer = false) {
   const row = await sql(
     c.env,

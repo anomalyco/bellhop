@@ -140,7 +140,7 @@ async function people(
       coalesce(s.issue_count,0) issue_count,s.last_seen_at,t.id tier_id,t.name tier_name,t.color,t.agents_reply,h.handle old_handle
       FROM persons p LEFT JOIN users u ON u.id=p.aid LEFT JOIN activity s ON s.aid=p.aid
       LEFT JOIN tier_assignments x ON x.app_id=?1 AND (x.actor_id=p.aid OR x.pending_email=p.pending) LEFT JOIN tiers t ON t.id=x.tier_id
-      LEFT JOIN mention_handles h ON h.app_id=?1 AND h.actor_id=p.aid WHERE NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND (m.user_id=p.aid OR m.email=coalesce(u.email,p.pending))))
+      LEFT JOIN mention_handles h ON h.app_id=?1 AND h.actor_id=p.aid WHERE NOT EXISTS(SELECT 1 FROM team m WHERE m.app_id=?1 AND (m.user_id=p.aid OR m.email=coalesce(u.email,p.pending))))
     SELECT * FROM directory WHERE (?2 IS NULL OR tier_id=?2) AND (?3='' OR instr(lower(coalesce(json_extract(actor,'$.name'),'')),?3) OR instr(lower(coalesce(json_extract(actor,'$.handle'),old_handle,'')),?3) OR instr(lower(coalesce(address,'')),?3))
     ORDER BY last_seen_at DESC,coalesce(address,actor_id)`,
       app,
@@ -181,7 +181,7 @@ export async function setTier(
   // Email writes never resolve an account. Only a later authenticated sign-in binds them.
   const who = `WITH person AS (SELECT ?2 aid,?3 address),
     target AS (SELECT aid,address pending FROM person WHERE NOT EXISTS(SELECT 1 FROM agents WHERE id=aid)
-      AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND (m.user_id=aid OR m.email=address))
+      AND NOT EXISTS(SELECT 1 FROM team m WHERE m.app_id=?1 AND (m.user_id=aid OR m.email=address))
       AND (address IS NOT NULL OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=?1 AND json_extract(i.author,'$.id')=aid AND json_extract(i.author,'$.type')!='agent')
         OR EXISTS(SELECT 1 FROM comments c JOIN issues i ON i.id=c.issue_id WHERE i.app_id=?1 AND json_extract(c.author,'$.id')=aid AND json_extract(c.author,'$.type')!='agent')
         OR EXISTS(SELECT 1 FROM tier_assignments WHERE app_id=?1 AND actor_id=aid)))`

@@ -19,6 +19,7 @@ import { ApiFailure, dbError, denied, missing, reservedSlugs, sql, sha256 } from
 import type { Bindings, Ctx } from "./core"
 import { appRoom, feedRoom, issueRoom } from "./events"
 import { icons } from "./icons"
+import { orgs } from "./orgs"
 import { feed, feedApps, getIssue, issueNumber, listIssues, myAuthorFilter } from "./issues"
 import { bySlug } from "./read-scope"
 import { issues } from "./mutations"
@@ -44,6 +45,7 @@ import { imports, wakeImports } from "./github-import"
 import { exportWorkspace } from "./workspace-export"
 import { docs } from "./docs"
 import { widget } from "./widget"
+import { submitFeedback } from "./feedback"
 export { Room } from "./room"
 
 const api = new Hono<Bindings>()
@@ -52,6 +54,8 @@ api.on(["OPTIONS", "GET"], "/media/:id/:name", endUserMedia)
 // This is the only report route callable cross-origin. It has no cookie authority and
 // handles its own streaming byte limit before the general browser/JSON middleware.
 api.on(["OPTIONS", "POST"], "/api/apps/:slug/metadata", uploadReport)
+// The workspace-scoped alias of POST /v1/feedback (the same implementation); also called cross-origin by apps.
+api.on(["OPTIONS", "POST"], "/api/apps/:slug/feedback", (c) => submitFeedback(c, c.req.param("slug")))
 const limit = bodyLimit({
   maxSize: 512 * 1024,
   onError: (c) => c.json({ error: { code: "too_large", message: "JSON payload too large" } }, 413)
@@ -127,7 +131,10 @@ const oauthLimit: MiddlewareHandler<Bindings> = async (c, next) => {
 api.get("/oauth/authorize", oauthLimit)
 api.on("POST", ["/oauth/register", "/oauth/device", "/oauth/token"], oauthLimit)
 api.use("*", async (c, next) => {
-  if (["POST", "PUT", "PATCH"].includes(c.req.method) && !/^\/api\/apps\/[^/]+\/(uploads|icon)$/.test(c.req.path))
+  if (
+    ["POST", "PUT", "PATCH"].includes(c.req.method) &&
+    !/^\/api\/(apps\/[^/]+\/(uploads|icon)|orgs\/[^/]+\/icon)$/.test(c.req.path)
+  )
     return limit(c, next)
   if (c.req.method === "DELETE" && /^\/api\/apps\/[^/]+\/metadata\/[^/]+\/items$/.test(c.req.path))
     return limit(c, next)
@@ -211,6 +218,7 @@ api.route("/", mailRoutes)
 api.route("/", oauth)
 api.route("/", agents)
 api.route("/", apps)
+api.route("/", orgs)
 api.route("/", tierRoutes)
 api.route("/", reports)
 api.route("/", teamTools)
@@ -316,9 +324,16 @@ export default {
     ctx.waitUntil(processVerifications(env))
     ctx.waitUntil(sql(env, "DELETE FROM identity_uses WHERE expires<=unixepoch()").run())
     ctx.waitUntil(
+      sql(
+        env,
+        "DELETE FROM feedback_rate WHERE bucket<CASE scope WHEN 'key' THEN unixepoch()/60-1 ELSE unixepoch()/3600-1 END"
+      ).run()
+    )
+    ctx.waitUntil(
       env.DB.batch([
         sql(env, "DELETE FROM api_sessions WHERE expires<=unixepoch()"),
-        sql(env, "DELETE FROM api_replays WHERE expires<=unixepoch()")
+        sql(env, "DELETE FROM api_replays WHERE expires<=unixepoch()"),
+        sql(env, "DELETE FROM feedback_replays WHERE expires<=unixepoch()")
       ])
     )
     ctx.waitUntil(expireReports(env))

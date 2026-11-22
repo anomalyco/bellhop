@@ -40,7 +40,8 @@ function summaryFrame(i: IssueSummary): IssueSummary {
     votes,
     viewer_voted,
     locked,
-    pinned
+    pinned,
+    preview
   } = i
   return {
     id,
@@ -60,7 +61,8 @@ function summaryFrame(i: IssueSummary): IssueSummary {
     votes,
     viewer_voted,
     locked,
-    pinned
+    pinned,
+    preview
   }
 }
 function validAttachment(a: Attachment | null | undefined) {
@@ -271,7 +273,7 @@ export class Room extends DurableObject<Env> {
             this.env,
             `SELECT c.id,c.author,c.body,c.hidden,c.updated_at,c.edited_at,c.internal,c.mentions,c.via,${sessions.length || bearers.length ? tierBag("i.app_id", ["c.author", "json_extract(c.hidden,'$.by')"], "c.mentions") : "NULL"} tier_bag,(SELECT count(*) FROM comment_helpful WHERE comment_id=c.id) helpful,m.role,json_extract(i.author,'$.id') reporter
       ,(SELECT json_group_array(json_object('id',l.id,'name',l.name,'size',l.size,'metadata_id',md.id)) FROM report_metadata md JOIN report_logs l ON l.metadata_id=md.id WHERE md.app_id=i.app_id AND md.comment_id=c.id AND md.issue_id=i.id) report_logs
-      ,c.held_at,c.sent_by FROM team_comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
+      ,c.held_at,c.sent_by FROM team_comments c JOIN issues i ON i.id=c.issue_id LEFT JOIN team m ON m.app_id=i.app_id AND m.user_id=json_extract(c.author,'$.id') WHERE c.id IN (SELECT value FROM json_each(?))`,
             JSON.stringify([...commentIds])
           )
         ) - 1
@@ -280,7 +282,7 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT s.token_hash hash,s.user_id id,m.role IS NOT NULL team FROM sessions s JOIN apps a ON a.id=?1 LEFT JOIN members m ON m.user_id=s.user_id AND m.app_id=a.id WHERE (a.mode!='helpdesk' OR m.role IS NOT NULL) AND s.expires_at>?2 AND s.token_hash IN(SELECT value FROM json_each(?3))
+            `SELECT s.token_hash hash,s.user_id id,m.role IS NOT NULL team FROM sessions s JOIN apps a ON a.id=?1 LEFT JOIN team m ON m.user_id=s.user_id AND m.app_id=a.id WHERE (a.mode!='helpdesk' OR m.role IS NOT NULL) AND s.expires_at>?2 AND s.token_hash IN(SELECT value FROM json_each(?3))
              UNION ALL SELECT s.hash,s.contact_id,0 FROM contact_sessions s JOIN apps a ON a.id=s.app_id WHERE a.id=?1 AND a.mode='helpdesk' AND s.expires>unixepoch() AND s.hash IN(SELECT value FROM json_each(?3))`,
             app,
             now(),
@@ -325,7 +327,7 @@ export class Room extends DurableObject<Env> {
       ? q.push(
           sql(
             this.env,
-            `SELECT user_id id FROM members WHERE app_id=?1 AND user_id IN (SELECT json_extract(value,'$.voter') FROM json_each(?2))
+            `SELECT user_id id FROM team WHERE app_id=?1 AND user_id IN (SELECT json_extract(value,'$.voter') FROM json_each(?2))
       UNION ALL SELECT agent_id FROM (${agentAccessSQL}) WHERE app_id=?1 AND role IS NOT NULL AND agent_id IN(SELECT json_extract(value,'$.voter') FROM json_each(?2))`,
             options.moved.target,
             people

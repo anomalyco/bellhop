@@ -12,12 +12,13 @@ import { startEmail, mint, patchMe, refresh, workspace } from "./sessions"
 import { conversations, items, mark, open, postMessage, typing, confirm, target } from "./conversations"
 import { replay } from "./replay"
 import { schemas, ref, string, type Schema } from "./schemas"
+import { feedbackCors, feedbackLimits, submitFeedback } from "../feedback"
 
 type Action = (c: Ctx, s: Scope, b: Record<string, unknown>, id: string, number: number, seed?: string) => unknown
 type Route = {
   method: "GET" | "PATCH" | "POST" | "DELETE" | "PUT"
   path: string
-  auth: Auth | "ticket"
+  auth: Auth | "ticket" | "report"
   transport?: "multipart" | "socket"
   request?: keyof typeof schemas
   response: keyof typeof schemas
@@ -29,6 +30,15 @@ type Route = {
 const conv = "/conversations/:id"
 // The dispatcher, OPTIONS and OpenAPI all enumerate this same table. No other v1 router is exported.
 export const routes: Record<string, Route> = {
+  submitFeedback: {
+    method: "POST",
+    path: "/feedback",
+    auth: "report",
+    request: "FeedbackInput",
+    response: "FeedbackCreated",
+    status: 201,
+    run: (c) => submitFeedback(c)
+  },
   escalateConversation: {
     method: "POST",
     path: conv + "/escalate",
@@ -248,7 +258,8 @@ const security = {
     server: [{ secret: [] }],
     shared: [{ secret: [] }, { session: [] }],
     widget: [{ publishable: [] }, { session: [] }],
-    email: [{ publishable: [] }, { session: [] }]
+    email: [{ publishable: [] }, { session: [] }],
+    report: [{ reportKey: [] }]
   },
   media = (name: string) => ({ "application/json": { schema: ref(name) } })
 export function document() {
@@ -285,7 +296,7 @@ export function document() {
           : {})
       }
     }
-    for (const [code, description] of Object.entries({
+    for (const [code, description] of Object.entries(name === "submitFeedback" ? feedbackErrors : {
       ...(name === "consumeApproval" ? { 409: "Already used", 410: "Pending, rejected, or expired" } : {}),
       404: "not_found: unknown host, resource not found or not owned",
       429: "rate_limited, idempotency_limit or code_limit; retry after the indicated delay",
@@ -328,6 +339,7 @@ export function document() {
               "Publishable key, or an anonymous session on its allowed origin. Verifying with the anonymous bearer claims only that session’s history and revokes it."
           }
         : {}),
+      ...(name === "submitFeedback" ? { description: feedbackDescription } : {}),
       ...(name === "refreshSession"
         ? {
             description:
@@ -347,7 +359,20 @@ export function document() {
             requestBody: {
               required: true,
               content:
-                r.transport === "multipart" ? { "multipart/form-data": { schema: ref(r.request) } } : media(r.request)
+                name === "submitFeedback"
+                  ? {
+                      ...media(r.request),
+                      "multipart/form-data": {
+                        schema: ref("FeedbackMultipart"),
+                        encoding: {
+                          payload: { contentType: "application/json" },
+                          screenshot: { contentType: "image/png, image/jpeg, image/webp" }
+                        }
+                      }
+                    }
+                  : r.transport === "multipart"
+                    ? { "multipart/form-data": { schema: ref(r.request) } }
+                    : media(r.request)
             }
           }
         : {}),
@@ -361,6 +386,13 @@ export function document() {
     paths,
     components: {
       securitySchemes: {
+        reportKey: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "bh_pub_…",
+          description:
+            "A workspace report key (Settings → Report keys): publishable, safe to ship in apps, names its workspace. Only uploads report metadata and sends feedback."
+        },
         socketTicket: {
           type: "apiKey",
           in: "query",
@@ -387,6 +419,22 @@ export function document() {
     }
   }
 }
+const L = feedbackLimits,
+  MB = (n: number) => n / 1024 / 1024 + " MB"
+const feedbackDescription = `Send in-app feedback as a private issue in the report key's workspace (on a workspace host, the key must be that workspace's; also POST /api/apps/{slug}/feedback). The submitter has no web view: with an email (and not anonymous) Bellhop sends one confirmation email, and once it's confirmed public replies are emailed and email replies post back. Anonymous sends keep no email, user, install id or logs. JSON with base64 screenshots, or multipart/form-data with a payload part (FeedbackInput as JSON, without screenshots) and up to ${L.screenshots} screenshot file parts. Screenshots are PNG, JPEG or WebP (checked by content), each <= ${MB(L.screenshot)}, <= ${MB(L.screenshotTotal)} in total; the whole request <= ${MB(L.request)}. Limits: ${L.perIpMinute} per minute per IP, ${L.perKeyMinute} per minute per key, ${L.perInstallHour} per hour per install_id, ${L.perKeyDay} per day and ${MB(L.bytesPerKeyDay)} per day per key. CORS is open to any origin. Retries: send an Idempotency-Key and retry with the same key and the same feedback (for multipart, the same payload part and screenshot files); the first answer comes back for 24 hours, with no second issue or confirmation email. The key is per report key; the same key with different feedback is a 422, and a retry while the first is still running a 409 with Retry-After. Client errors replay for 5 minutes.`
+const feedbackErrors = {
+  400: "invalid_input: a field is missing, too long or of the wrong type (at most 5 screenshots)",
+  401: "invalid_report_key: missing, unknown or revoked report key (or another workspace's, on a workspace host)",
+  403: "feedback_unavailable: help desk workspaces don't take feedback; blocked: this install is blocked",
+  404: "not_found: unknown host",
+  413: "too_large (a screenshot, the screenshots or the request) or feedback_byte_quota (the key's daily bytes)",
+  415: "unsupported_media_type: not JSON or multipart, or a screenshot that isn't a PNG, JPEG or WebP image",
+  409: "request_pending: a request with this Idempotency-Key is still running; retry after the indicated delay",
+  422: "idempotency_mismatch: the Idempotency-Key was used for different feedback",
+  429: "rate_limited (per IP), key_rate_limited (per key per minute), install_rate_limited (per install per hour), feedback_daily_limit (per key per day) or idempotency_limit (1000 active keys per report key and IP); retry after the indicated delay",
+  500: "internal_error",
+  503: "misconfigured"
+}
 export function publicApi() {
   const api = new Hono<Bindings>()
   api.use("*", async (c, next) => {
@@ -403,7 +451,7 @@ export function publicApi() {
     await next()
   })
   api.use("*", (c, next) =>
-    c.req.path === "/v1/uploads" && c.req.method === "POST"
+    (c.req.path === "/v1/uploads" || c.req.path === "/v1/feedback") && c.req.method === "POST"
       ? next()
       : bodyLimit({
           maxSize: 512 * 1024,
@@ -415,6 +463,11 @@ export function publicApi() {
       .filter((r) => r.path === path && r.auth !== "server")
       .map((r) => r.method)
     api.options(path, async (c) => {
+      // Report keys are meant for apps: feedback is open to any origin.
+      if (path === "/feedback") {
+        feedbackCors(c)
+        return c.body(null, 204)
+      }
       const origin = c.req.header("Origin")
       if (
         !origin ||
@@ -441,6 +494,7 @@ export function publicApi() {
         return c.json(document())
       }
       if (r.auth === "ticket") return upgrade(c)
+      if (r.auth === "report") return submitFeedback(c)
       // Malformed mint attempts pay only the ingress IP check: no D1 or key budget.
       if (r.method === "POST" && r.path.startsWith("/sessions")) {
         const prefix = /^Bearer bh_(pk|sk)_[a-f0-9]{64}$/i.exec(c.req.header("Authorization") ?? "")?.[1]

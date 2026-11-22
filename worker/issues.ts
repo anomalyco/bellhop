@@ -11,6 +11,7 @@ import type {
   IssueList,
   IssueRef,
   IssueSummary,
+  InboxList,
   Member,
   Mention,
   IssueSort,
@@ -41,6 +42,7 @@ import { can } from "./permissions"
 import { reportQuery, decodeReport, type ReportRow } from "./report-data"
 import { contactQuery, proofQuery, verification, requesterActor, type ContactRow, type ProofRow } from "./helpdesk-data"
 import { requestJson, typeInfo } from "./request-types"
+import { feedbackInfo, feedbackQuery, type FeedbackRow } from "./feedback-data"
 
 const viewerCTE = "viewer AS (SELECT ? voter,? ids)"
 const viewerArgs = (v: Viewer) => [v.voter ?? v.actorId, JSON.stringify(actorIds(v))]
@@ -48,17 +50,19 @@ const fields = (
   team: boolean,
   personal = true,
   full = false
-) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,${team?'i.assignee':"CASE WHEN (SELECT mode FROM apps WHERE id=i.app_id)!='helpdesk' THEN i.assignee END"} assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,i.reporter_locale,
+) => `i.id,i.number,i.title,i.status,i.close_reason,i.created_at,i.updated_at,i.author,${team?'i.assignee':"CASE WHEN (SELECT mode FROM apps WHERE id=i.app_id)!='helpdesk' THEN i.assignee END"} assignee,i.activity,i.private,i.hidden,i.locked,i.pinned,i.reporter_locale,substr(i.body,1,1000) body_head,
   ${team ? tierBag("i.app_id", ["i.author", "i.assignee", "json_extract(i.activity,'$.actor')", "json_extract(i.hidden,'$.by')"], full ? "i.mentions" : undefined) : "NULL"} tier_bag,
   ${voteCount(team ? "1" : "0", personal ? "(SELECT ids FROM viewer)" : "'[]'")} votes,
   ${personal ? "EXISTS(SELECT 1 FROM issue_votes WHERE issue_id=i.id AND voter=(SELECT voter FROM viewer))" : "0"} viewer_voted,
   (SELECT count(*) FROM comments WHERE issue_id=i.id ${team ? "" : "AND internal=0"}) AS comment_count,
   (SELECT json_group_array(json_object('id',l.id,'name',l.name,'color',l.color,'description',l.description))
-    FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id ORDER BY l.name) AS labels`
+    FROM issue_labels il JOIN labels l ON l.id=il.label_id WHERE il.issue_id=i.id ORDER BY l.name) AS labels,
+  ${team ? "(SELECT json_object('platform',f.platform,'app_version',f.app_version,'screenshots',json_array_length(f.screenshots),'email',f.email IS NOT NULL,'anonymous',f.anonymous) FROM feedback f WHERE f.issue_id=i.id)" : "NULL"} feedback_summary`
 type StoredSummary = Omit<
   IssueSummary,
-  "author" | "assignee" | "activity" | "labels" | "private" | "hidden" | "locked" | "pinned" | "viewer_voted"
+  "author" | "assignee" | "activity" | "labels" | "private" | "hidden" | "locked" | "pinned" | "viewer_voted" | "preview"
 > & {
+  body_head: string | null
   locked: number
   pinned: number
   viewer_voted: number
@@ -68,12 +72,13 @@ type StoredSummary = Omit<
   assignee: string | null
   activity: string | null
   labels: string
+  feedback_summary: string | null
   tier_bag: string | null
   reporter_locale: Issue["reporter_locale"]
 }
 type TeamRow = { user_id: string; role: Member["role"] }
 const teamQuery = (env: Env, scope: ReadScope) =>
-  sql(env, `SELECT user_id,role FROM members WHERE app_id=${appIdSQL(scope)} AND user_id IS NOT NULL`, appKey(scope))
+  sql(env, `SELECT user_id,role FROM team WHERE app_id=${appIdSQL(scope)}`, appKey(scope))
 const roleMap = (team: TeamRow[]) => new Map(team.map(({ user_id, role }) => [user_id, role]))
 export async function appRoles(env: Env, appId: string) {
   return roleMap(await rows<TeamRow>(teamQuery(env, appId)))
@@ -99,7 +104,7 @@ function currentActivity(json: string | null, roles: Roles): Activity | null {
 export async function readPresence(env: Env, issueId: string, appId?: string, publicOnly = false) {
   const row = await sql(
     env,
-    `SELECT i.activity,i.private,i.hidden IS NOT NULL hidden,json_extract(i.author,'$.id') reporter,m.user_id,m.role,(a.public=1 AND (${visibleSQL(outsider)})) public FROM issues i JOIN apps a ON i.app_id=a.id LEFT JOIN members m
+    `SELECT i.activity,i.private,i.hidden IS NOT NULL hidden,json_extract(i.author,'$.id') reporter,m.user_id,m.role,(a.public=1 AND (${visibleSQL(outsider)})) public FROM issues i JOIN apps a ON i.app_id=a.id LEFT JOIN team m
     ON m.app_id=i.app_id AND m.user_id=json_extract(i.activity,'$.actor.id') WHERE i.id=? ${appId ? "AND i.app_id=?" : ""} ${publicOnly ? `AND a.public=1 AND ${visibleSQL(outsider)}` : ""}`,
     issueId,
     ...(appId ? [appId] : [])
@@ -119,6 +124,34 @@ export async function readPresence(env: Env, issueId: string, appId?: string, pu
         gate: { private: !!row.private, hidden: !!row.hidden, reporter: row.reporter }
       }
     : null
+}
+function feedbackSummary(json: string | null): IssueSummary["feedback_summary"] {
+  if (!json) return null
+  const f = JSON.parse(json)
+  return { ...f, email: !!f.email, anonymous: !!f.anonymous }
+}
+// A list row's plain-text preview of the body: Markdown and HTML stripped, whitespace collapsed, about 140 characters.
+export function plainPreview(markdown: string | null | undefined, max = 140) {
+  if (!markdown) return null
+  const text = markdown
+    .replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g, " $1 ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<\/?[a-z][^>]*>/gi, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\[[^\]]*\]/g, "$1")
+    .replace(/^ {0,3}(?:#{1,6}\s+|(?:>\s?)+|[-*+]\s+(?:\[[ xX]\]\s+)?|\d+[.)]\s+)/gm, "")
+    .replace(/^ {0,3}(?:[-*_] *){3,}$/gm, " ")
+    .replace(/`+([^`]*)`+/g, "$1")
+    .replace(/(\*\*|__|~~)(.+?)\1/g, "$2")
+    .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?=[^\w*]|$)/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!text) return null
+  if (text.length <= max) return text
+  const cut = text.slice(0, max),
+    space = cut.lastIndexOf(" ")
+  return (space > max * 0.6 ? cut.slice(0, space) : cut).trimEnd() + "…"
 }
 function summary(r: StoredSummary, roles: Roles): IssueSummary {
   const { id, number, title, status, close_reason, created_at, updated_at, comment_count } = r
@@ -141,7 +174,9 @@ function summary(r: StoredSummary, roles: Roles): IssueSummary {
       author: parseActor(r.author, roles),
       assignee: r.assignee ? parseActor(r.assignee, roles) : null,
       activity: currentActivity(r.activity, roles),
-      labels: JSON.parse(r.labels)
+      labels: JSON.parse(r.labels),
+      preview: plainPreview(r.body_head),
+      feedback_summary: feedbackSummary(r.feedback_summary)
     },
     r.tier_bag ? JSON.parse(r.tier_bag) : undefined
   )
@@ -195,7 +230,9 @@ function issueFilter(
   parsed = parseSearch(options.query),
   handles: Map<string, string> = new Map(),
   feedUser?: string | null,
-  feedIds: string[] = []
+  feedIds: string[] = [],
+  // Across several apps (an org's inbox), resolve @handles in each issue's own app.
+  scopedHandles = false
 ) {
   const where = [visibleIssues(workspace, v)],
     values: unknown[] = [...actorBindings(v)]
@@ -282,17 +319,49 @@ function issueFilter(
           )
           const handle = value.replace(/^@/, "")
           values.push(handles.get(handle) ?? null, handle)
+        } else if (scopedHandles) {
+          where.push(
+            `(${ignoreAssignment}json_extract(i.${key},'$.id')=(SELECT actor_id FROM mention_handles WHERE app_id=i.app_id AND handle=?))`
+          )
+          values.push(value.replace(/^@/, ""))
         } else {
           where.push(`(${ignoreAssignment}json_extract(i.${key},'$.id')=?)`)
           values.push(handles.get(value.replace(/^@/, "")) ?? null)
         }
         break
+      // Feedback qualifiers: what the feedback form sent is the team's (and agents') only.
+      case "platform":
+      case "version":
+        if (v.team) {
+          where.push(`EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=i.id AND f.${key === "platform" ? "platform" : "app_version"}=?)`)
+          values.push(value)
+        }
+        break
+      case "meta":
+        if (v.team) {
+          const at = value.indexOf("=")
+          where.push("EXISTS(SELECT 1 FROM feedback_meta m WHERE m.issue_id=i.id AND m.key=? AND m.value=? COLLATE NOCASE)")
+          values.push(value.slice(0, at), value.slice(at + 1))
+        }
+        break
+      case "source":
+        if (v.team) where.push(`${value === "web" ? "NOT " : ""}EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=i.id)`)
+        break
+      case "app":
+        break
       case "has": {
+        if (value !== "metadata") {
+          if (v.team)
+            where.push(
+              `EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=i.id AND ${value === "email" ? "f.email IS NOT NULL" : "f.screenshots!='[]'"})`
+            )
+          break
+        }
         // The existence of diagnostics on someone else's post (especially an internal note)
         // is not public. Use the same post-author/parent visibility as Issue.metadata.
         const check = v.team
           ? "1"
-          : `${feedUser ? "EXISTS(SELECT 1 FROM members m WHERE m.app_id=i.app_id AND m.user_id=?) OR " : ""}(i.hidden IS NULL AND (c.id IS NULL OR (c.internal=0 AND c.hidden IS NULL)) AND json_extract(coalesce(c.author,i.author),'$.id') IN(SELECT value FROM json_each(?)))`
+          : `${feedUser ? "EXISTS(SELECT 1 FROM team m WHERE m.app_id=i.app_id AND m.user_id=?) OR " : ""}(i.hidden IS NULL AND (c.id IS NULL OR (c.internal=0 AND c.hidden IS NULL)) AND json_extract(coalesce(c.author,i.author),'$.id') IN(SELECT value FROM json_each(?)))`
         where.push(
           `EXISTS(SELECT 1 FROM report_metadata md LEFT JOIN comments c ON c.id=md.comment_id WHERE md.issue_id=i.id AND md.app_id=i.app_id AND md.ready=1 AND (${check}))`
         )
@@ -458,13 +527,91 @@ const feedAppFields = `a.slug,a.name app_name,'/icon/'||a.slug||'/'||a.icon_vers
 // roster. Only enrich the bounded final page, after its global ordering and limit.
 const feedFields = (
   personal = false
-) => `${fields(false, personal)},${feedAppFields},(SELECT json_group_object(m.user_id,m.role) FROM members m
+) => `${fields(false, personal)},${feedAppFields},(SELECT json_group_object(m.user_id,m.role) FROM team m
   WHERE m.app_id=i.app_id AND m.user_id IN (json_extract(i.author,'$.id'),json_extract(i.assignee,'$.id'),json_extract(i.activity,'$.actor.id'))) roles`
 type FeedRow = StoredSummary & { slug: string; app_name: string; icon_url: string | null; roles: string }
 function feedIssue(r: FeedRow): FeedIssue {
   return {
     ...summary(r, new Map(Object.entries(JSON.parse(r.roles) as Record<string, Member["role"]>))),
     app: { slug: r.slug, name: r.app_name, icon_url: r.icon_url }
+  }
+}
+// An org inbox row: the team's projection (all private and internal state), with its app.
+const inboxFields = `${fields(true, false)},${feedAppFields},(SELECT json_group_object(m.user_id,m.role) FROM team m
+  WHERE m.app_id=i.app_id AND m.user_id IN (json_extract(i.author,'$.id'),json_extract(i.assignee,'$.id'),json_extract(i.activity,'$.actor.id'))) roles`
+/**
+ * Most recently active issues across apps the viewer is on (the team in every one of them). Each app is a
+ * separate index seek (issues_inbox: app, closed, updated_at, id) that stops at one page, so a page costs the
+ * same however large the backlogs are; only the counts walk every matching issue.
+ */
+export async function inbox(
+  env: Env,
+  apps: { id: string; slug: string }[],
+  options: { state?: unknown; q?: unknown; cursor?: unknown; limit?: number },
+  actorId: string
+): Promise<InboxList> {
+  const parsed = parseSearch(options.q, false, true),
+    v: Viewer = { team: true, actorId },
+    wanted = parsed.terms.filter((t) => t.key === "app").map((t) => t.value),
+    selected = wanted.length ? apps.filter((a) => wanted.includes(a.slug)) : apps,
+    hidden = parsed.terms.some((t) => t.key === "is" && t.value === "hidden") ? "" : " AND i.hidden IS NULL",
+    closed = Number(
+      (parsed.tab ?? choice(options.state ?? "open", ["open", "closed"] as const, "state")) === "closed"
+    ),
+    limit = Math.min(100, Math.max(1, Math.floor(options.limit ?? pageSize)))
+  if (parsed.terms.some((t) => (t.key === "author" || t.key === "assignee") && t.value !== "@me"))
+    await Promise.all(apps.map((a) => mentionables(env, a.id)))
+  const scoped = (workspace: string) => {
+    const f = issueFilter(workspace, {}, v, parsed, new Map(), undefined, [], true)
+    return { where: f.where + hidden, values: f.values }
+  }
+  const seek = scoped("a.id"),
+    all = scoped("j.value")
+  let boundary = "",
+    cursorArgs: string[] = []
+  if (options.cursor !== undefined) {
+    const m = /^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z)~([\w-]{1,80})$/.exec(str(options.cursor, "cursor", 120))
+    if (!m) bad("Invalid inbox cursor")
+    boundary = "AND (i.updated_at,i.id)<(?,?)"
+    cursorArgs = [m[1]!, m[2]!]
+  }
+  const ids = JSON.stringify(selected.map((a) => a.id))
+  const [page, totals, perApp] = await env.DB.batch<unknown>([
+    sql(
+      env,
+      `WITH page AS MATERIALIZED (SELECT candidate.id,candidate.updated_at FROM apps a CROSS JOIN issues candidate
+      WHERE a.id IN (SELECT value FROM json_each(?)) AND candidate.rowid IN (SELECT i.rowid FROM issues i WHERE ${seek.where} AND (i.status='closed')=? ${boundary}
+        ORDER BY i.updated_at DESC,i.id DESC LIMIT ?) ORDER BY candidate.updated_at DESC,candidate.id DESC LIMIT ?)
+      SELECT ${inboxFields} FROM page p JOIN issues i ON i.id=p.id JOIN apps a ON a.id=i.app_id ORDER BY p.updated_at DESC,p.id DESC`,
+      ids,
+      ...seek.values,
+      closed,
+      ...cursorArgs,
+      limit + 1,
+      limit + 1
+    ),
+    sql(
+      env,
+      `SELECT count(*) FILTER (WHERE i.status!='closed') open,count(*) FILTER (WHERE i.status='closed') closed
+      FROM json_each(?) j CROSS JOIN issues i WHERE ${all.where}`,
+      ids,
+      ...all.values
+    ),
+    // For the app filter: every app, whatever app: terms the query has.
+    sql(
+      env,
+      `SELECT a.slug,(SELECT count(*) FROM issues i WHERE ${seek.where} AND i.status!='closed') open
+      FROM apps a WHERE a.id IN (SELECT value FROM json_each(?)) ORDER BY a.name,a.slug`,
+      ...seek.values,
+      JSON.stringify(apps.map((a) => a.id))
+    )
+  ])
+  const items = page!.results as FeedRow[]
+  return {
+    items: items.slice(0, limit).map(feedIssue),
+    counts: totals!.results[0] as InboxList["counts"],
+    by_app: perApp!.results as InboxList["by_app"],
+    next_cursor: items.length > limit ? `${items[limit - 1]!.updated_at}~${items[limit - 1]!.id}` : null
   }
 }
 export async function publicFeedIssue(env: Env, id: string) {
@@ -618,7 +765,7 @@ export async function getIssue(
     target = `SELECT id FROM issues WHERE ${where}`,
     key = appKey(scope)
   const {
-    data: [items, team, files, comments, events, relations, reports, contacts, proofs, handoffs]
+    data: [items, team, files, comments, events, relations, reports, contacts, proofs, handoffs, feedback]
   } = await readBatch<
     [
       StoredSummary & {
@@ -665,7 +812,8 @@ export async function getIssue(
       ReportRow,
       ContactRow,
       ProofRow,
-      { id: string; actor: string | null; type: IssueEvent["type"]; data: string | null; created_at: string }
+      { id: string; actor: string | null; type: IssueEvent["type"]; data: string | null; created_at: string },
+      FeedbackRow
     ]
   >(
     env,
@@ -738,7 +886,9 @@ export async function getIssue(
         `SELECT id,type,created_at,${v.team ? "data,actor" : "NULL data,NULL actor"} FROM handoff_timeline WHERE issue_id=(${target}) ${v.team ? "" : "AND type='escalated'"}`,
         key,
         number
-      )
+      ),
+      // What the feedback form sent: team and agents only.
+      v.team ? feedbackQuery(env, target, key, number) : sql(env, "SELECT NULL WHERE 0")
     ],
     read
   )
@@ -853,6 +1003,7 @@ export async function getIssue(
     escalation: r.handoff ? JSON.parse(r.handoff) : null,
     escalated_to_person: !!r.with_person,
     verifications,
+    feedback: feedbackInfo(feedback[0]),
     edited_at: r.edited_at,
     imported: r.github_repo
       ? {

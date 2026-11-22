@@ -3,7 +3,7 @@ import { savedReplies } from "./team-tools"
 import { analytics } from "./analytics"
 import { getContact, requestVerification } from "./helpdesk"
 import { allowed, clientIP, enforce } from "./rate-limits"
-import type { AgentRole, App, Label, Template } from "../shared/api"
+import type { AgentRole, App, Label, Org, Template } from "../shared/api"
 import {
   appCols,
   createApp,
@@ -16,14 +16,14 @@ import {
   writeLabel,
   writeTemplate
 } from "./apps"
-import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, sha256, sql, str } from "./core"
+import { ApiFailure, bad, choice, dbError, denied, fail, ids, input, missing, rows, sha256, sql, str } from "./core"
 import type { Bindings, Ctx } from "./core"
 import { agentAccessSQL, can, teamRole } from "./permissions"
 import { listTiers, setTier } from "./tiers"
 import type { Action } from "./permissions"
 import { roster, changeMember, invite } from "./members"
 import { setActivity } from "./events"
-import { attachment, getIssue, issueSummary, listIssues } from "./issues"
+import { attachment, getIssue, inbox, issueSummary, listIssues } from "./issues"
 import type { AttachmentRow } from "./issues"
 import { getReport, reportLog } from "./report-data"
 import {
@@ -43,7 +43,7 @@ import { mentionables } from "./conversation"
 import { teamViewer } from "./visibility"
 import type { Access } from "./mutations"
 import { oauthOrigin } from "./oauth"
-import { fromAppRow, type AppRow } from "./read-scope"
+import { fromAppRow, orgCols, type AppRow } from "./read-scope"
 import { configureWebhook, redeliver, rotateWebhook, testWebhook, webhookEvents } from "./webhooks"
 
 const number = { type: "integer", minimum: 1 },
@@ -53,6 +53,8 @@ const states = ["open", "closed"] as const,
   relations = ["duplicate_of", "related", "blocks"] as const
 export const toolRoles = {
   list_apps: "discover",
+  list_orgs: "across",
+  list_feedback: "across",
   list_tiers: "read",
   list_saved_replies: "read",
   get_analytics: "triage",
@@ -99,7 +101,7 @@ export const toolRoles = {
   invite_member: "setup",
   set_member_role: "setup",
   remove_member: "setup"
-} as const satisfies Record<string, Action | "discover" | "create">
+} as const satisfies Record<string, Action | "discover" | "create" | "across">
 function tool(
   name: keyof typeof toolRoles,
   description: string,
@@ -112,7 +114,7 @@ function tool(
     inputSchema: {
       type: "object",
       properties:
-        name === "list_apps" || name === "create_app"
+        name === "list_apps" || name === "create_app" || name === "list_orgs" || name === "list_feedback"
           ? properties
           : {
               ...properties,
@@ -249,6 +251,13 @@ const workspaceTools = [
 export const tools = [
   ...workspaceTools,
   tool("list_apps", "List the workspaces this agent can use and its role in each.", {}),
+  tool("list_orgs", "List the orgs this agent's account is on, with the org's apps this agent can use.", {}),
+  tool(
+    "list_feedback",
+    `List issues, most recently active first, across every app this agent can use, or one org or one app. The query takes list qualifiers plus app:<slug>, platform:, version:, meta:<key>=<value>, has:screenshot, has:email, source:feedback|web. Rows carry their app and feedback summary.`,
+    { org: text, app: text, query: text, state: { ...text, enum: states }, limit },
+    []
+  ),
   tool(
     "create_app",
     "Create a workspace owned by your account. Requires separate permission to create workspaces.",
@@ -264,8 +273,8 @@ export const tools = [
   }),
   tool(
     "get_issue",
-    `Read an issue with its timeline, attachments, relations, and system info. ${replyLanguage}`,
-    { number },
+    `Read an issue with its timeline, attachments, relations, system info and feedback. With images (default true), up to 5 screenshots and image attachments follow as image content (larger than 2 MB: a URL). ${replyLanguage}`,
+    { number, images: { type: "boolean" } },
     ["number"]
   ),
   tool(
@@ -363,6 +372,12 @@ const textResult = (value: unknown) => ({
     }
   ]
 })
+function base64(bytes: Uint8Array) {
+  const chunks = []
+  // A multiple of three means concatenated chunks only have padding at the end.
+  for (let i = 0; i < bytes.length; i += 24576) chunks.push(btoa(String.fromCharCode(...bytes.subarray(i, i + 24576))))
+  return chunks.join("")
+}
 function integer(v: unknown, field: string, max = Number.MAX_SAFE_INTEGER) {
   if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1 || v > max) bad(`Invalid ${field}`)
   return v
@@ -393,6 +408,43 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
   )
     bad("Unexpected or missing tool argument")
   if (action === "discover") return textResult(caller.apps)
+  if (action === "across") {
+    if (name === "list_orgs") {
+      const orgs = await rows<Org>(
+        sql(
+          c.env,
+          `SELECT ${orgCols},m.role FROM orgs o LEFT JOIN org_members m ON m.org_id=o.id AND m.user_id=?1
+          WHERE o.id IN (SELECT org_id FROM org_members WHERE user_id=?1 UNION SELECT org_id FROM apps WHERE id IN (SELECT value FROM json_each(?2)) AND org_id IS NOT NULL)
+          ORDER BY o.name,o.slug`,
+          caller.user,
+          JSON.stringify(caller.apps.map((a) => a.id))
+        )
+      )
+      return textResult(
+        orgs.map((o) => ({
+          ...o,
+          apps: caller.apps.filter((a) => a.org?.slug === o.slug).map(({ slug, name, role }) => ({ slug, name, role }))
+        }))
+      )
+    }
+    const org = args.org === undefined ? null : str(args.org, "org", 40),
+      only = args.app === undefined ? null : str(args.app, "app", 40),
+      apps = caller.apps.filter((a) => (!org || a.org?.slug === org) && (!only || a.slug === only))
+    if (only && !apps.length)
+      fail(403, "forbidden", `Workspace not allowed. Allowed: ${caller.apps.map((a) => a.slug).join(", ") || "(none)"}`)
+    return textResult(
+      await inbox(
+        c.env,
+        apps,
+        {
+          state: args.state === undefined ? undefined : choice(args.state, states, "state"),
+          q: args.query === undefined ? undefined : str(args.query, "query", 512),
+          limit: args.limit === undefined ? undefined : integer(args.limit, "limit", 100)
+        },
+        caller.actor.id
+      )
+    )
+  }
   if (action === "create") {
     if (!caller.create) denied()
     return textResult(await createApp(c, { id: caller.user }, args, caller.actor))
@@ -582,7 +634,8 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           viewer: async (slug) => (caller.apps.some((x) => x.slug === slug) ? { team: true, actorId: actor.id } : null)
         }
       )
-      return textResult({
+      if (b.images !== undefined && typeof b.images !== "boolean") bad("Invalid images flag")
+      const result = textResult({
         ...issue,
         metadata: issue.metadata.map(({ id, title, source, fingerprint, attached_to, logs }) => ({
           id,
@@ -593,6 +646,28 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
           logs
         }))
       })
+      if (b.images === false) return result
+      // The feedback screenshots first (in the order sent), then other images the agent can see, up to 5.
+      const shots = issue.feedback?.screenshot_ids ?? [],
+        visible = [
+          ...issue.attachments,
+          ...issue.timeline.flatMap((t) => (t.kind === "comment" ? t.comment.attachments : []))
+        ].filter((x) => x.kind === "image"),
+        picked = [
+          ...shots.flatMap((id) => visible.filter((x) => x.id === id)),
+          ...visible.filter((x) => !shots.includes(x.id))
+        ].slice(0, 5)
+      const content: { type: string; text?: string; mimeType?: string; data?: string }[] = [...result.content]
+      for (const x of picked) {
+        const row = await sql(env, "SELECT object_key FROM attachments WHERE id=? AND app_id=?", x.id, app.id).first<string>("object_key")
+        const object = row && x.size <= 2 * 1024 * 1024 ? await env.MEDIA.get(row) : null
+        if (!object) {
+          content.push({ type: "text", text: `Image ${x.name} (${x.size} bytes): ${new URL(x.url, a.origin).href}` })
+          continue
+        }
+        content.push({ type: "image", mimeType: x.mime, data: base64(new Uint8Array(await object.arrayBuffer())) })
+      }
+      return { content }
     }
     case "get_metadata":
       return textResult(await getReport(env, app.id, str(b.id, "metadata id", 80), { team: true, actorId: actor.id }))
@@ -617,12 +692,7 @@ async function call(c: Ctx, caller: Caller, name: string, args: Record<string, u
         return textResult(new URL(attachment(row).url, a.origin).href)
       const object = await env.MEDIA.get(row.object_key)
       if (!object) missing()
-      const bytes = new Uint8Array(await object.arrayBuffer()),
-        chunks = []
-      // A multiple of three means concatenated chunks only have padding at the end.
-      for (let i = 0; i < bytes.length; i += 24576)
-        chunks.push(btoa(String.fromCharCode(...bytes.subarray(i, i + 24576))))
-      return { content: [{ type: "image", mimeType: row.mime, data: chunks.join("") }] }
+      return { content: [{ type: "image", mimeType: row.mime, data: base64(new Uint8Array(await object.arrayBuffer())) }] }
     }
     case "comment": {
       const comment = await addComment(a, n(), b)
@@ -711,7 +781,7 @@ export async function authenticate(c: Ctx): Promise<Caller | null> {
         agent.id
       ).run()
     )
-  const apps = (scopes!.results as AppRow<Workspace>[]).map(fromAppRow)
+  const apps = (scopes!.results as AppRow<Workspace>[]).map((r) => fromAppRow(r))
   return {
     apps,
     user: agent.user_id,

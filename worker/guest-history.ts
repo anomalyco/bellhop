@@ -57,7 +57,7 @@ async function* scopes(c: Ctx, user?: User) {
     const apps = await rows<Pick<App, "id" | "role">>(
       sql(
         c.env,
-        `SELECT a.id,m.role FROM apps a LEFT JOIN members m ON m.app_id=a.id AND m.user_id=?
+        `SELECT a.id,m.role FROM apps a LEFT JOIN team m ON m.app_id=a.id AND m.user_id=?
        WHERE a.id>? ${user ? "AND a.mode='tracker'" : "AND a.issue_seq>0"} ORDER BY a.id LIMIT 128`,
         user?.id ?? null,
         after
@@ -209,7 +209,7 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
     sql(
       c.env,
       `INSERT OR IGNORE INTO tier_assignments(app_id,tier_id,actor_id) SELECT app_id,tier_id,?1 FROM tier_assignments
-      WHERE app_id=?2 AND actor_id=?3 AND NOT EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?1)`,
+      WHERE app_id=?2 AND actor_id=?3 AND NOT EXISTS(SELECT 1 FROM team WHERE app_id=?2 AND user_id=?1)`,
       actor.id,
       app,
       previous
@@ -219,7 +219,7 @@ async function claimApp(c: Ctx, app: string, previous: string, actor: Actor) {
     sql(
       c.env,
       `INSERT OR IGNORE INTO blocks SELECT hex(randomblob(16)),app_id,?,?,moderator,created_at FROM blocks
-      WHERE app_id=? AND actor_id=? AND NOT EXISTS(SELECT 1 FROM members WHERE app_id=? AND user_id=?)`,
+      WHERE app_id=? AND actor_id=? AND NOT EXISTS(SELECT 1 FROM team WHERE app_id=? AND user_id=?)`,
       actor.id,
       json,
       app,
@@ -352,7 +352,7 @@ export async function claimGuest(c: Ctx, user: User) {
             sql(
               c.env,
               `SELECT DISTINCT i.app_id id,m.role FROM issue_moves mv JOIN issues i ON i.id=mv.issue_id
-          LEFT JOIN members m ON m.app_id=i.app_id AND m.user_id=? WHERE mv.from_app=? AND i.app_id!=? AND i.app_id IN(SELECT id FROM apps WHERE mode='tracker')`,
+          LEFT JOIN team m ON m.app_id=i.app_id AND m.user_id=? WHERE mv.from_app=? AND i.app_id!=? AND i.app_id IN(SELECT id FROM apps WHERE mode='tracker')`,
               user.id,
               g.id,
               g.id

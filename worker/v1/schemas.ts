@@ -20,7 +20,56 @@ const status = { enum: ["open", "in_progress", "waiting", "closed"] },
 export const ref = (name: string) => ({ $ref: "#/components/schemas/" + name })
 const variant = (type: string, fields: Record<string, Schema>) => obj({ type: { const: type }, ...fields })
 const page = (item: string) => obj({ data: arr(ref(item)), next_cursor: ns })
+const field = (description: string, maxLength = 200) => ({ type: "string", maxLength, description })
 export const schemas = {
+  FeedbackInput: obj(
+    {
+      subject: { type: "string", minLength: 1, maxLength: 200, description: "A short summary; when omitted, the start of the message." },
+      message: { type: "string", minLength: 1, maxLength: 20000, description: "What happened, or what they'd like." },
+      email: { type: "string", format: "email", description: "Where to send replies; confirmed by one email before anything else is sent. Ignored when anonymous." },
+      anonymous: { type: "boolean", description: "Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept." },
+      user: obj({ id: field("The host app's user id, shown to the team as given."), name: field("Shown to the team as the reporter's name (not verified).", 120) }, []),
+      app: obj({ name: field("e.g. Hex"), version: field("e.g. 1.4.2"), build: field("e.g. 56") }, []),
+      device: obj({ platform: field("e.g. ios"), os: field("e.g. iOS 26.1"), model: field("e.g. iPhone17,1"), locale: field("e.g. en-US") }, []),
+      install_id: field("A random id the app creates once per installation (never a hardware id); groups an install's reports. Ignored when anonymous."),
+      metadata: {
+        type: "object",
+        description: "Key/values the app's form sets, shown to the team and searchable with meta:<key>=<value>. Kept when anonymous.",
+        maxProperties: 64,
+        propertyNames: { minLength: 1, maxLength: 64 },
+        additionalProperties: { type: "string", maxLength: 2000 }
+      },
+      category: field("Matched to a label by name (e.g. bug, idea, question); unknown names add no label.", 60),
+      screenshots: {
+        type: "array",
+        maxItems: 5,
+        description: "JSON only. PNG, JPEG or WebP (checked by content), each <= 10 MB decoded, <= 20 MB in total.",
+        items: obj({ name: field("File name.", 255), content_type: { enum: ["image/png", "image/jpeg", "image/webp"] }, data: { type: "string", contentEncoding: "base64" } }, ["content_type", "data"])
+      },
+      logs: {
+        type: "array",
+        maxItems: 10,
+        description: "Text logs attached as report metadata logs (each <= 1 MB). Ignored when anonymous.",
+        items: obj({ name: field("Unique per submission.", 255), content: string })
+      }
+    },
+    ["message"]
+  ),
+  FeedbackMultipart: obj(
+    {
+      payload: { type: "string", contentMediaType: "application/json", description: "FeedbackInput as JSON, without screenshots." },
+      screenshot: { type: "array", maxItems: 5, items: { type: "string", format: "binary" }, description: "Up to 5 file parts, in order." }
+    },
+    ["payload"]
+  ),
+  FeedbackCreated: obj({
+    number: { ...integer, description: "The issue number in the workspace." },
+    received_at: date,
+    email: {
+      enum: ["sent", "not_needed", "none", "limited"],
+      description: "sent: a confirmation email went out; not_needed: already confirmed; none: no email (anonymous, or the address opted out of email); limited: no confirmation could be sent now (too many to that address today, or one is still waiting)."
+    }
+  }),
   EscalateInput: obj({ reason: { type: "string", maxLength: 1000 } }, []),
   Approval: obj({
     details_hash: { type: "string", pattern: "^[A-Za-z0-9_-]{43}$" },

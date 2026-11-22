@@ -148,4 +148,7 @@ export async function auditPage(
   return { entries, next_cursor: rs.results.length > 50 ? `${last!.created_at}~${last!.id}` : null }
 }
 export const pruneAudit = (env: Env) =>
-  sql(env, "DELETE FROM audit_log WHERE created_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')").run()
+  env.DB.batch([
+    sql(env, "DELETE FROM audit_log WHERE created_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')"),
+    sql(env, "DELETE FROM org_audit_log WHERE created_at<strftime('%Y-%m-%dT%H:%M:%fZ','now','-90 days')")
+  ])

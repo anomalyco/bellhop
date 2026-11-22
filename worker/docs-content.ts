@@ -23,6 +23,8 @@ import publicApi from "../docs/api.md?raw"
 import widget from "../docs/widget.md?raw"
 import identity from "../docs/identity.md?raw"
 import agents from "../docs/agents.md?raw"
+import feedbackPage from "../docs/feedback.md?raw"
+import { feedbackLimits } from "./feedback"
 import production from "virtual:bellhop-production-config"
 
 // The public developer docs. Pages are Markdown in docs/; anything that can drift from the code
@@ -143,6 +145,12 @@ function build(): Record<string, string> {
     "approvals.goneStatus": approvalConsume[2]!,
     "approvals.code": approvalConsume[3]!,
     "approvals.jwks": approvalJwks,
+    "feedback.maxScreenshots": String(feedbackLimits.screenshots),
+    "feedback.category": `${(document() as Api).components.schemas.FeedbackInput?.properties?.category?.maxLength ?? fail("no category limit")} characters`,
+    "feedback.message": `${feedbackLimits.message.toLocaleString("en-US")} characters`,
+    "feedback.subject": `${feedbackLimits.subject} characters`,
+    "feedback.metadata": `${feedbackLimits.metadataKeys} keys; keys up to ${feedbackLimits.metadataKey} characters, values up to ${feedbackLimits.metadataValue.toLocaleString("en-US")}`,
+    "feedback.screenshots": `${feedbackLimits.screenshots} images, ${bytes(feedbackLimits.screenshot)} each, ${bytes(feedbackLimits.screenshotTotal)} in all`,
     "handoff.code": sourceMatch(coreSource, /ApiFailure\(\s*409,\s*"([a-z_]+)",\s*"Handoff or permissions changed/, "handoff conflict code")[1]!,
     "approvals.maxKeys": approvalKeys[1]!,
     "approvals.maxString": sourceMatch(approvalsSource, /\[\.\.\.v\]\.length > (\d+)/, "approval string limit")[1]!,
@@ -158,11 +166,13 @@ function build(): Record<string, string> {
 // What each tool returns. Kept next to the generated table, and checked for completeness.
 const returns: Record<keyof typeof toolRoles, string> = {
   list_apps: "Each workspace's `slug`, `name` and the agent's `role` there.",
+  list_orgs: "Each org (with the account's `role` in it) and its `apps` this agent can use.",
+  list_feedback: "`items` (each with its `app` and `feedback_summary`), `counts`, `by_app` and `next_cursor`.",
   create_app: "The new workspace.",
   get_app: "The workspace: details, counts, labels and templates, and the agent's role.",
   list_issues: "`issues`, `pinned`, `counts` and `next_cursor`.",
   search_issues: "The same shape as `list_issues`, across open and closed issues.",
-  get_issue: "The issue with its timeline, internal notes, attachments, relations and metadata summaries.",
+  get_issue: "The issue with its timeline, internal notes, attachments, relations, metadata summaries and feedback, then up to 5 images.",
   get_attachment: "A log's text, an image as `image` content, or a URL for anything else.",
   get_metadata: "The report metadata: specs, context, logs and fingerprint matches.",
   list_labels: "The labels.",
@@ -207,6 +217,7 @@ const returns: Record<keyof typeof toolRoles, string> = {
 }
 const roleGroups = [
   ["discover", "Any agent"],
+  ["across", "Any agent (in the apps it can read)"],
   ["read", "Viewer"],
   ["respond", "Responder"],
   ["triage", "Member"],
@@ -345,10 +356,13 @@ const operations: Record<string, [group: string, title: string, summary: string]
   approvalKeys: ["Approvals", "Get the approval signing keys", "The keys action services verify one workspace's approval tokens with (Ed25519). Name the workspace with `workspace`."],
   consumeApproval: ["Approvals", "Consume an approval", "Marks an approved, unexpired approval used, once, before your service acts. See [Running support agents](/docs/agents#6-verify-consume-act)."],
   listApprovals: ["Approvals", "List a conversation's approvals", "Every approval agents asked for on it, with its state. Never tokens."],
+  submitFeedback: ["Feedback", "Send feedback", "In-app feedback from an app's own form, as a private issue in the report key's workspace. See [Feedback API](/docs/feedback)."],
   openapi: ["Discovery", "Get the OpenAPI document", "This reference as OpenAPI 3.1."]
 }
-const groups = ["Sessions", "Conversations", "Uploads and realtime", "Server API", "Approvals", "Discovery"]
+const groups = ["Sessions", "Conversations", "Uploads and realtime", "Server API", "Approvals", "Feedback", "Discovery"]
 const credentials: Record<string, string> = {
+  report: "report key",
+  reportKey: "report key",
   secret: "secret key",
   publishable: "publishable key",
   session: "session",
@@ -454,7 +468,65 @@ function schemaReference() {
     })
     .join("\n")
 }
+// The Feedback API page: limits from worker/feedback.ts, the per-IP rate binding and the daily checks in migrations;
+// errors and the reference from the OpenAPI document.
+function feedbackDaily() {
+  return fromMigrations(/CONSTRAINT feedback_daily_limit CHECK\(n<=(\d+)\),CONSTRAINT feedback_byte_quota CHECK\(bytes<=(\d+)\)/, "feedback daily limits")
+}
+function feedbackLimitsTable() {
+  const L = feedbackLimits,
+    daily = feedbackDaily(),
+    n = (v: number) => v.toLocaleString("en-US")
+  const rows = [
+    ["Request size", bytes(L.request)],
+    ["Screenshots", `${L.screenshots}, each up to ${bytes(L.screenshot)}, ${bytes(L.screenshotTotal)} in all; PNG, JPEG or WebP`],
+    ["`message`", `${n(L.message)} characters`],
+    ["`subject`", `${n(L.subject)} characters`],
+    ["`metadata`", `${L.metadataKeys} keys; keys 1–${L.metadataKey} characters, values up to ${n(L.metadataValue)}`],
+    ["`logs`", `${L.logs} logs, each up to ${bytes(L.log)}`],
+    ["Other text (`app`, `device`, `user`, `install_id`)", `${L.field} characters each`],
+    ["Per IP address", rate("RL_UPLOAD")],
+    ["Per report key", `${L.perKeyMinute} per minute, ${n(Number(daily[1]))} per day and ${bytes(Number(daily[2]))} per day`],
+    ["Per `install_id`", `${L.perInstallHour} per hour`]
+  ]
+  return ["| What | Limit |", "| --- | --- |", ...rows.map(([what, limit]) => `| ${what} | ${limit} |`)].join("\n")
+}
+function feedbackOperation() {
+  for (const [path, methods] of Object.entries(api().paths))
+    for (const [method, op] of Object.entries(methods)) if (op.operationId === "submitFeedback") return { path, method, op }
+  return fail("no submitFeedback operation")
+}
+function feedbackErrorsTable() {
+  const { op } = feedbackOperation()
+  const codes = (text: string) =>
+    text.replace(/(^|; )([a-z_]+)(?=:)/g, (_, pre: string, code: string) => `${pre}\`${code}\``).replace(/\b(?<!`)([a-z]+(?:_[a-z]+)+)\b(?!`)/g, "`$1`")
+  const rows = Object.entries(op.responses)
+    .filter(([code]) => Number(code) >= 400)
+    .map(([code, r]) => `| \`${code}\` | ${cell(/^[a-z_]+$/.test(r.description) ? `\`${r.description}\`` : codes(r.description))} |`)
+  return ["| Status | Codes and meaning |", "| --- | --- |", ...rows].join("\n")
+}
+function feedbackReference() {
+  const { path, method, op } = feedbackOperation()
+  const { schemas } = api().components
+  const objects = ["FeedbackInput", "FeedbackCreated"].map((name) => {
+    const s = schemas[name] ?? fail(`no ${name} schema`)
+    const f = fields(s, schemas)
+    return [
+      `#### \`${name}\` object`,
+      "",
+      "| Field | Type | Required |",
+      "| --- | --- | --- |",
+      ...f.map(([k, t, required]) => `| \`${k}\` | ${cell(typeText(t) + (t.description ? `. ${t.description}` : ""))} | ${required ? "yes" : ""} |`),
+      ""
+    ].join("\n")
+  })
+  const entry = operationEntry(method, path, { ...op, description: undefined }).replace(/^#### .*\n\n/, "")
+  return [`Generated from [\`/v1/openapi.json\`](https://api.blhp.app/v1/openapi.json).`, "", entry, ...objects].join("\n")
+}
 const tables: Record<string, () => string> = {
+  "feedback-limits": feedbackLimitsTable,
+  "feedback-errors": feedbackErrorsTable,
+  "feedback-reference": feedbackReference,
   "mcp-tools": toolTable,
   "webhook-events": eventTable,
   "api-reference": apiReference,
@@ -521,6 +593,7 @@ function renderer() {
 const sources: [string, string][] = [
   ["index", index],
   ["reports", reports],
+  ["feedback", feedbackPage],
   ["mcp", mcp],
   ["agents", agents],
   ["webhooks", webhooks],

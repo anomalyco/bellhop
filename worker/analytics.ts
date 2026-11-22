@@ -5,7 +5,7 @@ import { bad, sql, type Ctx } from "./core"
 // member actors with no role field need the roster fallback; explicit null means outsider.
 const responder = `CASE json_extract(c.author,'$.type') WHEN 'agent' THEN 'agent' WHEN 'member' THEN
   CASE WHEN json_extract(c.author,'$.role') IN ('viewer','member','admin','owner') OR
-    (json_type(c.author,'$.role') IS NULL AND EXISTS(SELECT 1 FROM members m WHERE m.app_id=?1 AND m.user_id=json_extract(c.author,'$.id')))
+    (json_type(c.author,'$.role') IS NULL AND EXISTS(SELECT 1 FROM team m WHERE m.app_id=?1 AND m.user_id=json_extract(c.author,'$.id')))
   THEN 'human' END END`
 const inWindow = `i.app_id=?1 AND i.created_at BETWEEN ?2 AND ?3`
 const publicReply = `c.internal=0 AND c.hidden IS NULL AND c.created_at>=i.created_at`

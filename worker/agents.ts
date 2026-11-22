@@ -34,7 +34,7 @@ export function attachScopes(env: Env, agent: string, user: string, items: Retur
   return sql(
     env,
     `INSERT INTO agent_apps(agent_id,app_id,role,delegated_admin) SELECT g.id,
-    (SELECT a.id FROM apps a JOIN members m ON m.app_id=a.id AND m.user_id=g.user_id
+    (SELECT a.id FROM apps a JOIN team m ON m.app_id=a.id AND m.user_id=g.user_id
      WHERE a.id=json_extract(j.value,'$.key') AND (${role} IS NULL OR ${withinCapSQL(role, "m.role")})),${role},coalesce(${role}='admin',0)
     FROM agents g,json_each(?) j WHERE g.id=? AND g.user_id=? AND g.revoked_at IS NULL`,
     JSON.stringify(items),
@@ -226,7 +226,7 @@ agents.patch("/api/apps/:slug/agents/:id", async (c) => {
     sql(
       c.env,
       `INSERT INTO agent_apps(agent_id,app_id,role,delegated_admin) SELECT agent_id,app_id,?1,
-    ?1='admin' AND (delegated_admin=1 OR EXISTS(SELECT 1 FROM members WHERE app_id=?2 AND user_id=?4 AND role='owner')) FROM (${agentAccessSQL}) acl
+    ?1='admin' AND (delegated_admin=1 OR EXISTS(SELECT 1 FROM team WHERE app_id=?2 AND user_id=?4 AND role='owner')) FROM (${agentAccessSQL}) acl
     WHERE acl.app_id=?2 AND acl.agent_id=?3 AND acl.role IS NOT NULL AND ${withinCapSQL("?1", "acl.team")}
     ON CONFLICT(agent_id,app_id) DO UPDATE SET role=excluded.role,delegated_admin=excluded.delegated_admin`,
       role,

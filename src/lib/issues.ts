@@ -67,9 +67,9 @@ function matches(issue: IssueSummary, key: string, slug: string, anyState = fals
   return true
 }
 
-function summaryOf(issue: Issue | IssueSummary): IssueSummary {
+export function summaryOf(issue: Issue | IssueSummary): IssueSummary {
   const { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity } = issue
-  return { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity, private: issue.private, hidden: issue.hidden, votes: issue.votes, viewer_voted: issue.viewer_voted, locked: issue.locked, pinned: issue.pinned }
+  return { id, number, title, status, close_reason, labels, author, assignee, comment_count, created_at, updated_at, activity, private: issue.private, hidden: issue.hidden, votes: issue.votes, viewer_voted: issue.viewer_voted, locked: issue.locked, pinned: issue.pinned, preview: issue.preview, feedback_summary: issue.feedback_summary }
 }
 
 function bumpCounts(slug: string, from: IssueSummary["status"] | null, issue: IssueSummary) {

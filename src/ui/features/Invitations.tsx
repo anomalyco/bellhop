@@ -66,12 +66,15 @@ function InvitationRow({ invitation }: { invitation: Invitation }) {
     }
   }
 
+  // Org invitations are shown by the inbox screens; this row is for workspace invitations.
+  const target = invitation.app ?? invitation.org
+  if (!target) return null
   return (
     <div className="box-row invite-row">
-      <AppIcon src={invitation.app.icon_url} size={28} />
+      <AppIcon src={target.icon_url} size={28} />
       <div className="app-row-main invite-main">
         <div className="app-row-title">
-          <span className="app-row-name">{invitation.app.name}</span>
+          <span className="app-row-name">{target.name}</span>
           <RoleBadge role={invitation.role} />
         </div>
         <div className="issue-meta">

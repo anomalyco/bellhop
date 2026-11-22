@@ -8,8 +8,9 @@ export async function roster(env: Env, app: string): Promise<Member[]> {
     sql(
       env,
       `SELECT coalesce(m.user_id,m.id) id,m.email,u.name,u.avatar_url,m.role,m.user_id IS NOT NULL joined,
-      (m.user_id IS NOT NULL AND m.role!='viewer' AND coalesce(v.available,1)) available FROM members m
-     LEFT JOIN users u ON u.id=m.user_id LEFT JOIN handoff_availability v ON v.member_id=m.id WHERE m.app_id=?1
+      (m.user_id IS NOT NULL AND t.role!='viewer' AND coalesce(v.available,1)) available FROM members m
+     LEFT JOIN users u ON u.id=m.user_id LEFT JOIN team t ON t.app_id=m.app_id AND t.user_id=m.user_id
+     LEFT JOIN handoff_availability v ON v.member_id=t.id WHERE m.app_id=?1
      UNION ALL SELECT id,email,NULL,NULL,role,0,0 FROM workspace_invitations WHERE app_id=?1 ORDER BY role DESC,email`,
       app
     )
@@ -21,7 +22,7 @@ export type Manager = { user: string; agent?: string; actor: Actor }
 function gate(app: string, manager: Manager, elevated: boolean): [string, string[]] {
   const where = elevated ? "p.role='owner'" : "p.role IN ('admin','owner')"
   if (!manager.agent)
-    return [`EXISTS(SELECT 1 FROM members p WHERE p.app_id=? AND p.user_id=? AND ${where})`, [app, manager.user]]
+    return [`EXISTS(SELECT 1 FROM team p WHERE p.app_id=? AND p.user_id=? AND ${where})`, [app, manager.user]]
   return [
     `EXISTS(SELECT 1 FROM (${agentAccessSQL}) acl WHERE app_id=? AND user_id=? AND agent_id=? AND role='admin'
     ${elevated ? "AND team='owner' AND delegated_admin=1" : ""})`,

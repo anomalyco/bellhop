@@ -21,6 +21,7 @@ const homePages = new Set([
 ])
 const homeSegments = new Set([
   "index.html",
+  "o", // an org's inbox: /o/<org> (app slugs are at least two characters)
   "robots.txt",
   "sitemap.xml",
   ...Array.from(homePages, (p) => p.split("/")[1]!)

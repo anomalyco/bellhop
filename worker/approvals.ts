@@ -11,7 +11,7 @@ import { typeGuard } from "./request-types"
 import { serverGuard } from "./v1/server-auth"
 import type { Scope } from "./v1/access"
 
-export const memberGrant = `SELECT 1 FROM members m JOIN apps w ON w.id=m.app_id WHERE w.mode='helpdesk' AND m.app_id=? AND m.user_id=? AND m.role IN ('owner','admin','member')`
+export const memberGrant = `SELECT 1 FROM team m JOIN apps w ON w.id=m.app_id WHERE w.mode='helpdesk' AND m.app_id=? AND m.user_id=? AND m.role IN ('owner','admin','member')`
 export const responderGrant = `SELECT 1 FROM (${agentAccessSQL}) WHERE app_id=? AND agent_id=? AND role IN ('responder','member','admin')`
 const readDoc = (env: Env, app: string, id: string) =>
   sql(env, "SELECT doc,issue_id FROM approval_docs WHERE app_id=? AND id=?", app, id)

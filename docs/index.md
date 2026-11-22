@@ -32,6 +32,7 @@ curl -X POST https://blhp.app/api/apps/acme/metadata \
 | Add a support chat to your site or app | The chat widget and a publishable key | [Chat widget](/docs/widget) |
 | Sign your app's users in to your help desk | Identity keys and tokens, or a secret key | [Identity](/docs/identity) |
 | Build your own chat, or sync help desk requests with your backend | The help desk API v1 and its JS SDK | [Public API](/docs/api) |
+| Collect in-app feedback (message, screenshots, app and device details) from your iOS, macOS or web app | The feedback API and a report key | [Feedback API](/docs/feedback) |
 | Attach logs and system specs to bug reports from your app | The report metadata API and a report key | [Report metadata](/docs/reports) |
 | Have an agent triage, answer and close issues | MCP, with OAuth or a token agent | [Agents over MCP](/docs/mcp) |
 | Run an agent on a help desk, with held replies and signed approvals for refunds and account changes | MCP, request types and approval tokens | [Running support agents](/docs/agents) |
@@ -52,7 +53,7 @@ The report upload endpoint answers on both hosts; the examples use `https://blhp
 
 | Kind | Looks like | Used for | Where you get it |
 | --- | --- | --- | --- |
-| Report key | `bh_pub_…` | Uploading report metadata to one workspace | Settings → Report keys (workspace admins) |
+| Report key | `bh_pub_…` | Sending feedback and uploading report metadata to one workspace | Settings → Report keys (workspace admins) |
 | Agent OAuth token | `bh_a_…` | MCP | An MCP client signing in with OAuth |
 | Token agent | `bh_…` | MCP | [Agents](https://blhp.app/agents) on your account |
 | Publishable API key | `bh_pk_…` | The chat widget and the API from browsers, on the origins you allow | Settings → API keys (help desk admins) |
@@ -61,7 +62,7 @@ The report upload endpoint answers on both hosts; the examples use `https://blhp
 | Identity key | `bh_id_…` | Signing identity tokens on your server (never sent as a bearer) | Settings → Identity keys (help desk admins) |
 | None | | Atom feeds, oEmbed, preview images | Public workspaces only |
 
-Send keys and tokens in the `Authorization` header as `Bearer <token>`. Report keys and publishable API keys are safe to ship inside an app or a page: report keys can only upload metadata, and publishable keys work only from their allowed origins and can only start end-user sessions. Agent tokens, secret API keys and identity keys act for your workspace or account, so keep them on your server.
+Send keys and tokens in the `Authorization` header as `Bearer <token>`. Report keys and publishable API keys are safe to ship inside an app or a page: report keys can only send feedback and upload metadata, and publishable keys work only from their allowed origins and can only start end-user sessions. Agent tokens, secret API keys and identity keys act for your workspace or account, so keep them on your server.
 
 ## Errors
 
@@ -92,6 +93,7 @@ Limits are counted per minute, per IP address, per key or per agent. When you go
 | --- | --- |
 | Report uploads | {{rate:RL_UPLOAD}} per IP, {{rate:RL_WRITE}} per report key |
 | Report uploads per day | {{report.dailyUploads}} uploads and {{report.dailyBytes}} per report key per UTC day |
+| Feedback | See [Feedback API](/docs/feedback#limits) |
 | MCP requests | {{rate:RL_AGENT}} per agent |
 | MCP requests with a missing or wrong token | {{rate:RL_IP}} per IP |
 | Help desk API | See [Public API](/docs/api#rate-limits) |
@@ -101,6 +103,7 @@ Limits are counted per minute, per IP address, per key or per agent. When you go
 - [Chat widget](/docs/widget): embed it, identify users, control it from your page, or build your own on the SDK.
 - [Identity](/docs/identity): sign your users in with identity keys, the sign-in link, and email verification.
 - [Public API](/docs/api): keys, end-user sessions, conversations, uploads, realtime and the server API, with the full reference.
+- [Feedback API](/docs/feedback): send in-app feedback with screenshots, and a checklist for building the form.
 - [Report metadata](/docs/reports): upload diagnostics from an app and open the review page.
 - [Agents over MCP](/docs/mcp): connect an agent, roles, and every tool.
 - [Running support agents](/docs/agents): routing, autonomy, approvals and verifying approval tokens.

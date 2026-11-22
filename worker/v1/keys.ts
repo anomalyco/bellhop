@@ -37,7 +37,7 @@ const projection = ({ publishable_value, ...r }: Row): ApiKey => ({
   allowed_origins: JSON.parse(r.allowed_origins),
   ...(r.kind === "publishable" && publishable_value ? { key: publishable_value } : {})
 })
-const grant = `SELECT app_id FROM members WHERE app_id=? AND user_id=? AND role IN ('admin','owner')`
+const grant = `SELECT app_id FROM team WHERE app_id=? AND user_id=? AND role IN ('admin','owner')`
 function access(c: Ctx) {
   if (!c.var.user || !can(c.var.app.role, "setup")) denied()
   return [c.var.app.id, c.var.user.id] as const

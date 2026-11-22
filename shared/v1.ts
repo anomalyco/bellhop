@@ -10,6 +10,18 @@
 // End users never see "Bellhop": team and agent participants are shown
 // as the workspace presents them.
 //
+// In-app feedback (any app, any workspace): the product's main public endpoint. Native apps and their forms call it
+// directly with the workspace's report key; there is no SDK, so the OpenAPI document (/v1/openapi.json) is the spec.
+//   POST   https://api.blhp.app/v1/feedback   Authorization: Bearer bh_pub_… (a report key, Settings → Report keys;
+//          publishable, names its workspace)   FeedbackInput (api.ts) -> 201 FeedbackCreated (api.ts)
+//          JSON with base64 screenshots, or multipart/form-data: a "payload" part (FeedbackInput as JSON, without
+//          screenshots) and up to 5 "screenshot" file parts. Each submission is a private issue only the team and its
+//          agents see; the submitter has no web view and hears back only by email, after confirming it once. Also
+//          /v1/feedback on the workspace's host (the key must be that workspace's) and in dev path mode, and
+//          POST /api/apps/:slug/feedback. CORS for any origin. Send an Idempotency-Key and retry with the same key and
+//          the same feedback after a dropped connection: the first answer replays (no duplicate issue or email); the
+//          same key with different feedback is 422. Limits and error codes are in the OpenAPI operation (submitFeedback).
+//
 // Keys (created by workspace admins in Settings → API keys; secret keys shown only once):
 //   publishable  bh_pk_…  safe to ship in browsers. Names the workspace. Only accepted from the key's allowed origins
 //                         (exact origins; requests without a matching Origin are refused). Starts end-user sessions:

@@ -6,6 +6,7 @@ import { feed, feedApps, getIssue, issueNumber, listIssues, myAuthorFilter } fro
 import { getReport } from "./report-data"
 import { reportViewer } from "./reports"
 import { pageReads } from "./read-scope"
+import { orgAccess } from "./orgs"
 
 export async function pageContext(c: Ctx) {
   if (!c.var.guestId) firstContact(c)
@@ -38,6 +39,14 @@ export async function pagePayload(
     status: PageResult["status"] = 200
   async function route(): Promise<PagePayload["route"]> {
     if (slug === null) {
+      // An org's inbox renders in the SPA; the page answers 404 unless the viewer may open that org.
+      const org = /^\/o\/([a-z0-9-]{2,40})(?:\/.*)?$/.exec(location)
+      if (org) {
+        const user = await session
+        if (!user) return { kind: "not_found" }
+        await orgAccess(c.env, user.id, org[1]!)
+        return { kind: "other" }
+      }
       if (location !== "/") return { kind: homePage ? "other" : "not_found" }
       const guest = "g:" + c.var.guestHash
       const [list, apps] = await Promise.all([

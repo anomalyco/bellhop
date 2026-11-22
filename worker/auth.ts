@@ -83,7 +83,7 @@ export async function userBySession(c: Ctx, hash: string | null, read?: Read, sl
         sql(
           c.env,
           `SELECT u.id,u.email,u.name,u.avatar_url,u.locale FROM sessions s JOIN users u ON s.user_id=u.id
-    WHERE s.token_hash=? AND s.expires_at>? AND NOT EXISTS(SELECT 1 FROM apps a WHERE a.slug=? AND a.mode='helpdesk' AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=a.id AND m.user_id=u.id))`,
+    WHERE s.token_hash=? AND s.expires_at>? AND NOT EXISTS(SELECT 1 FROM apps a WHERE a.slug=? AND a.mode='helpdesk' AND NOT EXISTS(SELECT 1 FROM team m WHERE m.app_id=a.id AND m.user_id=u.id))`,
           hash,
           now(),
           slug

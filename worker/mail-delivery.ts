@@ -55,6 +55,8 @@ export async function enqueueDue(env: Env) {
   if (codes.length) await env.MAIL.sendBatch(codes.map((r) => ({ body: { id: formMailPrefix + r.id } })))
 }
 type Recipient = TokenRow & {
+  /** A feedback form's reporter: no web view, so no link, and the whole reply. */
+  feedback: number
   mode: string
   trusted: number
   locale: Locale
@@ -72,7 +74,7 @@ export async function deliverBatch(env: Env, id: string) {
     const key = id.slice(8),
       r = await sql(
         env,
-        `SELECT j.kind,u.id user_id,u.email,coalesce(u.locale,'en') locale,a.name,a.trusted,a.slug,i.number FROM handoff_mail j JOIN members m ON m.id=j.member_id JOIN users u ON u.id=m.user_id JOIN handoff_events e ON e.id=j.event_id JOIN handoffs h ON h.id=e.handoff_id AND h.ended_at IS NULL JOIN issues i ON i.id=h.issue_id AND i.app_id=h.app_id JOIN apps a ON a.id=h.app_id AND a.mode='helpdesk' LEFT JOIN mail_settings s ON s.user_id=u.id WHERE j.id=? AND i.status!='closed' AND m.app_id=a.id AND m.role IN ('member','admin','owner') AND coalesce(s.assigned,1) AND NOT EXISTS(SELECT 1 FROM mail_suppressed x WHERE x.address=u.email) AND ((j.kind IN ('nobody','still_waiting') AND m.role IN ('owner','admin') AND (j.kind='nobody' OR h.respond_by IS NOT NULL)) OR j.kind='passed' OR (j.kind IN ('assigned','reminder') AND json_extract(h.assignee,'$.id')=u.id AND (j.kind!='reminder' OR h.respond_by IS NOT NULL)))`,
+        `SELECT j.kind,u.id user_id,u.email,coalesce(u.locale,'en') locale,a.name,a.trusted,a.slug,i.number FROM handoff_mail j JOIN team m ON m.id=j.member_id JOIN users u ON u.id=m.user_id JOIN handoff_events e ON e.id=j.event_id JOIN handoffs h ON h.id=e.handoff_id AND h.ended_at IS NULL JOIN issues i ON i.id=h.issue_id AND i.app_id=h.app_id JOIN apps a ON a.id=h.app_id AND a.mode='helpdesk' LEFT JOIN mail_settings s ON s.user_id=u.id WHERE j.id=? AND i.status!='closed' AND m.app_id=a.id AND m.role IN ('member','admin','owner') AND coalesce(s.assigned,1) AND NOT EXISTS(SELECT 1 FROM mail_suppressed x WHERE x.address=u.email) AND ((j.kind IN ('nobody','still_waiting') AND m.role IN ('owner','admin') AND (j.kind='nobody' OR h.respond_by IS NOT NULL)) OR j.kind='passed' OR (j.kind IN ('assigned','reminder') AND json_extract(h.assignee,'$.id')=u.id AND (j.kind!='reminder' OR h.respond_by IS NOT NULL)))`,
         key
       ).first<{
         kind: keyof typeof handoffCopy.en
@@ -90,7 +92,7 @@ export async function deliverBatch(env: Env, id: string) {
       const [, slot] = await env.DB.batch([
         sql(
           env,
-          `INSERT OR IGNORE INTO handoff_mail_slots SELECT date('now'),m.user_id,j.id FROM handoff_mail j JOIN members m ON m.id=j.member_id WHERE j.id=? AND m.user_id=? AND (SELECT count(*) FROM handoff_mail_slots WHERE day=date('now') AND user_id=m.user_id)<20`,
+          `INSERT OR IGNORE INTO handoff_mail_slots SELECT date('now'),m.user_id,j.id FROM handoff_mail j JOIN team m ON m.id=j.member_id WHERE j.id=? AND m.user_id=? AND (SELECT count(*) FROM handoff_mail_slots WHERE day=date('now') AND user_id=m.user_id)<20`,
           key,
           r.user_id
         ),
@@ -143,17 +145,18 @@ export async function deliverBatch(env: Env, id: string) {
     ),
     sql(
       env,
-      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.mode,a.trusted,a.name,a.slug,coalesce(u.locale,p.locale,'en') locale FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id WHERE b.id=? AND b.sealed=1 AND p.state='on' AND (a.mode='tracker' OR p.user_id IS NULL OR p.role IS NOT NULL)`,
+      `SELECT p.id,p.nonce,p.address,p.number,p.title,p.issue_id,p.app_id,a.mode,a.trusted,a.name,a.slug,coalesce(u.locale,p.locale,'en') locale,
+      (p.role IS NULL AND EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=p.issue_id)) feedback FROM mail_batches b JOIN mail_people p ON p.id=b.sub_id JOIN apps a ON a.id=p.app_id LEFT JOIN users u ON u.id=p.user_id WHERE b.id=? AND b.sealed=1 AND p.state='on' AND (a.mode='tracker' OR p.user_id IS NULL OR p.role IS NOT NULL)`,
       id
     ),
     sql(
       env,
       `SELECT n.kind,coalesce(json_extract(c.author,'$.name'),json_extract(c.author,'$.handle')) author,coalesce(c.internal,0) internal,
-      CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') ELSE substr(c.body,1,4096) END description
+      CASE WHEN n.kind='status' THEN json_extract(e.data,'$.to') WHEN p.role IS NULL AND EXISTS(SELECT 1 FROM feedback f WHERE f.issue_id=i.id) THEN c.body ELSE substr(c.body,1,4096) END description
       FROM mail_items n JOIN mail_batches b ON b.id=n.batch_id AND b.sealed=1 JOIN mail_people p ON p.id=b.sub_id AND p.state='on' JOIN issues i ON i.id=p.issue_id
       LEFT JOIN comments c ON c.id=n.ref AND c.issue_id=i.id LEFT JOIN issue_events e ON n.kind='status' AND e.id=n.ref AND e.issue_id=i.id
       WHERE b.id=? AND NOT EXISTS(SELECT 1 FROM held_replies h WHERE h.id=n.ref AND h.issue_id=i.id)
-      AND n.actor!=p.actor_id AND (c.id IS NULL OR json_extract(c.author,'$.id')!=p.actor_id) AND ((p.role IS NULL AND NOT EXISTS(SELECT 1 FROM members m WHERE m.app_id=p.app_id AND m.email=p.address AND m.user_id IS NOT NULL)
+      AND n.actor!=p.actor_id AND (c.id IS NULL OR json_extract(c.author,'$.id')!=p.actor_id) AND ((p.role IS NULL AND NOT EXISTS(SELECT 1 FROM team m WHERE m.app_id=p.app_id AND m.email=p.address)
          AND (p.reason='manual' OR (p.reason='opened' AND p.opened) OR (p.reason='replied' AND p.replied)) AND ((n.kind='reply' AND c.id IS NOT NULL AND c.hidden IS NULL AND c.internal=0) OR (n.kind='status' AND e.type='status_changed')))
        OR (p.role IS NOT NULL AND ((n.kind='assigned' AND p.assigned AND json_extract(i.assignee,'$.id')=p.actor_id) OR (n.kind='mention' AND p.mentions AND c.hidden IS NULL AND (c.id IS NOT NULL OR n.ref=i.id)
        AND EXISTS(SELECT 1 FROM json_each(CASE WHEN n.ref=i.id THEN i.mentions ELSE c.mentions END) WHERE json_extract(value,'$.actor.id')=p.actor_id))))) ORDER BY n.id`,
@@ -182,7 +185,7 @@ export async function deliverBatch(env: Env, id: string) {
     const url = appUrl(env, mailOrigin(env), p.slug, `/issues/${p.number}`),
       off = unsubscribeURL(env, unsub),
       all = off + "&all=1"
-    const cap = Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
+    const cap = p.feedback ? Infinity : Math.max(32, Math.min(4096, Math.floor(55000 / data.length))),
       lines = data.map((n) => {
         if (n.kind === "nudge") return copy.nudge
         if (n.kind === "status")
@@ -204,8 +207,8 @@ export async function deliverBatch(env: Env, id: string) {
       fromName: workspaceSender(p.name, !!p.trusted),
       subject: formatMail(copy.subject, { title: clean(p.title), number: p.number, app: clean(p.name) }),
       replyTo: [`reply+${reply}@mail.blhp.app`],
-      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}<p><a href="${esc(url)}">${esc(formatMail(copy.view, { number: p.number }))}</a></p><p>${esc(instruction)}</p><p><a href="${esc(off)}">${esc(copy.unsubscribe)}</a>${p.mode === "helpdesk" ? "" : ` · <a href="${esc(all)}">${esc(copy.stop)}</a>`}</p>`,
-      text: `${lines.join("\n\n")}\n\n${url}\n${instruction}\n\n${copy.unsubscribe}: ${off}${p.mode === "helpdesk" ? "" : `\n${copy.stop}: ${all}`}`
+      html: `<h1>${esc(p.title)}</h1>${lines.map((line) => `<p>${esc(line).replace(/\n/g, "<br>")}</p>`).join("")}${p.feedback ? "" : `<p><a href="${esc(url)}">${esc(formatMail(copy.view, { number: p.number }))}</a></p>`}<p>${esc(instruction)}</p><p><a href="${esc(off)}">${esc(copy.unsubscribe)}</a>${p.mode === "helpdesk" ? "" : ` · <a href="${esc(all)}">${esc(copy.stop)}</a>`}</p>`,
+      text: `${lines.join("\n\n")}\n\n${p.feedback ? "" : url + "\n"}${instruction}\n\n${copy.unsubscribe}: ${off}${p.mode === "helpdesk" ? "" : `\n${copy.stop}: ${all}`}`
     })
     if (nudge)
       await sql(

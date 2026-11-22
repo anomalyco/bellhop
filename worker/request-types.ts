@@ -58,7 +58,7 @@ export function lookupRoute(app: string, target: RouteTarget) {
     return { query: "SELECT id FROM handoff_groups WHERE app_id=? AND id=?", args: [app, target.group] }
   return "member" in target
     ? {
-        query: `SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?`,
+        query: `SELECT json_object('type','member','id',u.id,'name',u.name,'avatar_url',u.avatar_url,'role',m.role) FROM users u JOIN team m ON m.user_id=u.id WHERE m.app_id=? AND u.email=?`,
         args: [app, target.member]
       }
     : {

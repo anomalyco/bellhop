@@ -57,7 +57,7 @@ export const identityKeys = new Hono<Bindings>()
 const path = "/api/apps/:slug/identity-keys",
   fields = "id,name,preview,created_at,last_used_at"
 // Recheck the admin grant and mode at the database operation as well as at the HTTP boundary.
-const grant = `SELECT a.id FROM apps a JOIN members m ON m.app_id=a.id WHERE a.id=? AND a.mode='helpdesk' AND m.user_id=? AND m.role IN ('admin','owner')`
+const grant = `SELECT a.id FROM apps a JOIN team m ON m.app_id=a.id WHERE a.id=? AND a.mode='helpdesk' AND m.user_id=? AND m.role IN ('admin','owner')`
 function admin(c: Ctx) {
   if (!c.var.desk) fail(403, "helpdesk_only", "Help desk workspace required")
   if (!c.var.user || !can(c.var.app.role, "setup")) denied()

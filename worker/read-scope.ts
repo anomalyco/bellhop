@@ -2,10 +2,18 @@ import type { App } from "../shared/api"
 import { missing, sql } from "./core"
 import type { Ctx } from "./core"
 
-export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url,a.public`
-export type AppRow<T extends { public: boolean } = App> = Omit<T, "public"> & { public: number }
-export function fromAppRow<T extends { public: number }>({ public: listed, ...rest }: T) {
-  return { ...rest, public: !!listed }
+export const appCols = `a.id,a.slug,a.name,a.description,a.created_at,'/icon/'||a.slug||'/'||a.icon_version AS icon_url,a.public,
+  (SELECT json_object('slug',o.slug,'name',o.name) FROM orgs o WHERE o.id=a.org_id) org`
+export const orgCols = `o.id,o.slug,o.name,'/icon/o/'||o.slug||'/'||o.icon_version icon_url,o.created_at`
+export type AppRow<T extends { public: boolean } = App> = Omit<T, "public" | "org"> & { public: number; org: string | null }
+// App.org is for the team only: rows read with appCols carry it, and it stays null without a role.
+export function fromAppRow<T extends { public: number; org: string | null; role: unknown }>(
+  row: T
+): Omit<T, "public" | "org"> & { public: boolean; org: App["org"] }
+export function fromAppRow<T extends { public: number }>(row: T): Omit<T, "public"> & { public: boolean }
+export function fromAppRow({ public: listed, ...rest }: { public: number; org?: string | null; role?: unknown }) {
+  if (!("org" in rest)) return { ...rest, public: !!listed }
+  return { ...rest, public: !!listed, org: rest.role && rest.org ? JSON.parse(rest.org) : null }
 }
 // HTTP reads know a slug; MCP and mutations already have a validated app ID. In the former
 // case, resolve the app and viewer role in the same D1 batch as the child queries.
@@ -49,7 +57,7 @@ export const appKey = (scope: ReadScope) => (typeof scope === "string" ? scope :
 export const appStatement = (env: Env, scope: ReturnType<typeof bySlug>) =>
   sql(
     env,
-    `SELECT ${appCols},m.role FROM apps a LEFT JOIN members m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
+    `SELECT ${appCols},m.role FROM apps a LEFT JOIN team m ON m.app_id=a.id AND m.user_id=? WHERE a.slug=?`,
     scope.user,
     scope.slug
   )

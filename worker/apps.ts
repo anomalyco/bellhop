@@ -7,6 +7,7 @@ import type {
   Invitation,
   Label,
   Member,
+  Org,
   Template,
   WebhookDelivery
 } from "../shared/api"
@@ -45,6 +46,7 @@ import {
   fromAppRow,
   readBatch,
   firstRow,
+  orgCols,
   type Read
 } from "./read-scope"
 import type { AppRow, ReadScope } from "./read-scope"
@@ -77,7 +79,7 @@ export async function viewerApp(
       sql(
         c.env,
         `SELECT ${appCols},a.mode,a.require_verified_email,m.role,s.user_id,CASE WHEN a.mode='tracker' AND (${ownCookies?.length ? "1" : "s.user_id IS NULL"}) THEN ${originScopes} ELSE '[]' END origins FROM apps a LEFT JOIN sessions s ON s.token_hash=? AND s.expires_at>?
-    LEFT JOIN members m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
+    LEFT JOIN team m ON m.app_id=a.id AND m.user_id=s.user_id WHERE a.slug=?`,
         hash,
         now(),
         slug
@@ -243,7 +245,7 @@ export async function settings(c: Ctx, revealSecret = false): Promise<AppSetting
   const id = c.var.app.id
   // Members need the roster to assign issues, but not the signing key or token configuration.
   // Re-read after a member mutation: the caller may just have removed or demoted themselves.
-  const current = await sql(c.env, "SELECT role FROM members WHERE app_id=? AND user_id=?", id, c.var.user!.id).first<
+  const current = await sql(c.env, "SELECT role FROM team WHERE app_id=? AND user_id=?", id, c.var.user!.id).first<
     Member["role"]
   >("role")
   const mcp_url = new URL("/mcp", c.env.PUBLIC_ORIGIN || c.req.url).href
@@ -256,7 +258,7 @@ export async function settings(c: Ctx, revealSecret = false): Promise<AppSetting
   const [hook, deliveries, members] = await Promise.all([
     sql(
       c.env,
-      `SELECT url,secret,events FROM webhook_settings WHERE app_id=? AND EXISTS(SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin'))`,
+      `SELECT url,secret,events FROM webhook_settings WHERE app_id=? AND EXISTS(SELECT 1 FROM team WHERE app_id=? AND user_id=? AND role IN ('owner','admin'))`,
       id,
       id,
       c.var.user!.id
@@ -279,7 +281,7 @@ export async function assignee(env: Env, appId: string, id: unknown): Promise<Ac
   if (id === null) return null
   const row = await sql(
     env,
-    `SELECT u.id,u.name,u.avatar_url,m.role FROM users u JOIN members m ON m.user_id=u.id WHERE m.app_id=? AND u.id=?`,
+    `SELECT u.id,u.name,u.avatar_url,m.role FROM users u JOIN team m ON m.user_id=u.id WHERE m.app_id=? AND u.id=?`,
     appId,
     str(id, "assignee_id")
   ).first<{ id: string; name: string; avatar_url: string | null; role: Member["role"] }>()
@@ -313,11 +315,11 @@ apps.get("/api/apps", async (c) => {
       await rows<AppRow>(
         sql(
           c.env,
-          `SELECT ${appCols},m.role FROM apps a JOIN members m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
+          `SELECT ${appCols},m.role FROM apps a JOIN team m ON a.id=m.app_id WHERE m.user_id=? ORDER BY a.name`,
           c.var.user.id
         )
       )
-    ).map(fromAppRow)
+    ).map((r) => fromAppRow(r))
   )
 })
 apps.post("/api/apps", async (c) => {
@@ -325,16 +327,30 @@ apps.post("/api/apps", async (c) => {
   if (!u) fail(401, "sign_in", "Sign in to create an app")
   return c.json(await createApp(c, u, await body(c)), 201)
 })
+export const validSlug = (value: unknown) => {
+  const slug = str(value, "slug", 40)
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(slug) || slug.length < 2 || reservedSlugs.has(slug))
+    bad("Invalid or reserved slug")
+  return slug
+}
+// A feedback app: private reports the reporter can't make public, unlisted, and labels a feedback form maps to.
+const feedbackLabels = [
+  ["bug", "d73a4a", "Something isn’t working"],
+  ["idea", "a2eeef", "A suggestion or feature idea"],
+  ["question", "d876e3", "A question about the app"]
+] as const
+export type OrgApp = { id: string; slug: string; name: string; kind: "feedback" | "tracker"; user: string }
 export async function createApp(
   c: Ctx,
   u: { id: string },
   b: Record<string, unknown>,
-  agent?: Extract<Actor, { type: "agent" }>
+  agent?: Extract<Actor, { type: "agent" }>,
+  org?: OrgApp
 ) {
-  const grant = agent?.id
-  const slug = str(b.slug, "slug", 40)
-  if (!/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/.test(slug) || slug.length < 2 || reservedSlugs.has(slug))
-    bad("Invalid or reserved slug")
+  const grant = agent?.id,
+    feedback = org?.kind === "feedback"
+  const slug = validSlug(b.slug)
+  if (feedback && b.public === true) bad("Feedback apps are unlisted")
   const app: App = {
     id: uid(),
     slug,
@@ -343,18 +359,23 @@ export async function createApp(
     created_at: now(),
     icon_url: null,
     role: "owner",
-    public: b.public === undefined ? false : publicFlag(b.public)
+    public: b.public === undefined || feedback ? false : publicFlag(b.public),
+    org: org ? { slug: org.slug, name: org.name } : null
   }
   const q = [
     sql(
       c.env,
-      "INSERT INTO apps(id,slug,name,description,created_at,public) VALUES(?,?,?,?,?,?)",
+      `INSERT INTO apps(id,slug,name,description,created_at,public,org_id,default_private,reporter_can_choose) SELECT ?,?,?,?,?,?,?,?,0
+      WHERE ?7 IS NULL OR EXISTS(SELECT 1 FROM org_members WHERE org_id=?7 AND user_id=? AND role IN ('admin','owner'))`,
       app.id,
       slug,
       app.name,
       app.description,
       app.created_at,
-      Number(app.public)
+      Number(app.public),
+      org?.id ?? null,
+      Number(feedback),
+      org?.user ?? null
     ),
     sql(
       c.env,
@@ -365,16 +386,17 @@ export async function createApp(
     ),
     sql(c.env, "INSERT INTO webhook_settings(app_id,secret) VALUES(?,?)", app.id, secret())
   ]
-  const labelIds = seedLabels.map(([n, col, d]) => {
+  const labelIds = (feedback ? feedbackLabels : seedLabels).map(([n, col, d]) => {
     const id = uid()
     q.push(sql(c.env, "INSERT INTO labels VALUES(?,?,?,?,?)", id, app.id, n, col, d))
     return id
   })
-  seedTemplates.forEach(([n, d, b], i) => {
-    const id = uid()
-    q.push(sql(c.env, "INSERT INTO templates VALUES(?,?,?,?,?,?,?,?)", id, app.id, n, d, "", b, Number(i === 0), i))
-    q.push(sql(c.env, "INSERT INTO template_labels VALUES(?,?)", id, labelIds[i]))
-  })
+  if (!feedback)
+    seedTemplates.forEach(([n, d, b], i) => {
+      const id = uid()
+      q.push(sql(c.env, "INSERT INTO templates VALUES(?,?,?,?,?,?,?,?)", id, app.id, n, d, "", b, Number(i === 0), i))
+      q.push(sql(c.env, "INSERT INTO template_labels VALUES(?,?)", id, labelIds[i]))
+    })
   if (grant)
     q.push(
       sql(
@@ -393,12 +415,37 @@ export async function createApp(
       agent ?? memberActor(c.var.user!, null),
       "app.created",
       { type: "app", id: app.id },
-      { public: app.public },
+      { public: app.public, ...(org && { org: org.slug, kind: org.kind }) },
       "1"
     )
   )
+  // A feedback app ships with its first report key, shown once.
+  const key = feedback ? "bh_pub_" + secret() : null
+  if (key) {
+    const id = uid(),
+      preview = key.slice(0, 15) + "…"
+    q.push(
+      sql(
+        c.env,
+        "INSERT INTO report_keys(id,app_id,name,preview,hash,created_at) VALUES(?,?,?,?,?,?)",
+        id,
+        app.id,
+        "Feedback form",
+        preview,
+        await sha256(key),
+        app.created_at
+      ),
+      entry(c.env, app.id, memberActor(c.var.user!, null), "report_key.created", {
+        type: "report_key",
+        id,
+        name: "Feedback form",
+        preview
+      })
+    )
+  }
   await c.env.DB.batch(q)
-  return detail(c, grant ? { ...app, role: "admin" } : app)
+  const created = await detail(c, grant ? { ...app, role: "admin" } : app)
+  return key ? { ...created, report_key: key } : created
 }
 function publicFlag(v: unknown) {
   if (typeof v !== "boolean") bad("public must be a boolean")
@@ -430,7 +477,7 @@ export async function updateApp(env: Env, app: App, actor: Actor, b: Record<stri
   const change = sql(
     env,
     `UPDATE apps SET default_group_id=CASE WHEN ? THEN ? ELSE default_group_id END,mode=coalesce(?,mode),require_verified_email=coalesce(?,require_verified_email),allow_anonymous=coalesce(?,allow_anonymous),default_autonomy=coalesce(?,default_autonomy),nudge_days=CASE WHEN ? THEN ? ELSE nudge_days END,default_private=coalesce(?,default_private),reporter_can_choose=coalesce(?,reporter_can_choose),name=coalesce(?,name),description=coalesce(?,description),public=CASE WHEN coalesce(?,mode)='helpdesk' THEN 0 ELSE coalesce(?,public) END
-    WHERE id=? AND (?=0 OR (coalesce(?,mode)='helpdesk' AND EXISTS(SELECT 1 FROM members m WHERE m.app_id=apps.id AND m.user_id=? AND m.role IN ('owner','admin')))) RETURNING name,description,public`,
+    WHERE id=? AND (?=0 OR (coalesce(?,mode)='helpdesk' AND EXISTS(SELECT 1 FROM team m WHERE m.app_id=apps.id AND m.user_id=? AND m.role IN ('owner','admin')))) RETURNING name,description,public`,
     Number(desk?.default_group_id !== undefined),
     desk?.default_group_id == null ? null : str(desk.default_group_id, "default_group_id", 100),
     mode,
@@ -532,18 +579,61 @@ apps.post("/api/apps/:slug/transfer", async (c) => {
 })
 apps.get("/api/me/invitations", async (c) => {
   const u = c.var.user ?? fail(401, "sign_in", "Sign in to see invitations")
-  const data = await rows<Omit<Invitation, "app" | "invited_by"> & { app: string; invited_by: string }>(
+  const data = await rows<
+    Omit<Invitation, "app" | "org" | "invited_by"> & { app: string | null; org: string | null; invited_by: string }
+  >(
     sql(
       c.env,
-      `SELECT v.id,v.role,v.created_at,v.invited_by,json_object('slug',a.slug,'name',a.name,'icon_url','/icon/'||a.slug||'/'||a.icon_version) app FROM workspace_invitations v JOIN apps a ON a.id=v.app_id WHERE v.email=? ORDER BY v.created_at DESC,v.id`,
+      `SELECT v.id id,v.role role,v.created_at created_at,v.invited_by invited_by,json_object('slug',a.slug,'name',a.name,'icon_url','/icon/'||a.slug||'/'||a.icon_version) app,NULL org
+      FROM workspace_invitations v JOIN apps a ON a.id=v.app_id WHERE v.email=?1
+      UNION ALL SELECT v.id,v.role,v.created_at,v.invited_by,NULL,json_object('slug',o.slug,'name',o.name,'icon_url','/icon/o/'||o.slug||'/'||o.icon_version)
+      FROM org_invitations v JOIN orgs o ON o.id=v.org_id WHERE v.email=?1 ORDER BY created_at DESC,id`,
       u.email
     )
   )
-  return c.json(data.map((v) => ({ ...v, app: JSON.parse(v.app), invited_by: JSON.parse(v.invited_by) })))
+  return c.json(
+    data.map((v) => ({
+      ...v,
+      app: v.app && JSON.parse(v.app),
+      org: v.org && JSON.parse(v.org),
+      invited_by: JSON.parse(v.invited_by)
+    }))
+  )
 })
 apps.post("/api/me/invitations/:id/accept", async (c) => {
   const u = c.var.user ?? fail(401, "sign_in", "Sign in to accept an invitation"),
     id = c.req.param("id")
+  if (await sql(c.env, "SELECT 1 FROM org_invitations WHERE id=? AND email=?", id, u.email).first()) {
+    const actor = auditActor(memberActor(u, null))
+    const [seat, org] = await c.env.DB.batch<Org>([
+      sql(
+        c.env,
+        "INSERT INTO org_members(id,org_id,user_id,email,role) SELECT id,org_id,?,email,role FROM org_invitations WHERE id=? AND email=?",
+        u.id,
+        id,
+        u.email
+      ),
+      sql(c.env, `SELECT ${orgCols},m.role FROM org_members m JOIN orgs o ON o.id=m.org_id WHERE m.id=? AND m.user_id=?`, id, u.id),
+      sql(
+        c.env,
+        `INSERT INTO org_audit_log(org_id,actor,action,target,data) SELECT org_id,?,'member.accepted',json_object('type','invitation','id',id,'email',email),json_object('role',role) FROM org_invitations WHERE id=? AND email=?`,
+        actor,
+        id,
+        u.email
+      ),
+      sql(
+        c.env,
+        `INSERT INTO audit_log(app_id,actor,action,target,data) SELECT a.id,?,'member.accepted',json_object('type','invitation','id',v.id,'email',v.email,'org',o.slug),json_object('role',v.role)
+        FROM org_invitations v JOIN orgs o ON o.id=v.org_id JOIN apps a ON a.org_id=v.org_id WHERE v.id=? AND v.email=?`,
+        actor,
+        id,
+        u.email
+      ),
+      sql(c.env, "DELETE FROM org_invitations WHERE id=? AND email=?", id, u.email)
+    ])
+    if (!seat!.meta.changes) missing()
+    return c.json(org!.results[0]!)
+  }
   const [seat, app] = await c.env.DB.batch<AppRow>([
     sql(
       c.env,
@@ -554,7 +644,7 @@ apps.post("/api/me/invitations/:id/accept", async (c) => {
     ),
     sql(
       c.env,
-      `SELECT ${appCols},m.role FROM apps a JOIN members m ON m.app_id=a.id WHERE m.id=? AND m.user_id=?`,
+      `SELECT ${appCols},m.role FROM apps a JOIN members x ON x.app_id=a.id JOIN team m ON m.app_id=a.id AND m.user_id=x.user_id WHERE x.id=? AND x.user_id=?`,
       id,
       u.id
     ),
@@ -573,7 +663,7 @@ apps.post("/api/me/invitations/:id/accept", async (c) => {
 apps.post("/api/me/invitations/:id/decline", async (c) => {
   const u = c.var.user ?? fail(401, "sign_in", "Sign in to decline an invitation")
   const id = c.req.param("id")
-  const [, removed] = await c.env.DB.batch([
+  const [, removed, , orgRemoved] = await c.env.DB.batch([
     sql(
       c.env,
       `INSERT INTO audit_log(app_id,actor,action,target) SELECT app_id,?,'member.declined',json_object('type','invitation','id',id,'email',email) FROM workspace_invitations WHERE id=? AND email=?`,
@@ -581,9 +671,17 @@ apps.post("/api/me/invitations/:id/decline", async (c) => {
       id,
       u.email
     ),
-    sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", id, u.email)
+    sql(c.env, "DELETE FROM workspace_invitations WHERE id=? AND email=?", id, u.email),
+    sql(
+      c.env,
+      `INSERT INTO org_audit_log(org_id,actor,action,target) SELECT org_id,?,'member.declined',json_object('type','invitation','id',id,'email',email) FROM org_invitations WHERE id=? AND email=?`,
+      auditActor(memberActor(u, null)),
+      id,
+      u.email
+    ),
+    sql(c.env, "DELETE FROM org_invitations WHERE id=? AND email=?", id, u.email)
   ])
-  if (!removed!.meta.changes) missing()
+  if (!removed!.meta.changes && !orgRemoved!.meta.changes) missing()
   return c.json({ ok: true })
 })
 apps.delete("/api/apps/:slug/members/me", async (c) => {

@@ -33,7 +33,7 @@ async function prefs(c: Ctx): Promise<NotificationSettings> {
     p =
       (await sql(
         c.env,
-        `SELECT coalesce(p.opened,1) opened,coalesce(p.replied,1) replied,coalesce(p.mentions,1) mentions,coalesce(p.assigned,1) assigned,coalesce(p.approvals,EXISTS(SELECT 1 FROM members m JOIN apps a ON a.id=m.app_id AND a.mode='helpdesk' WHERE m.user_id=u.id AND (m.role IN ('admin','owner') OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=m.app_id AND json_extract(i.assignee,'$.id')=u.id)))) approvals,EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email) muted FROM users u LEFT JOIN mail_settings p ON p.user_id=u.id WHERE u.id=?`,
+        `SELECT coalesce(p.opened,1) opened,coalesce(p.replied,1) replied,coalesce(p.mentions,1) mentions,coalesce(p.assigned,1) assigned,coalesce(p.approvals,EXISTS(SELECT 1 FROM team m JOIN apps a ON a.id=m.app_id AND a.mode='helpdesk' WHERE m.user_id=u.id AND (m.role IN ('admin','owner') OR EXISTS(SELECT 1 FROM issues i WHERE i.app_id=m.app_id AND json_extract(i.assignee,'$.id')=u.id)))) approvals,EXISTS(SELECT 1 FROM mail_suppressed WHERE address=u.email) muted FROM users u LEFT JOIN mail_settings p ON p.user_id=u.id WHERE u.id=?`,
         u.id
       ).first<Record<string, number>>()) ?? missing()
   return {
@@ -169,15 +169,7 @@ mailRoutes.put(route, async (c) => {
         ? [
             // Same pending API state regardless of requests on other issues. Only the
             // winning address-wide reservation is allowed to send a confirmation link.
-            sql(
-              c.env,
-              `INSERT INTO confirmation_daily(address,day,sub_id,nonce,n)
-             SELECT s.address,date('now'),s.id,s.nonce,1 FROM mail_people s WHERE s.issue_id=? AND s.actor_id=? AND s.state='pending'
-             AND NOT EXISTS(SELECT 1 FROM confirmation_daily d JOIN mail_subs p ON p.id=d.sub_id AND p.address=d.address AND p.nonce=d.nonce WHERE d.address=s.address AND p.state='pending' AND p.requested>=unixepoch()-86400)
-             ON CONFLICT(address) DO UPDATE SET day=excluded.day,sub_id=excluded.sub_id,nonce=excluded.nonce,n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END RETURNING sub_id id,nonce,address`,
-              iid,
-              actor
-            ),
+            reserveConfirmation(c.env, iid, actor),
             guestWrite(c.env, c.var.guestHash),
             sql(
               c.env,
@@ -205,30 +197,48 @@ mailRoutes.put(route, async (c) => {
         r.id,
         r.nonce
       ).first<{ locale: Locale | null; trusted: number }>())
-    if (r && pending) {
-      const confirm = `${mailOrigin(c.env)}/email/confirm?t=${await mailToken(c.env, "confirm", r)}`,
-        unsub = unsubscribeURL(c.env, await mailToken(c.env, "unsubscribe", r)),
-        copy = mailCopy[pending.locale ?? "en"],
-        desk = pending.trusted ? deskCopy[pending.locale ?? "en"] : null,
-        workspace = c.var.app.name.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim(),
-        intro = desk?.intro ?? copy.confirmIntro
-      // Neutral double opt-in. Never disclose the issue, workspace or custom text to an unverified address.
-      try {
-        await sendMail(c.env, "confirm-" + r.nonce, {
-          to: address,
-          fromName: desk ? workspace : "Bellhop",
-          subject: desk ? formatMail(desk.confirm, { workspace }) : copy.confirmSubject,
-          text: `${intro}\n${copy.confirmAction}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}${desk ? "" : `\n${copy.stop}: ${unsub}&all=1`}`,
-          html: `<p>${esc(intro)}</p><p><a href="${esc(confirm)}">${esc(copy.confirmAction)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a>${desk ? "" : ` · <a href="${esc(unsub + "&all=1")}">${esc(copy.stop)}</a>`}</p>`
-        })
-      } catch (e) {
-        await sql(c.env, "UPDATE mail_subs SET requested=0 WHERE id=? AND nonce=?", r.id, r.nonce).run()
-        throw e
-      }
-    }
+    if (r && pending) await sendConfirmation(c.env, r, address, { ...pending, workspace: c.var.app.name })
   }
   return c.json(await subscription(c, iid))
 })
+// The one confirmation email for a reserved pending subscription (see confirmation_daily). Neutral double opt-in:
+// never disclose the issue, workspace or custom text to an unverified address.
+export async function sendConfirmation(
+  env: Env,
+  r: TokenRow,
+  address: string,
+  pending: { locale: Locale | null; trusted: number; workspace: string }
+) {
+  const confirm = `${mailOrigin(env)}/email/confirm?t=${await mailToken(env, "confirm", r)}`,
+    unsub = unsubscribeURL(env, await mailToken(env, "unsubscribe", r)),
+    copy = mailCopy[pending.locale ?? "en"],
+    desk = pending.trusted ? deskCopy[pending.locale ?? "en"] : null,
+    workspace = pending.workspace.replace(/[\p{Cc}\u2028\u2029]+/gu, " ").trim(),
+    intro = desk?.intro ?? copy.confirmIntro
+  try {
+    await sendMail(env, "confirm-" + r.nonce, {
+      to: address,
+      fromName: desk ? workspace : "Bellhop",
+      subject: desk ? formatMail(desk.confirm, { workspace }) : copy.confirmSubject,
+      text: `${intro}\n${copy.confirmAction}: ${confirm}\n\n${copy.ignore}\n${copy.unsubscribe}: ${unsub}${desk ? "" : `\n${copy.stop}: ${unsub}&all=1`}`,
+      html: `<p>${esc(intro)}</p><p><a href="${esc(confirm)}">${esc(copy.confirmAction)}</a></p><p>${esc(copy.ignore)}</p><p><a href="${esc(unsub)}">${esc(copy.unsubscribe)}</a>${desk ? "" : ` · <a href="${esc(unsub + "&all=1")}">${esc(copy.stop)}</a>`}</p>`
+    })
+  } catch (e) {
+    await sql(env, "UPDATE mail_subs SET requested=0 WHERE id=? AND nonce=?", r.id, r.nonce).run()
+    throw e
+  }
+}
+// Reserve the address-wide confirmation for a pending subscription (the same rules as the subscription route).
+export const reserveConfirmation = (env: Env, issue: string, actor: string) =>
+  sql(
+    env,
+    `INSERT INTO confirmation_daily(address,day,sub_id,nonce,n)
+   SELECT s.address,date('now'),s.id,s.nonce,1 FROM mail_people s WHERE s.issue_id=? AND s.actor_id=? AND s.state='pending'
+   AND NOT EXISTS(SELECT 1 FROM confirmation_daily d JOIN mail_subs p ON p.id=d.sub_id AND p.address=d.address AND p.nonce=d.nonce WHERE d.address=s.address AND p.state='pending' AND p.requested>=unixepoch()-86400)
+   ON CONFLICT(address) DO UPDATE SET day=excluded.day,sub_id=excluded.sub_id,nonce=excluded.nonce,n=CASE WHEN day=excluded.day THEN n+1 ELSE 1 END RETURNING sub_id id,nonce,address`,
+    issue,
+    actor
+  )
 function page(c: Ctx, text: string, form = "") {
   return c.html(`<!doctype html><meta charset=utf-8><title>Email preferences</title><p>${esc(text)}</p>${form}`, 200, {
     "Cache-Control": "no-store",

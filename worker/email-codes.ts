@@ -84,7 +84,7 @@ export async function prepareCode(
       ? "1"
       : x.kind === "contact"
         ? "EXISTS(SELECT 1 FROM apps WHERE id=?3 AND mode='helpdesk')"
-        : `EXISTS(SELECT 1 FROM issues i JOIN apps a ON a.id=i.app_id WHERE i.id=?4 AND i.app_id=?3 AND (${serverKey ? "a.mode='helpdesk' AND EXISTS(SELECT 1 FROM api_keys WHERE app_id=i.app_id AND kind='secret' AND id=?9)" : actor?.type === "agent" ? `EXISTS(SELECT 1 FROM (${agentAccessSQL}) acl WHERE acl.app_id=i.app_id AND agent_id=?9 AND acl.role IN ('responder','member','admin'))` : team ? "EXISTS(SELECT 1 FROM members WHERE app_id=i.app_id AND user_id=?9)" : "i.hidden IS NULL AND json_extract(i.author,'$.id') IN(SELECT value FROM json_each(?10)) AND (a.mode!='helpdesk' OR EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=i.app_id AND t.id=?9))"}))`
+        : `EXISTS(SELECT 1 FROM issues i JOIN apps a ON a.id=i.app_id WHERE i.id=?4 AND i.app_id=?3 AND (${serverKey ? "a.mode='helpdesk' AND EXISTS(SELECT 1 FROM api_keys WHERE app_id=i.app_id AND kind='secret' AND id=?9)" : actor?.type === "agent" ? `EXISTS(SELECT 1 FROM (${agentAccessSQL}) acl WHERE acl.app_id=i.app_id AND agent_id=?9 AND acl.role IN ('responder','member','admin'))` : team ? "EXISTS(SELECT 1 FROM team WHERE app_id=i.app_id AND user_id=?9)" : "i.hidden IS NULL AND json_extract(i.author,'$.id') IN(SELECT value FROM json_each(?10)) AND (a.mode!='helpdesk' OR EXISTS(SELECT 1 FROM contacts t WHERE t.app_id=i.app_id AND t.id=?9))"}))`
   const google = "(?2='account' AND EXISTS(SELECT 1 FROM users WHERE email=?5 AND google_sub IS NOT NULL))",
     index = q.length
   q.push(

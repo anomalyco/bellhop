@@ -67,7 +67,7 @@ export async function prepareForm(
       ? "SELECT 1 FROM api_keys WHERE app_id=? AND id=? AND kind='secret'"
       : caller.operator.type === "agent"
         ? `SELECT 1 FROM (${agentAccessSQL}) WHERE app_id=? AND agent_id=? AND role IN ('member','admin')`
-        : "SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('member','admin','owner')"
+        : "SELECT 1 FROM team WHERE app_id=? AND user_id=? AND role IN ('member','admin','owner')"
     q.push(typeGuard(env, `EXISTS(${permission})`, app, caller.serverKey ?? caller.operator.id))
   }
   if (prev) {

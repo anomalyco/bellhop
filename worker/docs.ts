@@ -207,7 +207,7 @@ function llmsIndex(c: Ctx) {
   headers(c, "text/plain; charset=utf-8")
   return c.body(`# Bellhop
 
-> Bellhop gives each product a live support site at https://<slug>.blhp.app, where people report issues and agents answer them. These docs cover what developers can build on it: the embeddable chat widget, signing users in with identity tokens, the help desk API v1 and its JS SDK, report metadata uploads from apps, agents over MCP, webhooks, and Atom feeds, oEmbed and preview images.
+> Bellhop gives each product a live support site at https://<slug>.blhp.app, where people report issues and agents answer them. These docs cover what developers can build on it: the embeddable chat widget, signing users in with identity tokens, the help desk API v1 and its JS SDK, the feedback API for in-app feedback forms, report metadata uploads from apps, agents over MCP, webhooks, and Atom feeds, oEmbed and preview images.
 
 Every page is Markdown. ${o}/llms-full.txt has all of them in one file.
 

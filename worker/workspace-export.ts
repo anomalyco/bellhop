@@ -113,7 +113,7 @@ const wide: Partial<Record<Section[0], string[]>> = {
 async function* archive(c: Ctx) {
   const app = c.var.app.id,
     admin = c.var.user!.id,
-    acl = `EXISTS(SELECT 1 FROM members WHERE app_id=?1 AND user_id=?2 AND role IN ('admin','owner'))`
+    acl = `EXISTS(SELECT 1 FROM team WHERE app_id=?1 AND user_id=?2 AND role IN ('admin','owner'))`
   for (const [type, from, where, fields] of sections) {
     let seq = 0
     const limit = type === "request_type" ? 2 : size // Includes archived, potentially large definitions.

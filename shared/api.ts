@@ -24,6 +24,11 @@
 //     also allow creating workspaces: the approving user owns them and the agent gets admin. Agent posts carry the AI
 //     badge.
 //
+// - org member: an account with a Role in an org, a group of apps run by one team (e.g. "Anomaly" with Hex and
+//   OpenCode iOS). An org role applies to every app in the org as if held in each app; a person's effective role in
+//   an app is the higher of their app role and their org role. Agents count org roles like app roles (all_workspaces
+//   reaches every app in the account's orgs, always capped by the account's effective role).
+//
 // - contact: a requester in a help desk workspace (AppDetail.mode "helpdesk"). A per-workspace identity, never an
 //   account: signed in on that workspace's host with an email code, or by a host-signed identity token (the host
 //   app's own signed-in user, e.g. from Console or the chat widget). Signing in moves this browser's guest posts in
@@ -54,6 +59,8 @@
 //   sort:<IssueSort>. Unknown qualifiers are treated as text. author:@me is this browser's guest id or the account.
 //   Help desk (team only): is:held (has a held agent reply), is:awaiting-approval (has a pending approval),
 //   type:<request type name>, is:escalated (alias is:with-person), is:waiting-for-person and group:<name>.
+//   Feedback (team only): platform:<name>, version:<app version>, meta:<key>=<value> (quote the whole term for spaces:
+//   meta:"screen=Account settings"), has:screenshot, has:email and source:feedback|web.
 //   POST   /api/apps               NewApp                -> AppDetail          member; seeds default labels and templates
 //   GET    /api/apps/:slug                               -> AppDetail          public
 //   PATCH  /api/apps/:slug         { name?, description?, public?, visibility?, nudge_days?, mode?, helpdesk? }
@@ -79,7 +86,8 @@
 //          accepts after signing in). Pending invitees get no access, no email and no agent access there.
 //   DELETE /api/apps/:slug/members/me                    -> { ok: true }       leave the workspace (not the last owner)
 //   GET    /api/me/invitations                           -> Invitation[]       signed in
-//   POST   /api/me/invitations/:id/accept                -> App                signed in; that invitation's email only
+//   POST   /api/me/invitations/:id/accept                -> App | Org          signed in; that invitation's email only
+//          (an app invitation returns the App, an org invitation the Org)
 //   POST   /api/me/invitations/:id/decline               -> { ok: true }
 //   PATCH  /api/apps/:slug/members/:id { role }          -> AppSettings        admin
 //   DELETE /api/apps/:slug/members/:id                   -> AppSettings        admin
@@ -143,6 +151,48 @@
 //   DELETE /api/apps/:slug/report-keys/:id               -> { ok: true }       admin
 //   Pages: https://<slug>.blhp.app/new?metadata=<id> (and /<slug>/new?metadata= in path mode) opens new issue with it
 //   attached and its title suggested; https://blhp.app/new?metadata=<id> redirects to the right workspace.
+// Orgs: group apps for one team and give it one inbox across them.
+//   GET    /api/orgs                                     -> Org[]              signed in: orgs I'm on, or on one of
+//          whose apps (role null: those apps only)
+//   POST   /api/orgs               NewOrg                -> OrgDetail          signed in; the creator is its owner
+//   GET    /api/orgs/:org                                -> OrgDetail          org members (members list: admin), and
+//          people on some of its apps (just those apps); the icon is served at /icon/o/<slug>/<version>
+//   PATCH  /api/orgs/:org          { name? }             -> OrgDetail          org admin
+//   PUT    /api/orgs/:org/icon     raw image bytes       -> OrgDetail          org admin (as app icons)
+//   POST   /api/orgs/:org/members  { email, role? }      -> OrgDetail          org admin; an invitation like app invites
+//          (Invitation.org), accepted under /api/me/invitations; owner rules as for apps (only owners grant admin and
+//          owner; the last owner stays)
+//   PATCH  /api/orgs/:org/members/:id { role }           -> OrgDetail          org admin
+//   DELETE /api/orgs/:org/members/:id                    -> OrgDetail          org admin ({ ok: true } when it was your seat)
+//   DELETE /api/orgs/:org/members/me                     -> { ok: true }       org member: leave the org
+//   POST   /api/orgs/:org/apps     NewApp & { kind?: "feedback" | "tracker" } -> AppDetail & { report_key?: string }
+//          org admin; creates an app in the org. "feedback" (the default here): private by default and reporters
+//          can't choose, unlisted, labels bug / idea / question, and a first report key returned once in report_key.
+//   PUT    /api/apps/:slug/org     { org: string | null } -> AppDetail         owner of the app and admin of the org
+//          it joins (and of the org it leaves); null takes it out of its org
+//   GET    /api/orgs/:org/inbox?state=open|closed&q=<text>&cursor= -> InboxList   org members: every issue in the
+//          org's apps (people on only some of its apps: those), private ones included, most recently active first. q takes the list qualifiers plus
+//          app:<slug> (repeatable, any), platform:<name>, version:<app version>, meta:<key>=<value>, has:screenshot,
+//          has:email and source:feedback|web. Hidden issues only with is:hidden.
+// Feedback: apps send in-app feedback straight in with a report key (publishable, ship it in the app). Each
+// submission becomes a private issue in that app: only the team and agents can see it; the submitter has no web
+// view. With an email (and not anonymous) Bellhop sends one confirmation email; once confirmed, public replies go
+// to that address (the whole reply, no link) and email replies post back into the issue. Nothing else is ever emailed
+// to an unconfirmed address. This is the public API (v1, documented in /v1/openapi.json): see shared/v1.ts.
+//   POST   https://api.blhp.app/v1/feedback FeedbackInput -> FeedbackCreated   Authorization: Bearer <report key>;
+//          the key names the workspace (also /v1/feedback on its workspace host, where the key must be that
+//          workspace's, and in dev path mode). JSON (screenshots as base64), or multipart/form-data with a "payload"
+//          part (FeedbackInput as JSON, without screenshots) and up to 5 "screenshot" file parts. CORS for any
+//          origin. Screenshots png/jpeg/webp (checked by content), each <= 10 MB, <= 20 MB in total; request <= 30 MB.
+//          Limits: 10/min per IP (429 rate_limited), 60/min per key (429 key_rate_limited), 10/hour per install_id
+//          (429 install_rate_limited), 1000/day per key (429 feedback_daily_limit), 1 GB/day per key (413
+//          feedback_byte_quota). Help desk workspaces don't take feedback (403 feedback_unavailable).
+//          Retries: send Idempotency-Key and retry with the same key and the same feedback (multipart: the same payload
+//          part and screenshot files; the boundary may change). The first answer (FeedbackCreated, or a client error for
+//          5 minutes) replays for 24 hours: no second issue or confirmation email. Keys are per report key (1000 active
+//          per key and IP, 429 idempotency_limit); the same key with different feedback is 422 idempotency_mismatch, and
+//          a retry while the first is still running is 409 request_pending with Retry-After.
+//   POST   /api/apps/:slug/feedback                       the same, scoped to that workspace (the key must be its)
 //   GET    /api/apps/:slug/saved-replies                 -> SavedReply[]       team (viewer and up) and agents
 //   POST   /api/apps/:slug/saved-replies SavedReplyInput -> SavedReply         member
 //   PATCH  /api/apps/:slug/saved-replies/:id SavedReplyInput -> SavedReply     member
@@ -385,6 +435,104 @@ export interface App {
    * anyone with the link, but are never listed, in the feed, in sitemaps or indexed.
    */
   public: boolean
+  /** The org this app belongs to, for the team (null otherwise and for outsiders). */
+  org: { slug: string; name: string } | null
+}
+
+/** A group of apps run by one team, with one inbox across them. */
+export interface Org {
+  id: string
+  /** URL slug, same rules as app slugs. The org's inbox is https://blhp.app/o/<slug>. */
+  slug: string
+  name: string
+  icon_url: string | null
+  /** The viewer's role in the org; null when they're on some of its apps but not the org itself (they see only
+   *  those apps, in OrgDetail.apps and the inbox). */
+  role: Role | null
+  created_at: string
+}
+
+export interface NewOrg {
+  name: string
+  slug: string
+}
+
+export interface OrgDetail extends Org {
+  /** The org's apps (all of them, for org members), with the counts the viewer can see in each. */
+  apps: (App & { counts: { open: number; closed: number } })[]
+  /** Org admins only; empty for others. */
+  members: Member[]
+}
+
+/** One row of an org's inbox: an issue with the app it belongs to. */
+export interface InboxItem extends IssueSummary {
+  app: { slug: string; name: string; icon_url: string | null }
+}
+
+export interface InboxList {
+  items: InboxItem[]
+  counts: { open: number; closed: number }
+  /** Open issues per app for the same query (its app: terms aside), for the app filter; every app you see, by name. */
+  by_app: { slug: string; open: number }[]
+  next_cursor: string | null
+}
+
+/** What an app sends from its feedback form. */
+export interface FeedbackInput {
+  /** A short summary (1-200 characters); when omitted, the start of the message. */
+  subject?: string
+  /** What happened, or what they'd like (1-20,000 characters). */
+  message: string
+  /** Where to send replies; confirmed by one email before anything else is sent. Ignored when anonymous. */
+  email?: string
+  /** Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept, so apps
+   *  must not put identifying values in metadata for anonymous sends. */
+  anonymous?: boolean
+  /** The host app's signed-in user, shown to the team as given (not verified). Ignored when anonymous. */
+  user?: { id?: string; name?: string }
+  /** e.g. { name: "Hex", version: "1.4.2", build: "56" } */
+  app?: { name?: string; version?: string; build?: string }
+  /** e.g. { platform: "ios", os: "iOS 26.1", model: "iPhone17,1", locale: "en-US" } */
+  device?: { platform?: string; os?: string; model?: string; locale?: string }
+  /** A random id the app creates once per installation (never a hardware id), so the team sees reports from the
+   *  same install together. Ignored when anonymous. */
+  install_id?: string
+  /** Metadata the app configures for its form, shown to the team and searchable (meta:<key>=<value>), e.g.
+   *  { screen: "Settings", instance: "eu-1", plan: "pro" }. Up to 64 keys; keys 1-64 characters, values up to 2,000. */
+  metadata?: Record<string, string>
+  /** The form's category; matched to a label by name (e.g. "bug", "idea", "question"), unknown names ignored. */
+  category?: string
+  /** JSON only: base64 screenshots. Multipart sends them as "screenshot" file parts instead. */
+  screenshots?: { name?: string; content_type: string; data: string }[]
+  /** Text logs (as report metadata logs). Ignored when anonymous. */
+  logs?: { name: string; content: string }[]
+}
+
+export interface FeedbackCreated {
+  /** The issue number in the app. */
+  number: number
+  received_at: string
+  /** "sent": a confirmation email went out; "not_needed": already confirmed (the same install confirmed this address
+   *  in this app); "none": no email given (or anonymous, or the address opted out of email); "limited": no
+   *  confirmation could be sent now (too many to that address today, or an earlier one is still waiting). */
+  email: "sent" | "not_needed" | "none" | "limited"
+}
+
+/** Where an issue came from an app's feedback form, for the team and agents. */
+export interface FeedbackInfo {
+  anonymous: boolean
+  /** The address given, if any, and whether it's confirmed (replies only reach confirmed addresses). */
+  email: { address: string; confirmed: boolean } | null
+  user: { id?: string; name?: string } | null
+  app: { name?: string; version?: string; build?: string } | null
+  device: { platform?: string; os?: string; model?: string; locale?: string } | null
+  install_id: string | null
+  metadata: Record<string, string>
+  category: string | null
+  /** The screenshots among the issue's attachments, in the order sent. */
+  screenshot_ids: string[]
+  /** Other feedback from the same install id in this app, newest first (up to 10). */
+  same_install: IssueRef[]
 }
 
 export interface NewApp {
@@ -767,7 +915,7 @@ export interface ReportMetadata {
   matches: IssueRef[]
 }
 
-/** A publishable key that can only upload report metadata to one workspace. */
+/** A publishable key for one workspace: it can only upload report metadata and send feedback. */
 export interface ReportKey {
   id: string
   name: string
@@ -830,7 +978,9 @@ export interface AppSettings {
 /** An invitation to join a workspace, waiting for the invited account to accept or decline. */
 export interface Invitation {
   id: string
-  app: { slug: string; name: string; icon_url: string | null }
+  /** Exactly one of app and org is set. */
+  app: { slug: string; name: string; icon_url: string | null } | null
+  org: { slug: string; name: string; icon_url: string | null } | null
   role: Role
   invited_by: { name: string; avatar_url: string | null }
   created_at: string
@@ -1010,6 +1160,9 @@ export interface IssueRef {
 }
 
 export interface IssueSummary extends IssueRef {
+  /** The start of the body as plain text (Markdown stripped, whitespace collapsed, about 140 characters), for list
+   *  rows; null when the body is empty. */
+  preview: string | null
   /** Help desk MCP list/search projections; ordinary discovery summaries omit form answers. */
   request_type?: { id: string; name: string } | null
   fields?: Record<string, string>
@@ -1034,6 +1187,8 @@ export interface IssueSummary extends IssueRef {
   locked: boolean
   /** Pinned issues lead the list (at most 3 per app). */
   pinned: boolean
+  /** Feedback-form issues, for the team and agents: enough for a list row (null otherwise and for outsiders). */
+  feedback_summary?: { platform: string | null; app_version: string | null; screenshots: number; email: boolean; anonymous: boolean } | null
 }
 
 export interface Relation {
@@ -1075,6 +1230,8 @@ export interface Issue extends IssueSummary {
   escalated_to_person: boolean
   /** Report metadata attached to the issue or its comments; empty for viewers outside the team other than the reporter. */
   metadata: ReportMetadata[]
+  /** Set when it came from an app's feedback form; team and agents only (null otherwise). */
+  feedback: FeedbackInfo | null
   /** @mentions in the body. */
   mentions: Mention[]
   timeline: TimelineItem[]
@@ -1332,6 +1489,8 @@ export interface WebhookPayload {
   redelivery_of?: string
   /** For issue.opened / comment.created: report metadata attached to that post (team-facing). */
   metadata?: ReportMetadata[]
+  /** For issue.opened from an app's feedback form: what the form sent (team-facing). */
+  feedback?: FeedbackInfo
   /** Help desk requests: the requester's contact. */
   contact?: Contact
   /** For verification.completed. */
@@ -1351,7 +1510,14 @@ export interface WebhookPayload {
 //                                                  agent joins it as admin
 //   Tool roles: read tools viewer; comment and set_activity responder; triage tools member; workspace setup admin.
 //   list_issues    { state?: "open"|"closed", label?: string, query?: string, sort?: IssueSort, limit?: number }
-//   get_issue      { number }                    full issue: body, timeline, attachments, relations, system info
+//   get_issue      { number, images?: boolean }  full issue: body, timeline, attachments, relations, system info,
+//                                                  feedback; with images (default true) up to 5 screenshot/image
+//                                                  attachments follow the JSON as MCP image content (<= 2 MB each;
+//                                                  larger ones as URLs), the feedback screenshots first
+//   list_orgs      {}                            orgs the agent's account is on, with their apps the agent can use
+//   list_feedback  { org?, app?, query?, state?, limit? }   newest activity first across every app the agent can use
+//                                                  (or one org, or one app); query as the inbox q; rows carry app and
+//                                                  feedback summaries
 //   search_issues  { query, limit? }             full-text over titles, bodies and comments; finds duplicates
 //   get_attachment { id }                        images as MCP image content; video and files as an absolute URL
 //   get_metadata   { id }                        report metadata: specs, context, log attachments, fingerprint, matches

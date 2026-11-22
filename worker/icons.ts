@@ -10,7 +10,7 @@ const iconKey = (app: string, version: string) => `${app}/icons/${version}`
 const tooLarge = () => fail(413, "too_large", "App icons must be 1 MB or smaller")
 const unsupported = () => fail(415, "unsupported_media_type", "Use a PNG, JPEG, or WebP image with its matching Content-Type")
 
-function imageType(bytes: Uint8Array) {
+export function imageType(bytes: Uint8Array) {
   const tag = (at: number) => String.fromCharCode(...bytes.subarray(at, at + 4))
   if ([137, 80, 78, 71, 13, 10, 26, 10].every((b, i) => bytes[i] === b) && tag(12) === "IHDR") return "image/png"
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg"
@@ -18,7 +18,7 @@ function imageType(bytes: Uint8Array) {
   return null
 }
 
-async function readIcon(c: Ctx) {
+export async function readIcon(c: Ctx) {
   const oversized = Number(c.req.header("content-length")) > maxSize
   const mime = c.req.header("content-type")?.split(";", 1)[0]?.trim().toLowerCase()
   const stream = c.req.raw.body

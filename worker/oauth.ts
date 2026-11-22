@@ -326,7 +326,7 @@ oauth.get("/api/oauth/requests/:id", async (c) => {
     apps = await rows<OAuthRequest["apps"][number]>(
       sql(
         c.env,
-        `SELECT a.id,a.slug,a.name,'/icon/'||a.slug||'/'||a.icon_version icon_url,m.role FROM apps a JOIN members m
+        `SELECT a.id,a.slug,a.name,'/icon/'||a.slug||'/'||a.icon_version icon_url,m.role FROM apps a JOIN team m
      ON m.app_id=a.id WHERE m.user_id=? ORDER BY a.name`,
         c.var.user!.id
       )

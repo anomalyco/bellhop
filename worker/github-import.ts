@@ -280,7 +280,7 @@ async function step(env: Env, j: Job) {
   if (
     !(await sql(
       env,
-      "SELECT 1 FROM members WHERE app_id=? AND user_id=? AND role IN ('owner','admin')",
+      "SELECT 1 FROM team WHERE app_id=? AND user_id=? AND role IN ('owner','admin')",
       j.app_id,
       j.requester
     ).first())

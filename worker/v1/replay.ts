@@ -13,7 +13,15 @@ const b64 = (bytes: Uint8Array) => {
 // Seal private response bodies and key the fingerprint of low-entropy OTPs. Mint
 // responses store a random ticket, not a bearer; retries rederive the credential
 // from the ticket, the original Authorization header and the server's secret.
-export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: (seed?: string) => Promise<Response>) {
+// Feedback keeps its records in feedback_replays (scoped to a report key); everything else in api_replays.
+export async function replay(
+  c: Ctx,
+  s: Scope,
+  route: string,
+  raw: string,
+  run: (seed?: string) => Promise<Response>,
+  table: "api_replays" | "feedback_replays" = "api_replays"
+) {
   const nonce = c.req.header("Idempotency-Key")
   if (nonce === undefined) return run()
   str(nonce, "Idempotency-Key", 200)
@@ -38,15 +46,15 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
     ),
     additionalData = enc.encode(JSON.stringify([...ids, digest]))
   const [, reservation, read] = await c.env.DB.batch<{ digest: string; status: number | null; cipher: string | null }>([
-    sql(c.env, `DELETE FROM api_replays WHERE ${where} AND expires<=unixepoch()`, ...ids),
+    sql(c.env, `DELETE FROM ${table} WHERE ${where} AND expires<=unixepoch()`, ...ids),
     sql(
       c.env,
-      `INSERT INTO api_replays(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+86400,?) ON CONFLICT DO NOTHING`,
+      `INSERT INTO ${table}(key_id,scope,route,nonce,digest,expires,budget_scope) VALUES(?,?,?,?,?,unixepoch()+86400,?) ON CONFLICT DO NOTHING`,
       ...ids,
       digest,
       s.kind === "publishable" && !s.user ? await sha256(s.key + ":" + clientIP(c)) : s.user ? s.family : scope
     ),
-    sql(c.env, `SELECT digest,status,cipher FROM api_replays WHERE ${where}`, ...ids)
+    sql(c.env, `SELECT digest,status,cipher FROM ${table} WHERE ${where}`, ...ids)
   ])
   const deriveSeed = async (ticket: string) =>
     hex(
@@ -130,7 +138,7 @@ export async function replay(c: Ctx, s: Scope, route: string, raw: string, run: 
   sealed.set(cipher, 12)
   await sql(
     c.env,
-    `UPDATE api_replays SET status=?,cipher=?,contact_id=?,expires=min(expires,unixepoch()+CAST(? AS INTEGER)) WHERE ${where} AND digest=? AND status IS NULL`,
+    `UPDATE ${table} SET status=?,cipher=?,contact_id=?,expires=min(expires,unixepoch()+CAST(? AS INTEGER)) WHERE ${where} AND digest=? AND status IS NULL`,
     response.status,
     b64(sealed),
     s.replayContact ?? s.user?.id ?? null,

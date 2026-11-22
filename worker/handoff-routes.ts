@@ -15,7 +15,7 @@ import { conversations } from "./v1/conversations"
 import { workspaceConversations } from "./v1/server"
 import { contactActor, contactHash } from "./contact-session"
 
-const setup = `SELECT 1 FROM members m JOIN apps a ON a.id=m.app_id WHERE a.mode='helpdesk' AND a.id=? AND m.user_id=? AND m.role IN ('admin','owner')`
+const setup = `SELECT 1 FROM team m JOIN apps a ON a.id=m.app_id WHERE a.mode='helpdesk' AND a.id=? AND m.user_id=? AND m.role IN ('admin','owner')`
 function desk(c: Ctx) {
   if (!c.var.desk) fail(403, "helpdesk_only", "Help desk workspace required")
 }
@@ -146,7 +146,7 @@ async function save(c: Ctx, id?: string) {
   if (Array.isArray(ids)) {
     const json = JSON.stringify(ids),
       eligible =
-        "SELECT m.id,j.key FROM json_each(?) j JOIN members m ON m.user_id=j.value AND m.app_id=? AND m.role IN ('owner','admin','member')"
+        "SELECT m.id,j.key FROM json_each(?) j JOIN team m ON m.user_id=j.value AND m.app_id=? AND m.role IN ('owner','admin','member')"
     if ((await sql(env, `SELECT count(*) n FROM (${eligible})`, json, app).first<number>("n")) !== ids.length)
       bad("Group members must be current workspace members (member or higher)")
     q.push(
@@ -229,7 +229,7 @@ handoffRoutes.delete(groupPath + "/:id", async (c) => {
 handoffRoutes.get(base + "/me/availability", async (c) => {
   desk(c)
   requireTeam(c, "triage")
-  const row = await sql(c.env, `SELECT coalesce(v.available,1) available FROM members m
+  const row = await sql(c.env, `SELECT coalesce(v.available,1) available FROM team m
     JOIN apps a ON a.id=m.app_id AND a.mode='helpdesk' LEFT JOIN handoff_availability v ON v.member_id=m.id
     WHERE m.app_id=? AND m.user_id=? AND m.role IN ('owner','admin','member')`, c.var.app.id, c.var.user!.id).first<{available:number}>()
   return c.json({ available: !!(row ?? denied()).available })
@@ -244,7 +244,7 @@ handoffRoutes.put(base + "/me/availability", async (c) => {
     guard(c.env, `EXISTS(${memberGrant})`, app, c.var.user!.id),
     sql(
       c.env,
-      "INSERT INTO handoff_availability SELECT id,? FROM members WHERE app_id=? AND user_id=? ON CONFLICT(member_id) DO UPDATE SET available=excluded.available",
+      "INSERT INTO handoff_availability SELECT id,? FROM team WHERE app_id=? AND user_id=? ON CONFLICT(member_id) DO UPDATE SET available=excluded.available",
       Number(available),
       app,
       c.var.user!.id
