@@ -6,6 +6,7 @@
     "dev": "vite --host 127.0.0.1 --port 5287 --strictPort",
     "build": "vite build",
     "typecheck": "tsc -b",
+    "check": "tsc -b && vite build",
     "db:migrate": "wrangler d1 migrations apply bellhop --local"
   },
   "dependencies": {

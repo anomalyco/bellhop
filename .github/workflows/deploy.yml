@@ -1,7 +1,7 @@
 name: Deploy production
 
 # Production (https://blhp.app) deploys only from the `production` branch, which is
-# fast-forwarded to a tested commit on `main` (git push origin main:production).
+# fast-forwarded to a tested commit on `dev` (git push origin dev:production).
 # Staged: apply D1 migrations, upload the new version at 0%, smoke-test it through the
 # version-override header, promote it to 100%, smoke-test live traffic, and roll back
 # to the previous version if that fails. Each version has its own asset manifest and a
@@ -101,37 +101,54 @@ jobs:
           echo "new=$new" >> "$GITHUB_OUTPUT"
           sleep 8
 
+      # Smoke tests run repository code, so they never get the token.
       - name: Smoke-test the candidate
+        id: smoke-candidate
+        env:
+          OVERRIDE_VERSION: ${{ steps.candidate.outputs.new }}
+          SMOKE_DIR: ${{ runner.temp }}
+        run: node scripts/smoke.mjs
+
+      - name: Drop the failed candidate
+        if: failure() && steps.smoke-candidate.outcome == 'failure'
         env:
           CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
-          OVERRIDE_VERSION: ${{ steps.candidate.outputs.new }}
           PREV: ${{ steps.candidate.outputs.prev }}
-          SMOKE_DIR: ${{ runner.temp }}
         run: |
-          if ! node scripts/smoke.mjs; then
-            bunx wrangler versions deploy "$PREV@100%" -y
-            echo "::error::The candidate failed its smoke test; production stays on $PREV."
-            exit 1
-          fi
+          bunx wrangler versions deploy "$PREV@100%" -y
+          echo "::error::The candidate failed its smoke test; production stays on $PREV."
+          exit 1
 
-      - name: Promote and smoke-test live traffic
+      - name: Promote
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+          NEW: ${{ steps.candidate.outputs.new }}
+        run: |
+          bunx wrangler versions deploy "$NEW@100%" -y --message "$(git log --format=%s -1 | cut -c1-90)"
+          sleep 15
+
+      - name: Smoke-test live traffic
+        id: smoke-live
+        env:
+          SMOKE_DIR: ${{ runner.temp }}
+        run: node scripts/smoke.mjs || (sleep 10 && node scripts/smoke.mjs)
+
+      - name: Roll back
+        if: failure() && steps.smoke-live.outcome == 'failure'
         env:
           CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
           NEW: ${{ steps.candidate.outputs.new }}
           PREV: ${{ steps.candidate.outputs.prev }}
-          SMOKE_DIR: ${{ runner.temp }}
         run: |
-          bunx wrangler versions deploy "$NEW@100%" -y --message "$(git log --format=%s -1 | cut -c1-90)"
-          sleep 15
-          if ! node scripts/smoke.mjs; then
-            sleep 10
-            if ! node scripts/smoke.mjs; then
-              bunx wrangler versions deploy "$PREV@100%" -y
-              echo "::error::$NEW failed live smoke tests twice; rolled back to $PREV."
-              exit 1
-            fi
-          fi
-          echo "::notice::Production is on $NEW (previous $PREV)."
+          bunx wrangler versions deploy "$PREV@100%" -y
+          echo "::error::$NEW failed live smoke tests twice; rolled back to $PREV."
+          exit 1
+
+      - name: Report
+        env:
+          NEW: ${{ steps.candidate.outputs.new }}
+          PREV: ${{ steps.candidate.outputs.prev }}
+        run: echo "::notice::Production is on $NEW (previous $PREV)."
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
