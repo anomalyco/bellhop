@@ -26,7 +26,7 @@ export const schemas = {
     {
       subject: { type: "string", minLength: 1, maxLength: 200, description: "A short summary; when omitted, the start of the message." },
       message: { type: "string", minLength: 1, maxLength: 20000, description: "What happened, or what they'd like." },
-      email: { type: "string", format: "email", description: "Where to send replies; confirmed by one email before anything else is sent. Ignored when anonymous." },
+      email: { type: "string", format: "email", description: "Where to send replies. Nothing is sent until the team's first public reply, which sends one confirmation email. Ignored when anonymous." },
       anonymous: { type: "boolean", description: "Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept." },
       user: obj({ id: field("The host app's user id, shown to the team as given."), name: { ...field("Shown to the team as the reporter's name, as given by the app (not verified); 1-40 characters, no control or formatting characters.", 40), minLength: 1 } }, []),
       app: obj({ name: field("e.g. Hex"), version: field("e.g. 1.4.2"), build: field("e.g. 56") }, []),

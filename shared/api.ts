@@ -497,7 +497,7 @@ export interface FeedbackInput {
   subject?: string
   /** What happened, or what they'd like (1-20,000 characters). */
   message: string
-  /** Where to send replies; confirmed by one email before anything else is sent. Ignored when anonymous. */
+  /** Where to send replies. Nothing is sent until the team's first public reply, which sends one confirmation email. Ignored when anonymous. */
   email?: string
   /** Store no email, user, install id or logs. The message, screenshots, app, device and metadata are kept, so apps
    *  must not put identifying values in metadata for anonymous sends. */

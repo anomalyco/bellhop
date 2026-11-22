@@ -25,6 +25,8 @@ import identity from "../docs/identity.md?raw"
 import agents from "../docs/agents.md?raw"
 import feedbackPage from "../docs/feedback.md?raw"
 import { feedbackLimits } from "./feedback"
+import { imageLimits } from "./images"
+import feedbackSource from "./feedback.ts?raw"
 import production from "virtual:bellhop-production-config"
 
 // The public developer docs. Pages are Markdown in docs/; anything that can drift from the code
@@ -146,6 +148,11 @@ function build(): Record<string, string> {
     "approvals.code": approvalConsume[3]!,
     "approvals.jwks": approvalJwks,
     "feedback.maxScreenshots": String(feedbackLimits.screenshots),
+    "feedback.userName": `1–${feedbackLimits.userName} characters, no control or formatting characters`,
+    "feedback.confirmations": fromMigrations(/CONSTRAINT feedback_confirmation_limit CHECK\(n BETWEEN 1 AND (\d+)\)/, "feedback confirmation limit")[1]!,
+    "feedback.pendingSeconds": sourceMatch(feedbackSource, /table: "feedback_replays", pending: (\d+)/, "feedback replay pending time")[1]!,
+    "images.side": imageLimits.side.toLocaleString("en-US"),
+    "images.megapixels": String(imageLimits.pixels / 1e6),
     "feedback.category": `${(document() as Api).components.schemas.FeedbackInput?.properties?.category?.maxLength ?? fail("no category limit")} characters`,
     "feedback.message": `${feedbackLimits.message.toLocaleString("en-US")} characters`,
     "feedback.subject": `${feedbackLimits.subject} characters`,
@@ -476,16 +483,20 @@ function feedbackDaily() {
 function feedbackLimitsTable() {
   const L = feedbackLimits,
     daily = feedbackDaily(),
+    client = fromMigrations(/CONSTRAINT feedback_ip_daily_limit CHECK\(n<=(\d+)\),CONSTRAINT feedback_ip_byte_quota CHECK\(bytes<=(\d+)\)/, "feedback per-client daily limits"),
     n = (v: number) => v.toLocaleString("en-US")
   const rows = [
     ["Request size", bytes(L.request)],
     ["Screenshots", `${L.screenshots}, each up to ${bytes(L.screenshot)}, ${bytes(L.screenshotTotal)} in all; PNG, JPEG or WebP`],
+    ["Screenshot size", `${n(imageLimits.side)} px a side and ${imageLimits.pixels / 1e6} megapixels`],
     ["`message`", `${n(L.message)} characters`],
     ["`subject`", `${n(L.subject)} characters`],
     ["`metadata`", `${L.metadataKeys} keys; keys 1–${L.metadataKey} characters, values up to ${n(L.metadataValue)}`],
     ["`logs`", `${L.logs} logs, each up to ${bytes(L.log)}`],
-    ["Other text (`app`, `device`, `user`, `install_id`)", `${L.field} characters each`],
+    ["`user.name`", `1–${L.userName} characters, no control or formatting characters`],
+    ["Other text (`app`, `device`, `user.id`, `install_id`)", `${L.field} characters each`],
     ["Per IP address", rate("RL_UPLOAD")],
+    ["Per client (report key and IP address)", `${n(Number(client[1]))} per day and ${bytes(Number(client[2]))} per day`],
     ["Per report key", `${L.perKeyMinute} per minute, ${n(Number(daily[1]))} per day and ${bytes(Number(daily[2]))} per day`],
     ["Per `install_id`", `${L.perInstallHour} per hour`]
   ]
