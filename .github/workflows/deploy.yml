@@ -76,6 +76,25 @@ jobs:
           AWS_SESSION_TOKEN: ${{ steps.aws.outputs.aws-session-token }}
         run: bash .github/release/cloudflare-token.sh
 
+      # A freshly minted token can take a little while to work against the D1 API:
+      # the first run failed with "Authentication error [code: 10000]" on its first
+      # D1 query 3 seconds after minting, while the token verified fine. Wait until a
+      # read-only query succeeds (up to about 2 minutes) before applying anything.
+      - name: Wait for the token to reach D1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
+        run: |
+          for i in $(seq 1 12); do
+            if bunx wrangler d1 execute bellhop --remote --env production --command "SELECT 1" > /dev/null 2>&1; then
+              echo "D1 accepted the token after $i attempt(s)."
+              exit 0
+            fi
+            sleep 10
+          done
+          bunx wrangler d1 execute bellhop --remote --env production --command "SELECT 1"
+          echo "::error::D1 still rejects the deploy token after 2 minutes."
+          exit 1
+
       - name: Apply D1 migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ steps.cloudflare-token.outputs.token }}
