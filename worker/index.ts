@@ -82,7 +82,10 @@ api.use("*", async (c, next) => {
   const allowed = origin === new URL(c.req.url).origin || (!!c.env.PUBLIC_ORIGIN && origin === c.env.PUBLIC_ORIGIN)
   if (
     !publicOAuth &&
+    // Both are token-authenticated and use no session. The confirm page is served with Referrer-Policy: no-referrer
+    // (the token is in its URL), so its own form posts with Origin: null.
     c.req.path !== "/email/unsubscribe" &&
+    c.req.path !== "/email/confirm" &&
     origin &&
     !allowed &&
     (c.req.method !== "GET" || c.req.header("upgrade"))
