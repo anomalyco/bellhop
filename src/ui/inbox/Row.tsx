@@ -1,26 +1,55 @@
-import { memo } from "react"
+import { memo, type CSSProperties } from "react"
 import type { InboxItem } from "../../../shared/api"
 import { useT } from "../../i18n/inbox"
 import { t as tc } from "../../i18n/core"
 import { visibleState } from "../../lib/issues"
 import { Time } from "../../lib/time"
 import { ActorAvatar, actorName } from "../Actor"
-import { ImageIcon, MailIcon } from "../icons"
-import { AppIcon, Label, StateIcon } from "../primitives"
+import { ImageIcon } from "../icons"
+import { StateIcon } from "../primitives"
 import { SiteLink } from "../SiteLink"
 import "../../styles/inbox.css"
 
 const statusText = (i: InboxItem) => (i.status === "closed" ? null : i.status === "open" ? null : tc(`state.${i.status}`))
 
+const platformNames: Record<string, string> = { ios: "iOS", ipados: "iPadOS", android: "Android", macos: "macOS", web: "Web", windows: "Windows", linux: "Linux" }
+/** "ios" as iOS, and so on; anything else as sent. */
+export const platformName = (p: string) => platformNames[p.toLowerCase()] ?? p
+
 /**
- * One feedback in the inbox: the app's icon, the title (and a preview when the server sends one), then a mono line
- * with the number, platform and version, screenshots, the reply address or anonymity, labels, status and age.
+ * One feedback in the inbox, always two lines of the same height: the title, a preview and the age; then the
+ * details in a fixed order (number, the app when the list mixes apps, who sent it, platform and version,
+ * screenshots, labels, status, assignee), cut short rather than wrapped.
  */
-export const InboxRow = memo(function InboxRow({ item, href, open, cursor, onOpen }: { item: InboxItem; href: string; open: boolean; cursor: boolean; onOpen: (i: InboxItem) => void }) {
+export const InboxRow = memo(function InboxRow({
+  item,
+  href,
+  open,
+  cursor,
+  showApp,
+  onOpen,
+}: {
+  item: InboxItem
+  href: string
+  open: boolean
+  cursor: boolean
+  showApp: boolean
+  onOpen: (i: InboxItem) => void
+}) {
   const t = useT()
   const fb = item.feedback_summary
-  const preview = (item as InboxItem & { preview?: string | null }).preview
   const status = statusText(item)
+  // The feedback API names the reporter after the app's user, or "Anonymous" when it gave none
+  const name = item.author.type === "guest" && item.author.name && item.author.name !== "Anonymous" ? item.author.name : null
+  const reporter = !fb
+    ? { text: actorName(item.author), title: undefined }
+    : fb.anonymous
+      ? { text: t("row.anon"), title: t("row.anonymous") }
+      : name
+        ? { text: name, title: fb.email ? t("row.email") : undefined }
+        : fb.email
+          ? { text: t("row.byEmail"), title: t("row.email") }
+          : { text: t("row.anon"), title: t("row.noContact") }
   return (
     <SiteLink
       href={href}
@@ -36,54 +65,51 @@ export const InboxRow = memo(function InboxRow({ item, href, open, cursor, onOpe
         onOpen(item)
       }}
     >
-      <span className="inbox-row-icon" title={item.app.name}>
-        <AppIcon src={item.app.icon_url} size={18} name={item.app.name} />
+      <span className="inbox-row-top">
+        <span className="inbox-row-title">{item.title}</span>
+        {item.preview && <span className="inbox-row-preview">{item.preview}</span>}
+        <span className="inbox-row-age">
+          <Time iso={item.updated_at} />
+        </span>
       </span>
-      <span className="inbox-row-main">
-        <span className="inbox-row-top">
-          <span className="inbox-row-title">{item.title}</span>
-          {preview && <span className="inbox-row-preview">{preview}</span>}
-          <span className="inbox-row-age">
-            <Time iso={item.updated_at} />
+      <span className="inbox-row-meta">
+        <span className="inbox-row-number">#{item.number}</span>
+        {showApp && <span className="inbox-row-app">{item.app.name}</span>}
+        <span className="inbox-row-reporter" title={reporter.title}>
+          {reporter.text}
+        </span>
+        {(fb?.platform || fb?.app_version) && (
+          <span className="inbox-row-device">
+            {fb.platform && platformName(fb.platform)}
+            {fb.app_version && <span className="mono inbox-row-version">{fb.app_version}</span>}
           </span>
-        </span>
-        <span className="inbox-row-meta">
-          <span className="mono inbox-row-number">#{item.number}</span>
-          <span className="inbox-row-app">{item.app.name}</span>
-          {fb?.platform && <span className="mono">{fb.platform}</span>}
-          {fb?.app_version && <span className="mono">{fb.app_version}</span>}
-          {!!fb?.screenshots && (
-            <span className="inbox-row-flag" title={t("row.screenshots", { count: fb.screenshots })}>
-              <ImageIcon size={12} />
-              <span className="mono">{fb.screenshots}</span>
-            </span>
-          )}
-          {fb?.anonymous ? (
-            <span className="inbox-row-flag" title={t("row.anonymous")}>
-              {t("row.anon")}
-            </span>
-          ) : (
-            fb?.email && (
-              <span className="inbox-row-flag" title={t("row.email")} aria-label={t("row.email")}>
-                <MailIcon size={12} />
+        )}
+        {!!fb?.screenshots && (
+          <span className="inbox-row-shots" title={t("row.screenshots", { count: fb.screenshots })}>
+            <ImageIcon size={12} />
+            {fb.screenshots}
+          </span>
+        )}
+        {item.labels.length > 0 && (
+          <span className="inbox-row-labels">
+            {item.labels.map((l) => (
+              <span key={l.id} className="inbox-row-label" style={{ "--label": `#${l.color}` } as CSSProperties}>
+                {l.name}
               </span>
-            )
-          )}
-          {item.labels.map((l) => (
-            <Label key={l.id} name={l.name} color={l.color} />
-          ))}
-          {(status || item.status === "closed") && (
-            <span className="inbox-row-status">
-              <StateIcon state={visibleState(item)} size={12} />
-              {status}
-            </span>
-          )}
-          {item.assignee && (
-            <span className="inbox-row-assignee" title={t("row.assigned", { name: actorName(item.assignee) })}>
-              <ActorAvatar actor={item.assignee} size={16} />
-            </span>
-          )}
-        </span>
+            ))}
+          </span>
+        )}
+        {(status || item.status === "closed") && (
+          <span className="inbox-row-status">
+            <StateIcon state={visibleState(item)} size={12} />
+            {status}
+          </span>
+        )}
+        {item.assignee && (
+          <span className="inbox-row-assignee" title={t("row.assigned", { name: actorName(item.assignee) })}>
+            <ActorAvatar actor={item.assignee} size={16} />
+          </span>
+        )}
       </span>
     </SiteLink>
   )

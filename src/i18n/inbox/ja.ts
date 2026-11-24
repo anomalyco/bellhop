@@ -24,6 +24,7 @@ const messages: Translation<typeof en> = {
   "chip.anyPlatform": "すべてのプラットフォーム",
   "chip.screenshot": "スクリーンショット",
   "chip.email": "メール",
+  "chip.includes": "含む",
   "chip.label": "ラベル",
   "chip.anyLabel": "すべてのラベル",
   "chip.clear": "クリア",
@@ -35,11 +36,11 @@ const messages: Translation<typeof en> = {
   "row.email": "返信先あり",
   "row.anonymous": "匿名で送信",
   "row.anon": "匿名",
+  "row.byEmail": "メールのみ",
+  "row.noContact": "名前もメールもなし",
   "row.assigned": "担当: {name}",
 
   // The detail pane
-  "detail.empty": "フィードバックを選んで表示します。",
-  "detail.emptyKeys": "{j} と {k} で移動、{enter} で開く、{help} ですべてのショートカットを表示。",
   "detail.back": "受信トレイに戻る",
   "detail.openIn": "{app} で開く",
   "detail.prev": "前へ",

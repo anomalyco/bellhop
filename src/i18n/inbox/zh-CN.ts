@@ -24,6 +24,7 @@ const messages: Translation<typeof en> = {
   "chip.anyPlatform": "任意平台",
   "chip.screenshot": "截图",
   "chip.email": "邮箱",
+  "chip.includes": "包含",
   "chip.label": "标签",
   "chip.anyLabel": "任意标签",
   "chip.clear": "清除",
@@ -35,11 +36,11 @@ const messages: Translation<typeof en> = {
   "row.email": "有回复地址",
   "row.anonymous": "匿名发送",
   "row.anon": "匿名",
+  "row.byEmail": "仅邮箱",
+  "row.noContact": "未提供姓名或邮箱",
   "row.assigned": "已分配给 {name}",
 
   // The detail pane
-  "detail.empty": "选择一条反馈来查看。",
-  "detail.emptyKeys": "{j} 和 {k} 移动，{enter} 打开，{help} 列出所有快捷键。",
   "detail.back": "返回收件箱",
   "detail.openIn": "在 {app} 中打开",
   "detail.prev": "上一条",

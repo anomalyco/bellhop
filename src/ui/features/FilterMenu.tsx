@@ -92,8 +92,8 @@ function managed(t: Token, scope: Scope) {
   return false
 }
 
-export function activeFilters(q: string, scope: Scope = "workspace") {
-  return tokens(q).filter((t) => managed(t, scope)).length
+export function activeFilters(q: string, scope: Scope = "workspace", also?: (key: string, value: string) => boolean) {
+  return tokens(q).filter((t) => managed(t, scope) || (t.key !== null && !!also?.(t.key, t.value))).length
 }
 
 const help: { q: string; text: PlainKey; scope: Scope[] }[] = [
@@ -125,6 +125,8 @@ export function FilterMenu({
   member = false,
   review = null,
   disabled,
+  lead,
+  also,
 }: {
   query: string
   onChange?: (next: string) => void
@@ -137,10 +139,14 @@ export function FilterMenu({
   review?: Review
   /** The loading skeleton: the button holds its place. */
   disabled?: boolean
+  /** The caller's own groups, shown first (FilterGroup and FilterChip). */
+  lead?: ReactNode
+  /** Qualifiers the caller's groups manage, counted on the button and cleared with the rest. */
+  also?: (key: string, value: string) => boolean
 }) {
   const t = useT()
   const [helping, setHelping] = useState(false)
-  const count = activeFilters(query, scope)
+  const count = activeFilters(query, scope, also)
   const change = (next: string) => onChange?.(next)
   return (
     <Menu
@@ -168,7 +174,7 @@ export function FilterMenu({
         helping ? (
           <Help scope={scope} desk={!!review} onBack={() => setHelping(false)} />
         ) : (
-          <Groups query={query} scope={scope} slug={slug} member={member} review={review} onChange={change} onHelp={() => setHelping(true)} />
+          <Groups query={query} scope={scope} slug={slug} member={member} review={review} lead={lead} also={also} onChange={change} onHelp={() => setHelping(true)} />
         )
       }
     </Menu>
@@ -181,6 +187,8 @@ function Groups({
   slug,
   member,
   review,
+  lead,
+  also,
   onChange,
   onHelp,
 }: {
@@ -189,6 +197,8 @@ function Groups({
   slug?: string
   member: boolean
   review: Review
+  lead?: ReactNode
+  also?: (key: string, value: string) => boolean
   onChange: (next: string) => void
   onHelp: () => void
 }) {
@@ -205,6 +215,7 @@ function Groups({
 
   return (
     <div className="filter-menu">
+      {lead}
       {review && (
         <Group title={td("queue.title")}>
           <Chip on={hasQualifier(query, "is", "held")} onClick={() => onChange(toggle(query, "is", "held"))}>
@@ -326,8 +337,8 @@ function Groups({
           {query || "is:open"}
         </span>
         <span className="filter-foot-actions">
-          {activeFilters(query, scope) > 0 && (
-            <Button size="small" variant="invisible" onClick={() => onChange(editQuery(query, (t) => managed(t, scope)))}>
+          {activeFilters(query, scope, also) > 0 && (
+            <Button size="small" variant="invisible" onClick={() => onChange(editQuery(query, (t) => managed(t, scope) || (t.key !== null && !!also?.(t.key, t.value))))}>
               {t("filter.clear")}
             </Button>
           )}
@@ -356,6 +367,9 @@ function Chip({ on, onClick, radio, children }: { on: boolean; onClick: () => vo
     </button>
   )
 }
+
+/** For a caller's `lead` groups, so they look like the menu's own. */
+export { Group as FilterGroup, Chip as FilterChip }
 
 function Help({ scope, desk, onBack }: { scope: Scope; desk: boolean; onBack: () => void }) {
   const t = useT()
