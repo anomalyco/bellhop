@@ -24,6 +24,7 @@ const messages: Translation<typeof en> = {
   "chip.anyPlatform": "Alle Plattformen",
   "chip.screenshot": "Screenshot",
   "chip.email": "E-Mail",
+  "chip.includes": "Enthält",
   "chip.label": "Label",
   "chip.anyLabel": "Alle Labels",
   "chip.clear": "Zurücksetzen",
@@ -35,11 +36,11 @@ const messages: Translation<typeof en> = {
   "row.email": "Hat eine Antwortadresse",
   "row.anonymous": "Anonym gesendet",
   "row.anon": "Anonym",
+  "row.byEmail": "Nur E-Mail",
+  "row.noContact": "Kein Name und keine E-Mail angegeben",
   "row.assigned": "Zugewiesen an {name}",
 
   // The detail pane
-  "detail.empty": "Wähle ein Feedback aus, um es zu lesen.",
-  "detail.emptyKeys": "{j} und {k} wechseln, {enter} öffnet, {help} zeigt alle Tastenkürzel.",
   "detail.back": "Zurück zum Posteingang",
   "detail.openIn": "In {app} öffnen",
   "detail.prev": "Vorheriges",

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react"
 import { flushSync } from "react-dom"
 import { useLocation, useSearch } from "wouter"
 import type { InboxItem, InboxList, Issue, IssueRef, IssueSummary, LiveEvent, OrgDetail } from "../../../shared/api"
 import { formatNumber } from "../../i18n"
-import { tr, useT } from "../../i18n/inbox"
+import { useT } from "../../i18n/inbox"
 import { api, errorMessage, keys } from "../../lib/api"
 import { invalidate, load, setData, useResource } from "../../lib/cache"
 import {
@@ -22,16 +22,16 @@ import {
   valueOf,
   withMeta,
   type InboxState,
+  type Token,
 } from "../../lib/inbox"
 import { useLive } from "../../lib/live"
 import { flip, SPRING_30 } from "../../lib/motion"
 import { homeUrl, orgPath } from "../../lib/site"
-import { FilterMenu } from "../../ui/features/FilterMenu"
-import { ArrowUpIcon, ChevronDownIcon, ImageIcon, MailIcon, PlusIcon, XIcon } from "../../ui/icons"
+import { FilterChip, FilterGroup, FilterMenu } from "../../ui/features/FilterMenu"
+import { ArrowUpIcon, ImageIcon, MailIcon, PlusIcon, XIcon } from "../../ui/icons"
 import { InboxDetail, type DetailHandle } from "../../ui/inbox/Detail"
-import { InboxRow } from "../../ui/inbox/Row"
+import { InboxRow, platformName } from "../../ui/inbox/Row"
 import { ShortcutsDialog } from "../../ui/inbox/Shortcuts"
-import { Menu, MenuItem } from "../../ui/Menu"
 import { AppIcon, Button } from "../../ui/primitives"
 import { ErrorPage, Header, useMe } from "../../ui/Shell"
 import { SiteLink } from "../../ui/SiteLink"
@@ -318,6 +318,9 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
   const showDetail = !!open
   const phoneDetail = showDetail && !wide
   const labelNames = [...new Set([...defaultLabels, ...items.flatMap((i) => i.labels.map((l) => l.name))])]
+  const labelColors = new Map(items.flatMap((i) => i.labels.map((l) => [l.name, l.color] as const)))
+  // The app's name on a row only helps when the list holds more than one app's feedback
+  const showApp = !app && new Set(items.map((i) => i.app.slug)).size > 1
 
   return (
     <>
@@ -333,6 +336,7 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
             ) : (
               <div className="inbox-strip" aria-hidden="true" data-pending="" />
             )}
+            <div className="inbox-head">
             <div className="inbox-toolbar" data-loading={!shown || undefined}>
               <nav className="segmented inbox-states" aria-label={t("list.states")}>
                 <SiteLink href={href({ state: "open", item: null })} aria-current={state === "open" ? "page" : undefined}>
@@ -345,11 +349,13 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
                 </SiteLink>
               </nav>
               <SearchBox query={q} filtered={!!q} placeholder={t("list.search")} onSubmit={setQuery} onClear={() => setQuery("")} />
+              <FilterMenu query={q} onChange={setQuery} lead={<InboxFilters q={q} labels={labelNames} onChange={setQuery} />} also={ownFilter} />
               <button type="button" className="btn inbox-keys-button" data-variant="ghost-muted" data-icon-only="" onClick={() => setHelp(true)} aria-label={t("keys.button")} title={`${t("keys.button")} (?)`}>
                 ?
               </button>
             </div>
-            <Chips q={q} labels={labelNames} onChange={setQuery} />
+            <ActiveFilters q={q} colors={labelColors} onChange={setQuery} />
+            </div>
             <div className="inbox-newer-slot">
               {newer.length > 0 && (
                 <button type="button" className="feed-newer" onClick={showNewer}>
@@ -363,7 +369,7 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
               {!shown && !error && <SkeletonRows />}
               {shown && items.length === 0 && orgInfo && <Empty org={orgInfo} app={app} q={q} state={state} list={shown} onClear={() => setQuery("")} />}
               {items.map((item, i) => (
-                <InboxRow key={item.id} item={item} href={href({ item: itemParam(item) })} open={i === openIndex} cursor={i === cursorIndex && !!cursor} onOpen={(it) => openItem(it)} />
+                <InboxRow key={item.id} item={item} href={href({ item: itemParam(item) })} open={i === openIndex} cursor={i === cursorIndex && !!cursor} showApp={showApp} onOpen={(it) => openItem(it)} />
               ))}
               {shown?.next_cursor && (
                 <div className="inbox-more">
@@ -376,10 +382,9 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
             </div>
           </section>
         )}
-        {(wide || phoneDetail) && (
+        {open && (
           <div className="inbox-pane">
-            {open ? (
-              <InboxDetail
+            <InboxDetail
                 key={`${open.slug}/${open.number}`}
                 org={org}
                 slug={open.slug}
@@ -392,12 +397,6 @@ function OrgInbox({ org, app }: { org: string; app: string | null }) {
                 onOpenRef={(slug, r: IssueRef) => go({ item: `${slug}/${r.number}` })}
                 onClosedChange={onClosedChange}
               />
-            ) : (
-              <div className="inbox-pane-empty">
-                <p>{t("detail.empty")}</p>
-                <p className="inbox-pane-keys">{tr("detail.emptyKeys", { j: <kbd>j</kbd>, k: <kbd>k</kbd>, enter: <kbd>Enter</kbd>, help: <kbd>?</kbd> })}</p>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -426,10 +425,11 @@ function SkeletonRows() {
     <>
       {[0, 1, 2, 3, 4, 5].map((i) => (
         <div key={i} className="inbox-row inbox-row-skeleton" aria-hidden="true">
-          <span className="skeleton" style={{ width: 18, height: 18, borderRadius: 4 }} />
-          <span className="inbox-row-main">
+          <span className="inbox-row-top">
             <span className="skeleton" style={{ width: `${62 - i * 5}%`, height: 13 }} />
-            <span className="skeleton" style={{ width: 160, height: 10, marginTop: 6 }} />
+          </span>
+          <span className="inbox-row-meta">
+            <span className="skeleton" style={{ width: 200, height: 10 }} />
           </span>
         </div>
       ))}
@@ -507,86 +507,97 @@ function AppStrip({ org, app, list, hrefFor }: { org: OrgDetail; app: string | n
   )
 }
 
-/** Platform, screenshot, email and label filters over the query, its meta filters as removable chips, and the shared Filters menu. */
-function Chips({ q, labels, onChange }: { q: string; labels: string[]; onChange: (q: string) => void }) {
+/** The inbox's own qualifiers: Platform, Screenshot, Email and Label in the Filters menu, counted and cleared there. */
+const ownKeys = ["platform", "label", "meta", "version", "source"]
+const ownFilter = (key: string) => ownKeys.includes(key)
+
+/** Platform, screenshot, email and label: the first groups of the Filters menu. */
+function InboxFilters({ q, labels, onChange }: { q: string; labels: string[]; onChange: (q: string) => void }) {
   const t = useT()
-  const platform = valueOf(q, "platform")
+  const platform = valueOf(q, "platform")?.toLowerCase() ?? null
   const label = valueOf(q, "label")
-  const metas = metaFilters(q)
-  const any = !!q.trim()
+  return (
+    <>
+      <FilterGroup title={t("chip.platform")}>
+        <FilterChip on={!platform} onClick={() => onChange(setOne(q, "platform", null))} radio>
+          {t("chip.anyPlatform")}
+        </FilterChip>
+        {platforms.map((p) => (
+          <FilterChip key={p} on={platform === p} onClick={() => onChange(setOne(q, "platform", platform === p ? null : p))} radio>
+            {platformName(p)}
+          </FilterChip>
+        ))}
+      </FilterGroup>
+      <FilterGroup title={t("chip.includes")}>
+        <FilterChip on={has(q, "has", "screenshot")} onClick={() => onChange(toggle(q, "has", "screenshot"))}>
+          {t("chip.screenshot")}
+        </FilterChip>
+        <FilterChip on={has(q, "has", "email")} onClick={() => onChange(toggle(q, "has", "email"))}>
+          {t("chip.email")}
+        </FilterChip>
+      </FilterGroup>
+      <FilterGroup title={t("chip.label")}>
+        <FilterChip on={!label} onClick={() => onChange(setOne(q, "label", null))} radio>
+          {t("chip.anyLabel")}
+        </FilterChip>
+        {labels.map((l) => (
+          <FilterChip key={l} on={label === l} onClick={() => onChange(setOne(q, "label", label === l ? null : l))} radio>
+            {l}
+          </FilterChip>
+        ))}
+      </FilterGroup>
+    </>
+  )
+}
+
+/** Every qualifier in the query as a removable chip, under the search row; nothing when there are none. */
+function ActiveFilters({ q, colors, onChange }: { q: string; colors: Map<string, string>; onChange: (q: string) => void }) {
+  const t = useT()
+  const all = tokens(q)
+  if (!all.some((tk) => tk.key !== null)) return null
+  const meta = new Map(metaFilters(q).map((m) => [m.raw, m]))
+  const describe = (tk: Token): { text: string; body: ReactNode } => {
+    const m = meta.get(tk.raw)
+    if (m) {
+      const text = t("chip.meta", { key: m.key, value: m.value })
+      return { text, body: <span className="mono">{`${m.key}=${m.value}`}</span> }
+    }
+    if (tk.key === "platform") {
+      const text = `${t("chip.platform")}: ${platformName(tk.value)}`
+      return { text, body: <><span className="inbox-chip-key">{t("chip.platform")}</span>{platformName(tk.value)}</> }
+    }
+    if (tk.key === "has" && tk.value.toLowerCase() === "screenshot") return { text: t("chip.screenshot"), body: <><ImageIcon size={12} />{t("chip.screenshot")}</> }
+    if (tk.key === "has" && tk.value.toLowerCase() === "email") return { text: t("chip.email"), body: <><MailIcon size={12} />{t("chip.email")}</> }
+    if (tk.key === "label") {
+      const color = colors.get(tk.value)
+      return {
+        text: `${t("chip.label")}: ${tk.value}`,
+        body: (
+          <>
+            <span className="inbox-chip-key">{t("chip.label")}</span>
+            {color && <span className="inbox-chip-dot" style={{ "--label": `#${color}` } as CSSProperties} aria-hidden="true" />}
+            {tk.value}
+          </>
+        ),
+      }
+    }
+    return { text: tk.raw, body: <span className="mono">{tk.raw}</span> }
+  }
   return (
     <div className="inbox-chips">
-      <Menu
-        align="start"
-        width={200}
-        trigger={(p) => (
-          <button type="button" className="inbox-chip" data-on={platform ? "" : undefined} {...p}>
-            {platform ? <span className="mono">{platform}</span> : t("chip.platform")}
-            <ChevronDownIcon size={12} />
-          </button>
-        )}
-      >
-        {(close) => (
-          <>
-            <MenuItem checked={!platform} onSelect={() => (close(), onChange(setOne(q, "platform", null)))}>
-              {t("chip.anyPlatform")}
-            </MenuItem>
-            {platforms.map((p) => (
-              <MenuItem key={p} checked={platform === p} onSelect={() => (close(), onChange(setOne(q, "platform", p)))}>
-                <span className="mono">{p}</span>
-              </MenuItem>
-            ))}
-          </>
-        )}
-      </Menu>
-      <button type="button" className="inbox-chip" data-on={has(q, "has", "screenshot") ? "" : undefined} aria-pressed={has(q, "has", "screenshot")} onClick={() => onChange(toggle(q, "has", "screenshot"))}>
-        <ImageIcon size={12} />
-        {t("chip.screenshot")}
-      </button>
-      <button type="button" className="inbox-chip" data-on={has(q, "has", "email") ? "" : undefined} aria-pressed={has(q, "has", "email")} onClick={() => onChange(toggle(q, "has", "email"))}>
-        <MailIcon size={12} />
-        {t("chip.email")}
-      </button>
-      <Menu
-        align="start"
-        width={200}
-        trigger={(p) => (
-          <button type="button" className="inbox-chip" data-on={label ? "" : undefined} {...p}>
-            {label ?? t("chip.label")}
-            <ChevronDownIcon size={12} />
-          </button>
-        )}
-      >
-        {(close) => (
-          <>
-            <MenuItem checked={!label} onSelect={() => (close(), onChange(setOne(q, "label", null)))}>
-              {t("chip.anyLabel")}
-            </MenuItem>
-            {labels.map((l) => (
-              <MenuItem key={l} checked={label === l} onSelect={() => (close(), onChange(setOne(q, "label", l)))}>
-                {l}
-              </MenuItem>
-            ))}
-          </>
-        )}
-      </Menu>
-      {metas.map((m) => {
-        const name = t("chip.meta", { key: m.key, value: m.value })
+      {all.map((tk, i) => {
+        if (tk.key === null) return null
+        const { text, body } = describe(tk)
         return (
-          <button key={m.raw} type="button" className="inbox-chip" data-on="" onClick={() => onChange(editQuery(q, (tk) => tk.raw === m.raw))} aria-label={t("chip.remove", { filter: name })}>
-            <span className="mono">
-              {m.key}={m.value}
-            </span>
+          <button key={`${tk.raw}-${i}`} type="button" className="inbox-chip" onClick={() => onChange(all.filter((_, j) => j !== i).map((x) => x.raw).join(" "))} aria-label={t("chip.remove", { filter: text })} title={t("chip.remove", { filter: text })}>
+            {body}
             <XIcon size={12} />
           </button>
         )
       })}
-      <FilterMenu query={q} onChange={onChange} />
-      {any && (
-        <button type="button" className="inbox-chip inbox-chip-clear" onClick={() => onChange("")}>
-          {t("chip.clear")}
-        </button>
-      )}
+      <button type="button" className="inbox-chip inbox-chip-clear" onClick={() => onChange(editQuery(q, (x) => x.key !== null))}>
+        {t("chip.clear")}
+      </button>
     </div>
   )
 }

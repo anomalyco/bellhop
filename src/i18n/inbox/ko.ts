@@ -24,6 +24,7 @@ const messages: Translation<typeof en> = {
   "chip.anyPlatform": "모든 플랫폼",
   "chip.screenshot": "스크린샷",
   "chip.email": "이메일",
+  "chip.includes": "포함",
   "chip.label": "라벨",
   "chip.anyLabel": "모든 라벨",
   "chip.clear": "지우기",
@@ -35,11 +36,11 @@ const messages: Translation<typeof en> = {
   "row.email": "회신 주소 있음",
   "row.anonymous": "익명으로 보냄",
   "row.anon": "익명",
+  "row.byEmail": "이메일만",
+  "row.noContact": "이름과 이메일 없음",
   "row.assigned": "{name}에게 할당됨",
 
   // The detail pane
-  "detail.empty": "읽을 피드백을 선택하세요.",
-  "detail.emptyKeys": "{j}/{k}로 이동, {enter}로 열기, {help}로 모든 단축키 보기.",
   "detail.back": "인박스로 돌아가기",
   "detail.openIn": "{app}에서 열기",
   "detail.prev": "이전",

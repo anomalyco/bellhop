@@ -22,6 +22,7 @@ const messages = {
   "chip.anyPlatform": "Any platform",
   "chip.screenshot": "Screenshot",
   "chip.email": "Email",
+  "chip.includes": "Includes",
   "chip.label": "Label",
   "chip.anyLabel": "Any label",
   "chip.clear": "Clear",
@@ -33,11 +34,11 @@ const messages = {
   "row.email": "Has a reply address",
   "row.anonymous": "Sent anonymously",
   "row.anon": "Anonymous",
+  "row.byEmail": "Email only",
+  "row.noContact": "No name or email given",
   "row.assigned": "Assigned to {name}",
 
   // The detail pane
-  "detail.empty": "Pick feedback to read it.",
-  "detail.emptyKeys": "{j} and {k} move, {enter} opens, {help} lists every shortcut.",
   "detail.back": "Back to the inbox",
   "detail.openIn": "Open in {app}",
   "detail.prev": "Previous",
